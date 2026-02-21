@@ -93,13 +93,18 @@ strict = true
 ```bash
 mkdir -p squidbot/core squidbot/adapters/llm squidbot/adapters/channels \
          squidbot/adapters/tools squidbot/adapters/persistence squidbot/adapters/skills \
-         squidbot/config squidbot/cli squidbot/skills \
+         squidbot/adapters/dashboard \
+         squidbot/config squidbot/cli \
+         squidbot/skills/memory squidbot/skills/cron squidbot/skills/github \
+         squidbot/skills/git squidbot/skills/python squidbot/skills/web-search \
+         squidbot/skills/summarize squidbot/skills/research squidbot/skills/skill-creator \
          tests/core tests/integration \
          workspace
 touch squidbot/__init__.py squidbot/core/__init__.py \
       squidbot/adapters/__init__.py squidbot/adapters/llm/__init__.py \
       squidbot/adapters/channels/__init__.py squidbot/adapters/tools/__init__.py \
       squidbot/adapters/persistence/__init__.py squidbot/adapters/skills/__init__.py \
+      squidbot/adapters/dashboard/__init__.py \
       squidbot/config/__init__.py squidbot/cli/__init__.py \
       tests/__init__.py tests/core/__init__.py tests/integration/__init__.py
 ```
@@ -130,8 +135,97 @@ Be concise and direct. Show your work only when it adds value.
 Prefer code and concrete output over lengthy explanations.
 ```
 
-**Step 5: Create .gitignore**
+**Step 5: Create bundled skill stubs**
 
+Each bundled skill gets a minimal `SKILL.md` with correct frontmatter. Content will be filled in iteratively.
+
+```bash
+# memory skill
+cat > squidbot/skills/memory/SKILL.md << 'EOF'
+---
+name: memory
+description: "Manage your long-term memory document across sessions."
+always: false
+requires: {}
+---
+
+# Memory Skill
+
+Use the `memory_write` tool to update your memory document with important information that should persist across sessions.
+EOF
+
+# cron skill
+cat > squidbot/skills/cron/SKILL.md << 'EOF'
+---
+name: cron
+description: "Schedule recurring tasks and reminders using cron expressions."
+always: false
+requires: {}
+---
+
+# Cron Skill
+
+Use `squidbot cron add` to schedule recurring tasks. Supports standard cron expressions (e.g. `0 9 * * 1-5`) and interval syntax (`every 3600`).
+EOF
+
+# skill-creator skill
+cat > squidbot/skills/skill-creator/SKILL.md << 'EOF'
+---
+name: skill-creator
+description: "Create new skills by writing SKILL.md files to the workspace."
+always: false
+requires: {}
+---
+
+# Skill Creator
+
+To create a new skill, write a `SKILL.md` file to `workspace/skills/<name>/SKILL.md` using the `write_file` tool. The frontmatter must include `name`, `description`, and optionally `always` and `requires`.
+EOF
+
+# Remaining stubs (github, git, python, web-search, summarize, research)
+for skill in github git python web-search summarize research; do
+  cat > squidbot/skills/$skill/SKILL.md << EOF
+---
+name: $skill
+description: "Placeholder — to be filled in."
+always: false
+requires: {}
+---
+
+# ${skill^} Skill
+
+Content coming soon.
+EOF
+done
+```
+
+**Step 7: Create .gitignore**
+
+```
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+dist/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+```
+
+**Step 8: Install dependencies**
+
+```bash
+uv sync
+```
+
+Expected: All dependencies installed without error.
+
+**Step 9: Commit**
+
+```bash
+git add .
+git commit -m "chore: initial project scaffold"
 ```
 __pycache__/
 *.pyc
@@ -375,7 +469,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from squidbot.core.models import Message, InboundMessage, OutboundMessage, ToolDefinition, ToolResult
-from squidbot.core.ports import LLMPort, ChannelPort, ToolPort, MemoryPort
+from squidbot.core.ports import LLMPort, ChannelPort, ToolPort, MemoryPort, SkillsPort
 
 
 class MockLLM:
@@ -450,9 +544,24 @@ def test_mock_tool_satisfies_protocol():
     assert tool.name == "mock_tool"
 
 
+class MockSkills:
+    """Minimal mock skills loader that satisfies SkillsPort."""
+
+    def list_skills(self) -> list:
+        return []
+
+    def load_skill_body(self, name: str) -> str:
+        raise FileNotFoundError(name)
+
+
 def test_mock_memory_satisfies_protocol():
     memory: MemoryPort = MockMemory()  # type: ignore[assignment]
     assert memory is not None
+
+
+def test_mock_skills_satisfies_protocol():
+    skills: SkillsPort = MockSkills()  # type: ignore[assignment]
+    assert skills.list_skills() == []
 ```
 
 **Step 2: Run test to verify it fails**
@@ -611,6 +720,48 @@ class MemoryPort(Protocol):
 
     async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
         """Persist the full list of scheduled jobs."""
+        ...
+
+
+class SkillsPort(Protocol):
+    """
+    Interface for skill discovery and loading.
+
+    Implementations search one or more directories for SKILL.md files,
+    parse their frontmatter, and cache results keyed by (path, mtime).
+    """
+
+    def list_skills(self) -> list:
+        """
+        Return all discovered SkillMetadata objects.
+
+        Re-reads from disk only if a file's mtime has changed since last load.
+        """
+        ...
+
+    def load_skill_body(self, name: str) -> str:
+        """Return the full SKILL.md text for a named skill."""
+        ...
+
+
+class StatusPort(Protocol):
+    """
+    Interface for gateway status reporting.
+
+    Provides read-only access to runtime state for dashboards or status commands.
+    Implementations may be a simple in-memory snapshot updated by the gateway.
+    """
+
+    def get_active_sessions(self) -> list[str]:
+        """Return session IDs of currently active conversations."""
+        ...
+
+    def get_channel_status(self) -> dict[str, str]:
+        """Return a mapping of channel name to status string."""
+        ...
+
+    def get_cron_jobs(self) -> list[CronJob]:
+        """Return the current list of scheduled jobs."""
         ...
 ```
 
@@ -1083,6 +1234,15 @@ class ChannelsConfig(BaseModel):
     email: EmailChannelConfig = Field(default_factory=EmailChannelConfig)
 
 
+class SkillsConfig(BaseModel):
+    """Configuration for the skills system."""
+
+    extra_dirs: list[str] = Field(
+        default_factory=list,
+        description="Additional directories to search for skills, in priority order.",
+    )
+
+
 class Settings(BaseModel):
     """Root configuration object for squidbot."""
 
@@ -1090,6 +1250,7 @@ class Settings(BaseModel):
     agents: AgentConfig = Field(default_factory=AgentConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> "Settings":
@@ -1277,7 +1438,7 @@ and contains no I/O or external service calls.
 from __future__ import annotations
 
 from squidbot.core.models import Message
-from squidbot.core.ports import MemoryPort
+from squidbot.core.ports import MemoryPort, SkillsPort
 
 # Injected into the system prompt when the context limit is approaching.
 _PRUNE_WARNING = (
@@ -1294,19 +1455,28 @@ class MemoryManager:
     Responsibilities:
     - Build the full message list for each LLM call (system + history + user)
     - Inject memory.md content into the system prompt
+    - Inject skills XML block and always-skill bodies into the system prompt
     - Prune old messages when history exceeds the configured limit
     - Persist new exchanges after each agent turn
     """
 
-    def __init__(self, storage: MemoryPort, max_history_messages: int = 200) -> None:
+    def __init__(
+        self,
+        storage: MemoryPort,
+        max_history_messages: int = 200,
+        skills: SkillsPort | None = None,
+    ) -> None:
         """
         Args:
             storage: The persistence adapter implementing MemoryPort.
             max_history_messages: Maximum number of history messages to keep.
                                   Older messages are dropped (not summarized).
+            skills: Optional skills loader. If provided, injects skill metadata
+                    and always-skill bodies into every system prompt.
         """
         self._storage = storage
         self._max_history = max_history_messages
+        self._skills = skills
         # Warn when we're 20% from the limit
         self._warn_threshold = int(max_history_messages * 0.8)
 
@@ -1319,7 +1489,7 @@ class MemoryManager:
         """
         Construct the full message list for an LLM call.
 
-        Layout: [system_prompt + memory.md] + [history (pruned)] + [user_message]
+        Layout: [system_prompt + memory.md + skills] + [history (pruned)] + [user_message]
 
         Args:
             session_id: Unique session identifier.
@@ -1336,6 +1506,16 @@ class MemoryManager:
         full_system = system_prompt
         if memory_doc.strip():
             full_system += f"\n\n## Your Memory\n\n{memory_doc}"
+
+        # Inject skills: XML index + full bodies of always-skills
+        if self._skills is not None:
+            from squidbot.core.skills import build_skills_xml
+            skill_list = self._skills.list_skills()
+            full_system += f"\n\n{build_skills_xml(skill_list)}"
+            for skill in skill_list:
+                if skill.always and skill.available:
+                    body = self._skills.load_skill_body(skill.name)
+                    full_system += f"\n\n{body}"
 
         # Prune history if over the limit
         near_limit = len(history) >= self._warn_threshold
@@ -2020,13 +2200,12 @@ in-memory test doubles. No network calls, no filesystem I/O.
 """
 from __future__ import annotations
 
-import asyncio
 import pytest
 from collections.abc import AsyncIterator
 
 from squidbot.core.agent import AgentLoop
 from squidbot.core.memory import MemoryManager
-from squidbot.core.models import Message, ToolCall, ToolDefinition, ToolResult
+from squidbot.core.models import InboundMessage, Message, OutboundMessage, Session, ToolCall, ToolResult
 from squidbot.core.registry import ToolRegistry
 
 
@@ -2067,6 +2246,25 @@ class InMemoryStorage:
         pass
 
 
+class CollectingChannel:
+    """Channel test double that collects sent messages. streaming=False."""
+    streaming = False
+
+    def __init__(self):
+        self.sent: list[str] = []
+
+    async def send(self, message: OutboundMessage) -> None:
+        self.sent.append(message.text)
+
+    async def send_typing(self, session_id: str) -> None:
+        pass
+
+
+class StreamingChannel(CollectingChannel):
+    """Channel test double with streaming=True."""
+    streaming = True
+
+
 class EchoTool:
     name = "echo"
     description = "Echoes text"
@@ -2078,6 +2276,9 @@ class EchoTool:
 
     async def execute(self, text: str, **_) -> ToolResult:
         return ToolResult(tool_call_id="", content=f"echoed: {text}")
+
+
+SESSION = Session(channel="cli", sender_id="local")
 
 
 @pytest.fixture
@@ -2093,33 +2294,49 @@ def memory(storage):
 @pytest.mark.asyncio
 async def test_simple_text_response(storage, memory):
     llm = ScriptedLLM(["Hello from the bot!"])
-    registry = ToolRegistry()
-    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="You are a bot.")
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=__import__("squidbot.core.registry", fromlist=["ToolRegistry"]).ToolRegistry(), system_prompt="You are a bot.")
 
-    response = await loop.run("cli:local", "Hello!")
-    assert response == "Hello from the bot!"
+    await loop.run(SESSION, "Hello!", channel)
+    assert channel.sent == ["Hello from the bot!"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_channel_receives_chunks(storage, memory):
+    """Streaming channels get chunks as they arrive, not the full text at once."""
+    llm = ScriptedLLM(["chunk one", "chunk two"])
+    channel = StreamingChannel()
+    from squidbot.core.registry import ToolRegistry
+    loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="You are a bot.")
+
+    await loop.run(SESSION, "Hello!", channel)
+    # For streaming channels each chunk is sent separately
+    assert len(channel.sent) >= 1
 
 
 @pytest.mark.asyncio
 async def test_tool_call_then_text(storage, memory):
     tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "world"})
     llm = ScriptedLLM([[tool_call], "Result received!"])
+    from squidbot.core.registry import ToolRegistry
     registry = ToolRegistry()
     registry.register(EchoTool())
+    channel = CollectingChannel()
     loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="You are a bot.")
 
-    response = await loop.run("cli:local", "Please echo world")
-    assert "Result received!" in response
+    await loop.run(SESSION, "Please echo world", channel)
+    assert any("Result received!" in s for s in channel.sent)
 
 
 @pytest.mark.asyncio
 async def test_history_persisted_after_run(storage, memory):
     llm = ScriptedLLM(["I remember you."])
-    registry = ToolRegistry()
-    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="You are a bot.")
+    from squidbot.core.registry import ToolRegistry
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="You are a bot.")
 
-    await loop.run("cli:local", "Remember me!")
-    history = await storage.load_history("cli:local")
+    await loop.run(SESSION, "Remember me!", channel)
+    history = await storage.load_history(SESSION.id)
     assert len(history) == 2  # user + assistant
     assert history[0].role == "user"
     assert history[1].role == "assistant"
@@ -2140,16 +2357,16 @@ Expected: FAIL with "No module named 'squidbot.core.agent'"
 """
 Core agent loop for squidbot.
 
-The agent loop coordinates the LLM, tool execution, and memory management.
-It has no direct knowledge of channels, filesystems, or network protocols —
-all external interactions happen through the injected port implementations.
+The agent loop coordinates the LLM, tool execution, memory, and channel delivery.
+It has no direct knowledge of filesystems or network protocols — all external
+interactions happen through the injected port implementations.
 """
 
 from __future__ import annotations
 
 from squidbot.core.memory import MemoryManager
-from squidbot.core.models import Message, ToolCall, ToolResult
-from squidbot.core.ports import LLMPort
+from squidbot.core.models import Message, OutboundMessage, Session, ToolCall
+from squidbot.core.ports import ChannelPort, LLMPort
 from squidbot.core.registry import ToolRegistry
 
 # Maximum number of tool-call rounds per user message.
@@ -2162,10 +2379,14 @@ class AgentLoop:
     The core agent loop.
 
     For each user message, the loop:
-    1. Builds the full message context (system + history + user)
-    2. Calls the LLM
+    1. Builds the full message context (system prompt + history + user message)
+    2. Calls the LLM and streams or collects the response
     3. If the LLM returns tool calls, executes them and loops back
-    4. If the LLM returns text, persists the exchange and returns the text
+    4. If the LLM returns text, delivers it to the channel and persists the exchange
+
+    Streaming behaviour is determined by channel.streaming:
+    - True (e.g. CLI): each text chunk is sent immediately via channel.send()
+    - False (e.g. Matrix, Email): chunks are accumulated, sent once at the end
     """
 
     def __init__(
@@ -2187,19 +2408,17 @@ class AgentLoop:
         self._registry = registry
         self._system_prompt = system_prompt
 
-    async def run(self, session_id: str, user_message: str) -> str:
+    async def run(self, session: Session, user_message: str, channel: ChannelPort) -> None:
         """
-        Process a single user message and return the assistant's reply.
+        Process a single user message and deliver the reply to the channel.
 
         Args:
-            session_id: Unique identifier for this conversation session.
+            session: The conversation session (carries channel + sender identity).
             user_message: The user's input text.
-
-        Returns:
-            The assistant's final text response.
+            channel: The channel to deliver the response to.
         """
         messages = await self._memory.build_messages(
-            session_id=session_id,
+            session_id=session.id,
             system_prompt=self._system_prompt,
             user_message=user_message,
         )
@@ -2217,6 +2436,9 @@ class AgentLoop:
             async for chunk in response_stream:
                 if isinstance(chunk, str):
                     text_chunks.append(chunk)
+                    if channel.streaming:
+                        # Forward each chunk immediately for typewriter effect
+                        await channel.send(OutboundMessage(session=session, text=chunk))
                 elif isinstance(chunk, list):
                     tool_calls = chunk
 
@@ -2229,33 +2451,34 @@ class AgentLoop:
                 break
 
             # Execute tool calls and append results to message history
-            if text_response:
-                messages.append(Message(role="assistant", content=text_response, tool_calls=tool_calls))
-            else:
-                messages.append(Message(role="assistant", content="", tool_calls=tool_calls))
+            messages.append(Message(
+                role="assistant",
+                content=text_response,
+                tool_calls=tool_calls,
+            ))
 
             for tc in tool_calls:
                 result = await self._registry.execute(tc.name, tool_call_id=tc.id, **tc.arguments)
-                messages.append(
-                    Message(
-                        role="tool",
-                        content=result.content,
-                        tool_call_id=tc.id,
-                    )
-                )
+                messages.append(Message(
+                    role="tool",
+                    content=result.content,
+                    tool_call_id=tc.id,
+                ))
 
             tool_round += 1
         else:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 
-        # Persist the user message and final assistant reply
+        # For non-streaming channels (or if no chunks were sent yet), send full reply
+        if not channel.streaming and final_text:
+            await channel.send(OutboundMessage(session=session, text=final_text))
+
+        # Persist the exchange
         await self._memory.persist_exchange(
-            session_id=session_id,
+            session_id=session.id,
             user_message=user_message,
             assistant_reply=final_text,
         )
-
-        return final_text
 ```
 
 **Step 4: Run test to verify it passes**
@@ -2414,10 +2637,85 @@ def onboard(config: Path = DEFAULT_CONFIG_PATH) -> None:
     asyncio.run(_run_onboard(config_path=config))
 
 
+cron_app = cyclopts.App(name="cron", help="Manage scheduled jobs.")
+app.command(cron_app)
+
+
+@cron_app.command
+def list_jobs(config: Path = DEFAULT_CONFIG_PATH) -> None:
+    """List all scheduled cron jobs."""
+    import json
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+
+    async def _list():
+        storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+        jobs = await storage.load_cron_jobs()
+        if not jobs:
+            print("No cron jobs configured.")
+            return
+        for job in jobs:
+            status = "on" if job.enabled else "off"
+            print(f"  [{status}] {job.id}  {job.name}")
+            print(f"       schedule: {job.schedule}  channel: {job.channel}")
+            print(f"       message:  {job.message}")
+
+    asyncio.run(_list())
+
+
+@cron_app.command
+def add(
+    name: str,
+    message: str,
+    schedule: str,
+    channel: str = "cli:local",
+    config: Path = DEFAULT_CONFIG_PATH,
+) -> None:
+    """Add a new cron job."""
+    import uuid
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.core.models import CronJob
+
+    async def _add():
+        storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+        jobs = await storage.load_cron_jobs()
+        job = CronJob(
+            id=str(uuid.uuid4())[:8],
+            name=name,
+            message=message,
+            schedule=schedule,
+            channel=channel,
+        )
+        jobs.append(job)
+        await storage.save_cron_jobs(jobs)
+        print(f"Added cron job '{name}' (id={job.id})")
+
+    asyncio.run(_add())
+
+
+@cron_app.command
+def remove(job_id: str, config: Path = DEFAULT_CONFIG_PATH) -> None:
+    """Remove a cron job by ID."""
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+
+    async def _remove():
+        storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+        jobs = await storage.load_cron_jobs()
+        before = len(jobs)
+        jobs = [j for j in jobs if j.id != job_id]
+        if len(jobs) == before:
+            print(f"No job found with id '{job_id}'")
+            return
+        await storage.save_cron_jobs(jobs)
+        print(f"Removed job '{job_id}'")
+
+    asyncio.run(_remove())
+
+
 async def _make_agent_loop(settings: Settings):
     """Construct the agent loop from configuration."""
     from squidbot.adapters.llm.openai import OpenAIAdapter
     from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.adapters.skills.fs import FsSkillsLoader
     from squidbot.adapters.tools.files import ListFilesTool, ReadFileTool, WriteFileTool
     from squidbot.adapters.tools.shell import ShellTool
     from squidbot.core.agent import AgentLoop
@@ -2431,7 +2729,13 @@ async def _make_agent_loop(settings: Settings):
     # Build storage directory
     storage_dir = Path.home() / ".squidbot"
     storage = JsonlMemory(base_dir=storage_dir)
-    memory = MemoryManager(storage=storage, max_history_messages=200)
+
+    # Skills loader (extra dirs → workspace/skills → bundled)
+    bundled_skills = Path(__file__).parent.parent / "skills"
+    extra_dirs = [Path(d).expanduser() for d in settings.skills.extra_dirs]
+    skills = FsSkillsLoader(search_dirs=extra_dirs + [workspace / "skills", bundled_skills])
+
+    memory = MemoryManager(storage=storage, max_history_messages=200, skills=skills)
 
     # LLM adapter
     llm = OpenAIAdapter(
@@ -2463,47 +2767,60 @@ async def _make_agent_loop(settings: Settings):
 async def _run_agent(message: str | None, config_path: Path) -> None:
     """Run the CLI channel agent."""
     from squidbot.adapters.channels.cli import CliChannel
+    from squidbot.core.models import OutboundMessage
 
     settings = Settings.load(config_path)
     agent_loop = await _make_agent_loop(settings)
     channel = CliChannel()
 
     if message:
-        # Single-shot mode
-        reply = await agent_loop.run(CliChannel.SESSION.id, message)
-        print(reply)
+        # Single-shot mode: use a non-streaming collecting channel to capture reply
+        await agent_loop.run(CliChannel.SESSION, message, channel)
         return
 
     # Interactive REPL mode
     print("squidbot — type 'exit' or Ctrl+D to quit")
     async for inbound in channel.receive():
-        reply = await agent_loop.run(inbound.session.id, inbound.text)
-        await channel.send(
-            from squidbot.core.models import OutboundMessage
-            OutboundMessage(session=inbound.session, text=reply)
-        )
+        await agent_loop.run(inbound.session, inbound.text, channel)
 
 
 async def _run_gateway(config_path: Path) -> None:
     """Start all enabled channels concurrently."""
+    from squidbot.adapters.channels.cli import CliChannel
+    from squidbot.core.scheduler import CronScheduler
+
     settings = Settings.load(config_path)
     agent_loop = await _make_agent_loop(settings)
 
-    tasks = []
+    # Registry of active channels keyed by session prefix for cron routing
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
 
-    # CLI is always available in gateway mode
-    from squidbot.adapters.channels.cli import CliChannel
-    from squidbot.core.models import OutboundMessage
+    # Map of channel_prefix -> channel instance for cron job routing
+    channel_registry: dict[str, object] = {}
+    cli_channel = CliChannel()
+    channel_registry["cli"] = cli_channel
 
     async def run_channel(channel):
         async for inbound in channel.receive():
-            reply = await agent_loop.run(inbound.session.id, inbound.text)
-            await channel.send(OutboundMessage(session=inbound.session, text=reply))
+            await agent_loop.run(inbound.session, inbound.text, channel)
 
-    tasks.append(asyncio.create_task(run_channel(CliChannel())))
+    async def on_cron_due(job):
+        """Deliver a scheduled message to the job's target channel."""
+        from squidbot.core.models import Session
+        # job.channel is a session ID like "cli:local"
+        channel_prefix = job.channel.split(":")[0]
+        channel = channel_registry.get(channel_prefix)
+        if channel is None:
+            return  # target channel not active, skip
+        session = Session(channel=channel_prefix, sender_id=job.channel.split(":", 1)[1])
+        await agent_loop.run(session, job.message, channel)
 
-    if tasks:
-        await asyncio.gather(*tasks)
+    scheduler = CronScheduler(storage=storage)
+
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(run_channel(cli_channel))
+        tg.create_task(scheduler.run(on_due=on_cron_due))
 
 
 async def _run_onboard(config_path: Path) -> None:
@@ -2535,13 +2852,7 @@ if __name__ == "__main__":
     main()
 ```
 
-Note: The inline import in `_run_agent` needs to be fixed — move imports to top of async function.
-
-**Step 3: Fix the import issue in _run_agent**
-
-The `from squidbot.core.models import OutboundMessage` inside a f-string was a typo in the plan above. The correct implementation has it imported at the top of `_run_agent`.
-
-**Step 4: Smoke test**
+**Step 3: Smoke test**
 
 ```bash
 uv run squidbot status
@@ -2549,7 +2860,7 @@ uv run squidbot status
 
 Expected: Shows configuration values (with defaults since no config file exists yet).
 
-**Step 5: Commit**
+**Step 4: Commit**
 
 ```bash
 git add squidbot/adapters/channels/cli.py squidbot/cli/main.py
@@ -3229,7 +3540,7 @@ app.command(skills_app)
 
 
 @skills_app.command
-def list(config: Path = DEFAULT_CONFIG_PATH) -> None:
+def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
     """List all discovered skills and their availability."""
     from squidbot.adapters.skills.fs import FsSkillsLoader
 
@@ -3237,7 +3548,7 @@ def list(config: Path = DEFAULT_CONFIG_PATH) -> None:
     workspace = Path(settings.agents.workspace).expanduser()
     bundled = Path(__file__).parent.parent / "skills"
 
-    extra_dirs = [Path(d).expanduser() for d in getattr(settings, "skills_extra_dirs", [])]
+    extra_dirs = [Path(d).expanduser() for d in settings.skills.extra_dirs]
     search_dirs = extra_dirs + [workspace / "skills", bundled]
 
     loader = FsSkillsLoader(search_dirs=search_dirs)
@@ -3300,7 +3611,7 @@ uv run squidbot agent -m "Say hello in one sentence."
 
 Expected: A one-sentence greeting from the model.
 
-**Step 5: Run linter and type checker**
+**Step 4: Run linter and type checker**
 
 ```bash
 uv run ruff check squidbot/ && uv run mypy squidbot/
