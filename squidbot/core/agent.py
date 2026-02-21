@@ -18,6 +18,24 @@ from squidbot.core.registry import ToolRegistry
 MAX_TOOL_ROUNDS = 20
 
 
+def _format_llm_error(exc: Exception) -> str:
+    """Convert an LLM API exception into a user-readable error message."""
+    name = type(exc).__name__
+    msg = str(exc)
+    # Extract just the human-readable part from openai error dicts
+    if "AuthenticationError" in name:
+        return "Error: invalid API key. Run 'squidbot onboard' to reconfigure."
+    if "RateLimitError" in name:
+        return "Error: rate limit reached. Try again in a moment."
+    if "APIConnectionError" in name or "APITimeoutError" in name:
+        return (
+            "Error: could not reach the API. Check your internet connection and api_base setting."
+        )
+    # Generic fallback — show type and first line of message
+    first_line = msg.splitlines()[0] if msg else name
+    return f"Error ({name}): {first_line}"
+
+
 class AgentLoop:
     """
     The core agent loop.
@@ -72,19 +90,23 @@ class AgentLoop:
         tool_round = 0
 
         while tool_round < MAX_TOOL_ROUNDS:
-            response_stream = await self._llm.chat(messages, tool_definitions)
-
             tool_calls: list[ToolCall] = []
             text_chunks: list[str] = []
 
-            async for chunk in response_stream:
-                if isinstance(chunk, str):
-                    text_chunks.append(chunk)
-                    if channel.streaming:
-                        # Forward each chunk immediately for typewriter effect
-                        await channel.send(OutboundMessage(session=session, text=chunk))
-                elif isinstance(chunk, list):
-                    tool_calls = chunk
+            try:
+                response_stream = await self._llm.chat(messages, tool_definitions)
+                async for chunk in response_stream:
+                    if isinstance(chunk, str):
+                        text_chunks.append(chunk)
+                        if channel.streaming:
+                            # Forward each chunk immediately for typewriter effect
+                            await channel.send(OutboundMessage(session=session, text=chunk))
+                    elif isinstance(chunk, list):
+                        tool_calls = chunk
+            except Exception as e:
+                error_msg = _format_llm_error(e)
+                await channel.send(OutboundMessage(session=session, text=error_msg))
+                return
 
             text_response = "".join(text_chunks)
             if text_response:
