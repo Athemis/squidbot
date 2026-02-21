@@ -1,0 +1,41 @@
+"""Tests for the cron scheduler."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+import pytest
+from squidbot.core.models import CronJob
+from squidbot.core.scheduler import CronScheduler, parse_schedule, is_due
+
+
+def test_parse_cron_expression():
+    job = CronJob(id="1", name="test", message="hi", schedule="0 9 * * *", channel="cli:local")
+    next_run = parse_schedule(job, now=datetime(2026, 2, 21, 8, 0, tzinfo=timezone.utc))
+    assert next_run is not None
+    assert next_run.hour == 9
+
+
+def test_parse_interval():
+    job = CronJob(id="1", name="test", message="hi", schedule="every 60", channel="cli:local")
+    next_run = parse_schedule(job, now=datetime(2026, 2, 21, 8, 0, tzinfo=timezone.utc))
+    assert next_run is not None
+
+
+def test_is_due_past_time():
+    job = CronJob(
+        id="1",
+        name="test",
+        message="hi",
+        schedule="0 9 * * *",
+        channel="cli:local",
+        last_run=datetime(2026, 2, 21, 8, 0, tzinfo=timezone.utc),
+    )
+    now = datetime(2026, 2, 21, 9, 1, tzinfo=timezone.utc)
+    assert is_due(job, now=now)
+
+
+def test_is_not_due_before_time():
+    job = CronJob(id="1", name="test", message="hi", schedule="0 9 * * *", channel="cli:local")
+    now = datetime(2026, 2, 21, 8, 59, tzinfo=timezone.utc)
+    assert not is_due(job, now=now)
