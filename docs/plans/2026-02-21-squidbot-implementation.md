@@ -6,7 +6,7 @@
 
 **Architecture:** Hexagonal (Ports & Adapters). The core domain (agent loop, memory, scheduler) uses only `Protocol` interfaces. Adapters implement those interfaces for LLM, channels, tools, and persistence. The core has zero external imports.
 
-**Tech Stack:** Python 3.14, uv, pydantic v2, pydantic-settings, openai SDK, matrix-nio, httpx, cyclopts, ruamel.yaml, croniter, ruff, mypy, pytest, pytest-asyncio
+**Tech Stack:** Python 3.14, uv, pydantic v2, pydantic-settings, openai SDK, matrix-nio, httpx, cyclopts, ruamel.yaml, cronsim, ruff, mypy, pytest, pytest-asyncio
 
 ---
 
@@ -55,7 +55,7 @@ dependencies = [
     "cyclopts>=3.0",
     "anyio>=4.0",
     "ruamel.yaml>=0.18",
-    "croniter>=3.0",
+    "cronsim>=2.0",
 ]
 
 [project.scripts]
@@ -2715,15 +2715,10 @@ Expected: FAIL
 
 **Step 3: Write the scheduler (minimal viable)**
 
-Note: Use `croniter` or implement a simple cron parser. Add `croniter` to dependencies first:
-
-```toml
-# Add to pyproject.toml dependencies:
-"croniter>=3.0",
-```
+Note: `cronsim` is already in `pyproject.toml`. Install if not yet synced:
 
 ```bash
-uv add croniter
+uv sync
 ```
 
 ```python
@@ -2741,7 +2736,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from croniter import croniter
+from cronsim import CronSim
 
 from squidbot.core.models import CronJob
 from squidbot.core.ports import MemoryPort
@@ -2770,8 +2765,8 @@ def parse_schedule(job: CronJob, now: datetime | None = None) -> datetime | None
             return None
 
     try:
-        cron = croniter(schedule, now)
-        return cron.get_next(datetime)
+        cron = CronSim(schedule, now)
+        return next(iter(cron))
     except Exception:
         return None
 
@@ -2803,8 +2798,8 @@ def is_due(job: CronJob, now: datetime | None = None) -> bool:
     # Cron expression: check if we're past the next scheduled time since last run
     baseline = job.last_run or datetime(2000, 1, 1, tzinfo=timezone.utc)
     try:
-        cron = croniter(schedule, baseline)
-        next_run = cron.get_next(datetime)
+        cron = CronSim(schedule, baseline)
+        next_run = next(iter(cron))
         return next_run <= now
     except Exception:
         return False

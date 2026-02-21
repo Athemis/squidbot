@@ -600,7 +600,7 @@ Result returned as tool_result to parent
 | MCP client | mcp |
 | CLI framework | cyclopts |
 | YAML parsing | ruamel.yaml (YAML 1.2, round-trip safe) |
-| Cron parsing | croniter |
+| Cron parsing | cronsim |
 | Build tool | uv |
 | Linter/formatter | ruff |
 | Type checker | mypy |
