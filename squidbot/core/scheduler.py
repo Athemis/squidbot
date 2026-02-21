@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from cronsim import CronSim
@@ -31,7 +31,7 @@ def parse_schedule(job: CronJob, now: datetime | None = None) -> datetime | None
     - Interval expressions: "every N" (seconds)
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     schedule = job.schedule.strip()
     if schedule.startswith("every "):
@@ -56,7 +56,7 @@ def is_due(job: CronJob, now: datetime | None = None) -> bool:
     run in the current scheduling window.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     if not job.enabled:
         return False
 
@@ -113,16 +113,16 @@ class CronScheduler:
 
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
         jobs = await self._storage.load_cron_jobs()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         updated = False
         for job in jobs:
             if is_due(job, now=now):
                 job.last_run = now
                 updated = True
-                try:
+                try:  # noqa: SIM105 — contextlib.suppress doesn't support async
                     await on_due(job)
                 except Exception:
-                    pass  # Don't crash the scheduler on handler errors
+                    pass
         if updated:
             await self._storage.save_cron_jobs(jobs)
 
