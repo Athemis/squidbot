@@ -1063,6 +1063,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "rich" },
     { name = "ruamel-yaml" },
 ]
 
@@ -1084,6 +1085,7 @@ requires-dist = [
     { name = "openai", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "rich", specifier = ">=13.0" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
 ]
 
