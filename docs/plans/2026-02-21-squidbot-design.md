@@ -593,8 +593,8 @@ Result returned as tool_result to parent
 | Language | Python 3.14 |
 | Data validation | Pydantic v2 |
 | Configuration | pydantic-settings |
-| LLM client | openai (>=1.0, OpenAI-compatible) |
-| Async runtime | asyncio (stdlib) |
+| LLM client | openai (>=2.0, OpenAI-compatible) |
+| Async runtime | asyncio (stdlib, Python 3.14) |
 | HTTP client | httpx |
 | Matrix protocol | matrix-nio |
 | MCP client | mcp |

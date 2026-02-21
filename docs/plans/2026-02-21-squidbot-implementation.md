@@ -6,7 +6,7 @@
 
 **Architecture:** Hexagonal (Ports & Adapters). The core domain (agent loop, memory, scheduler) uses only `Protocol` interfaces. Adapters implement those interfaces for LLM, channels, tools, and persistence. The core has zero external imports.
 
-**Tech Stack:** Python 3.14, uv, pydantic v2, pydantic-settings, openai SDK, matrix-nio, httpx, cyclopts, ruamel.yaml, cronsim, ruff, mypy, pytest, pytest-asyncio
+**Tech Stack:** Python 3.14, uv, pydantic v2, pydantic-settings, openai SDK v2, matrix-nio, httpx, cyclopts, ruamel.yaml, cronsim, ruff, mypy, pytest, pytest-asyncio
 
 ---
 
@@ -48,12 +48,11 @@ requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    "openai>=1.0",
+    "openai>=2.0",
     "httpx>=0.28",
     "matrix-nio>=0.25",
     "mcp>=1.0",
     "cyclopts>=3.0",
-    "anyio>=4.0",
     "ruamel.yaml>=0.18",
     "cronsim>=2.0",
 ]
