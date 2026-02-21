@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from rich.markdown import Markdown
 
 from squidbot.adapters.channels.cli import RichCliChannel
 from squidbot.core.models import OutboundMessage, Session
@@ -24,7 +25,7 @@ class TestRichCliChannelAttributes:
 class TestRichCliChannelSend:
     @pytest.mark.asyncio
     async def test_send_prints_to_console(self):
-        """send() should call Console.print with a Markdown object."""
+        """send() should render response as Markdown via Console.print."""
         ch = RichCliChannel()
         msg = OutboundMessage(session=Session(channel="cli", sender_id="local"), text="**hello**")
 
@@ -35,6 +36,11 @@ class TestRichCliChannelSend:
             await ch.send(msg)
 
             mock_console.print.assert_called()
+            # At least one call should have passed a Markdown object
+            calls = mock_console.print.call_args_list
+            assert any(isinstance(arg, Markdown) for call in calls for arg in call.args), (
+                "Expected Console.print to be called with a Markdown object"
+            )
 
     @pytest.mark.asyncio
     async def test_send_typing_is_noop(self):
@@ -88,6 +94,22 @@ class TestRichCliChannelReceive:
             "squidbot.adapters.channels.cli.asyncio.to_thread", new_callable=AsyncMock
         ) as mock_thread:
             mock_thread.side_effect = ["exit"]
+
+            messages = []
+            async for msg in ch.receive():
+                messages.append(msg)
+
+        assert messages == []
+
+    @pytest.mark.asyncio
+    async def test_receive_stops_on_quit(self):
+        """receive() should stop when user types 'quit'."""
+        ch = RichCliChannel()
+
+        with patch(
+            "squidbot.adapters.channels.cli.asyncio.to_thread", new_callable=AsyncMock
+        ) as mock_thread:
+            mock_thread.side_effect = ["quit"]
 
             messages = []
             async for msg in ch.receive():
