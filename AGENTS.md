@@ -33,6 +33,8 @@ uv tool install --reinstall /home/alex/git/squidbot
 
 **Always run `uv run ruff check .` and `uv run pytest` before committing.**
 
+**Use Conventional Commits:** `type(scope): description` — types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `deps`. Examples: `feat: add RichCliChannel`, `fix: handle KeyboardInterrupt in _prompt`, `deps: add rich as explicit dependency`.
+
 ---
 
 ## Architecture — Hexagonal (Ports & Adapters)
