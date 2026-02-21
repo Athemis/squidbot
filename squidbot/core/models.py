@@ -63,7 +63,7 @@ class Session:
 
     channel: str
     sender_id: str
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=datetime.now, compare=False)
 
     @property
     def id(self) -> str:
