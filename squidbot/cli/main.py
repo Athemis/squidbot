@@ -250,7 +250,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
 
     # Interactive REPL mode: Rich interface
     console = Console()
-    console.print(f"[bold]squidbot[/bold] 0.1.0  •  model: [cyan]{settings.llm.model}[/cyan]")
+    console.print(f"🦑 [bold]squidbot[/bold] 0.1.0  •  model: [cyan]{settings.llm.model}[/cyan]")
     console.print(Rule(style="dim"))
     console.print("[dim]type 'exit' or Ctrl+D to quit[/dim]")
 
