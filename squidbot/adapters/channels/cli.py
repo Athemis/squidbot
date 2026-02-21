@@ -41,14 +41,14 @@ class CliChannel:
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
-            except EOFError, KeyboardInterrupt:
+            except (EOFError, KeyboardInterrupt):
                 break
 
     def _prompt(self) -> str | None:
         """Blocking prompt — runs in a thread executor."""
         try:
             return input("\nYou: ")
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             return None
 
     async def send(self, message: OutboundMessage) -> None:
@@ -83,16 +83,16 @@ class RichCliChannel:
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
-            except EOFError, KeyboardInterrupt:
+            except (EOFError, KeyboardInterrupt):
                 break
 
     def _prompt(self) -> str | None:
         """Blocking prompt — runs in a thread executor."""
+        console = Console()
+        console.print(Rule(style="dim"))
         try:
-            console = Console()
-            console.print(Rule(style="dim"))
             return Prompt.ask("[bold green]You[/bold green]")
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             return None
 
     async def send(self, message: OutboundMessage) -> None:
