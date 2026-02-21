@@ -24,32 +24,37 @@ interfaces ("Ports"). Concrete implementations ("Adapters") plug into these port
 Dependency direction: Adapters → Ports ← Core. The core never imports from adapters.
 
 ```
-┌─────────────────────────────────────────────┐
-│                    CORE                     │
-│                                             │
-│  AgentLoop   Memory   Scheduler   Models    │
-│                                             │
-│  (imports only: ports.py, models.py)        │
-└─────────────────┬───────────────────────────┘
-                  │ Ports (Python Protocols)
-       ┌──────────┼──────────┐
-       │          │          │
-  ┌────▼───┐ ┌────▼───┐ ┌────▼───┐
-  │ LLM    │ │Channel │ │ Tool   │
-  │Adapter │ │Adapter │ │Adapter │
-  ├────────┤ ├────────┤ ├────────┤
-  │openai  │ │cli     │ │shell   │
-  │        │ │matrix  │ │files   │
-  │        │ │email   │ │search  │
-  │        │ │        │ │mcp     │
-  └────────┘ └────────┘ │spawn   │
-                        └────────┘
-       ┌──────────┐
-       │Persistence│
-       │ Adapter  │
-       ├──────────┤
-       │jsonl/json│
-       └──────────┘
+┌─────────────────────────────────────────────────────┐
+│                       CORE                          │
+│                                                     │
+│  AgentLoop   Memory   Scheduler   Models   Skills   │
+│                                                     │
+│  (imports only: ports.py, models.py)                │
+└─────────────────────┬───────────────────────────────┘
+                      │ Ports (Python Protocols)
+       ┌──────────────┼──────────────┐
+       │              │              │
+  ┌────▼───┐     ┌────▼───┐    ┌────▼────┐
+  │ LLM    │     │Channel │    │  Tool   │
+  │Adapter │     │Adapter │    │ Adapter │
+  ├────────┤     ├────────┤    ├─────────┤
+  │openai  │     │cli     │    │shell    │
+  │        │     │matrix  │    │files    │
+  │        │     │email   │    │search   │
+  └────────┘     └────────┘    │mcp      │
+                               │spawn    │
+  ┌─────────┐    ┌──────────┐  └─────────┘
+  │Persist. │    │ Skills   │
+  │ Adapter │    │ Adapter  │
+  ├─────────┤    ├──────────┤
+  │jsonl    │    │fs        │
+  └─────────┘    └──────────┘
+
+  ┌─────────────────────┐
+  │  Dashboard Adapter  │  ← future, plugs into StatusPort
+  ├─────────────────────┤
+  │  web-ui / tui / ... │
+  └─────────────────────┘
 ```
 
 ## Project Structure
@@ -63,7 +68,8 @@ squidbot/
 │   │   ├── agent.py        # Agent loop (LLM ↔ tool execution)
 │   │   ├── memory.py       # Memory management (history + memory.md)
 │   │   ├── scheduler.py    # Cron scheduler
-│   │   └── registry.py     # Tool registry
+│   │   ├── registry.py     # Tool registry
+│   │   └── skills.py       # SkillMetadata model + skill summary builder
 │   ├── adapters/
 │   │   ├── llm/
 │   │   │   └── openai.py   # OpenAI-compatible LLM adapter
@@ -77,8 +83,31 @@ squidbot/
 │   │   │   ├── web_search.py  # Web search (SearXNG/DuckDuckGo/Brave)
 │   │   │   ├── mcp.py      # MCP server client
 │   │   │   └── spawn.py    # Sub-agent spawn tool
-│   │   └── persistence/
-│   │       └── jsonl.py    # JSON/JSONL file persistence
+│   │   ├── persistence/
+│   │   │   └── jsonl.py    # JSON/JSONL file persistence
+│   │   ├── skills/
+│   │   │   └── fs.py       # FsSkillsLoader: reads SKILL.md files from disk
+│   │   └── dashboard/      # Placeholder — future dashboard adapter(s)
+│   │       └── __init__.py
+│   ├── skills/             # Bundled skills (shipped with the package)
+│   │   ├── memory/
+│   │   │   └── SKILL.md    # always: true — memory.md conventions
+│   │   ├── cron/
+│   │   │   └── SKILL.md    # Scheduling instructions
+│   │   ├── github/
+│   │   │   └── SKILL.md    # requires: [gh]
+│   │   ├── git/
+│   │   │   └── SKILL.md    # requires: [git]
+│   │   ├── python/
+│   │   │   └── SKILL.md    # requires: [python3]
+│   │   ├── web-search/
+│   │   │   └── SKILL.md    # Web search best practices
+│   │   ├── summarize/
+│   │   │   └── SKILL.md    # Document/content summarization
+│   │   ├── research/
+│   │   │   └── SKILL.md    # Structured research with web search
+│   │   └── skill-creator/
+│   │       └── SKILL.md    # How to create new skills
 │   ├── config/
 │   │   └── schema.py       # Pydantic Settings configuration schema
 │   └── cli/
@@ -87,7 +116,8 @@ squidbot/
 │   ├── core/               # Pure unit tests, no external dependencies
 │   │   ├── test_agent.py
 │   │   ├── test_memory.py
-│   │   └── test_scheduler.py
+│   │   ├── test_scheduler.py
+│   │   └── test_skills.py
 │   └── integration/        # Integration tests (require API keys / services)
 │       └── test_openai.py
 ├── workspace/              # Default user workspace (committed skeleton)
@@ -116,7 +146,7 @@ class ChannelPort(Protocol):
     """Interface for inbound/outbound message channels."""
     async def receive(self) -> AsyncIterator[InboundMessage]: ...
     async def send(self, message: OutboundMessage) -> None: ...
-    async def send_typing(self, session_id: str) -> None: ...  # optional indicator
+    async def send_typing(self, session_id: str) -> None: ...
 
 class ToolPort(Protocol):
     """Interface for agent tools."""
@@ -134,6 +164,23 @@ class MemoryPort(Protocol):
     async def save_memory_doc(self, session_id: str, content: str) -> None: ...
     async def load_cron_jobs(self) -> list[CronJob]: ...
     async def save_cron_jobs(self, jobs: list[CronJob]) -> None: ...
+
+class SkillsPort(Protocol):
+    """Interface for skill discovery and loading."""
+    def list_skills(self) -> list[SkillMetadata]: ...
+    def load_skill_body(self, name: str) -> str: ...  # full SKILL.md text
+
+class StatusPort(Protocol):
+    """
+    Interface for gateway status — consumed by the future dashboard adapter.
+
+    The gateway maintains a GatewayState object and exposes it via this port.
+    Dashboard adapters read from StatusPort; they never write agent state directly.
+    """
+    def get_active_sessions(self) -> list[SessionInfo]: ...
+    def get_channel_status(self) -> list[ChannelStatus]: ...
+    def get_cron_jobs(self) -> list[CronJob]: ...
+    def get_skills(self) -> list[SkillMetadata]: ...
 ```
 
 ## Agent Loop (core/agent.py)
@@ -145,10 +192,10 @@ It has no knowledge of HTTP, files, or external services.
 InboundMessage
      │
      ▼
-Load session history + memory.md
+Load session history + memory.md + skills summary
      │
      ▼
-Build messages: [system_prompt + memory.md, history, user_message]
+Build messages: [system_prompt + memory.md + skills XML, history, user_message]
      │
      ▼
      ┌──────────────────────────────┐
@@ -198,6 +245,181 @@ error-prone (nanobot-redux had consolidation bugs), and opaque. The `memory.md` 
 transparent and debuggable. The memory system sits behind `MemoryPort` and can be replaced
 later with a summarizing implementation without touching the core.
 
+## Skills System
+
+Skills are directories containing a `SKILL.md` file — markdown instructions for the agent,
+with YAML frontmatter for metadata. They are pure data, not executable code.
+
+### Skill Format
+
+```yaml
+---
+name: github
+description: "Interact with GitHub — create PRs, manage issues, query CI status."
+always: false        # true: full body injected into every system prompt
+requires:
+  bins: [gh]         # optional: skill is marked unavailable if binary not on PATH
+  env: []            # optional: skill is marked unavailable if env var not set
+metadata: {"squidbot": {"emoji": "🐙"}}
+---
+
+# GitHub Skill
+
+[Full markdown instructions for the agent — loaded on demand via read_file]
+```
+
+The metadata block uses the key `"squidbot"`. The format is otherwise structurally compatible
+with nanobot/OpenClaw skill conventions (which use `"nanobot"` / `"openclaw"` keys),
+making manual skill porting straightforward.
+
+### Three-Tier Loading
+
+| Tier | What | When |
+|---|---|---|
+| 1. Metadata | `name` + `description` (~100 tokens per skill) | Always in system prompt as XML block |
+| 2. SKILL.md body | Full markdown content | Agent reads via `read_file` when task matches |
+| 3. Bundled resources | `scripts/`, `references/` subdirs | Agent reads/executes as needed |
+
+The agent receives an `<skills>` XML block in every system prompt listing all discovered
+skills with their availability. The agent is instructed: *"When the current task matches a
+skill's description, read its SKILL.md with `read_file` before proceeding — do not attempt
+the task from first principles when a skill covers it."*
+
+Example XML block injected into system prompt:
+
+```xml
+<skills>
+  <skill available="true">
+    <name>github</name>
+    <description>Interact with GitHub — create PRs, manage issues, query CI status.</description>
+    <location>/path/to/squidbot/skills/github/SKILL.md</location>
+  </skill>
+  <skill available="false">
+    <name>gh</name>
+    <description>...</description>
+    <location>...</location>
+    <requires>CLI: gh</requires>
+  </skill>
+</skills>
+```
+
+### Skill Resolution
+
+**Precedence:** workspace skills override bundled skills by name. A user-defined
+`~/.squidbot/workspace/skills/github/SKILL.md` replaces the bundled `github` skill entirely.
+
+**Availability:** Skills with unsatisfied `requires.bins` or `requires.env` are included in
+the XML with `available="false"` and a `<requires>` hint. The agent can still read them but
+knows the prerequisite is missing.
+
+**Always-skills:** Skills with `always: true` (e.g. `memory`) have their full body injected
+unconditionally into the system prompt rather than listed in the XML summary.
+
+### Skill Directories
+
+```
+squidbot/skills/                         # Bundled (read-only, shipped with package)
+├── memory/SKILL.md      always: true    # memory.md conventions, always injected
+├── cron/SKILL.md                        # Scheduling instructions
+├── github/SKILL.md      requires: [gh]  # GitHub via gh CLI
+├── git/SKILL.md         requires: [git] # Git operations
+├── python/SKILL.md      requires: [python3]
+├── web-search/SKILL.md                  # Web search best practices
+├── summarize/SKILL.md                   # Document/content summarization
+├── research/SKILL.md                    # Structured research workflow
+└── skill-creator/SKILL.md               # How to create new skills
+
+~/.squidbot/workspace/skills/            # User-defined (override bundled by name)
+└── <name>/SKILL.md
+```
+
+### skill-creator: Agent-Created Skills
+
+The `skill-creator` bundled skill teaches the agent how to write new skills. When the user
+asks the agent to "remember how I like to write emails" or "create a skill for my deployment
+workflow", the agent:
+
+1. Reads `skill-creator/SKILL.md` via `read_file`
+2. Writes `~/.squidbot/workspace/skills/<name>/SKILL.md` via `write_file`
+3. The new skill is auto-discovered on the next gateway start (no restart required for
+   bundled skill listing; hot-reload is a future enhancement)
+
+The `skill-creator` SKILL.md explains:
+- The full SKILL.md format (frontmatter fields, body conventions)
+- When to use `always: true` vs. on-demand loading
+- How to write a good `description` field (the trigger criterion)
+- The `squidbot` metadata key convention
+- A template the agent fills in
+
+Example interaction:
+
+```
+User:  "Create a skill for writing professional emails in German."
+
+Agent: [reads skill-creator/SKILL.md]
+       [writes ~/.squidbot/workspace/skills/email-german/SKILL.md]
+
+       "Skill 'email-german' created. It will be available the next time
+       the gateway starts. When you ask me to write a German email, I'll
+       load its instructions automatically."
+```
+
+### Architecture Fit
+
+Skills are read-only data consumed by `FsSkillsLoader` (implements `SkillsPort`). The
+`MemoryManager` calls `SkillsPort.list_skills()` to build the XML block and injects always-
+skill bodies into the system prompt. The core (`skills.py`) contains only the `SkillMetadata`
+dataclass and the XML-summary builder — no filesystem I/O.
+
+### Skills Registry (Future)
+
+A `RegistrySkillsAdapter` can later be added behind `SkillsPort` to support downloading
+skills from a remote registry. This is explicitly deferred. The adapter boundary ensures
+the core and agent loop need no changes when this is added.
+
+## Dashboard (Future)
+
+A dashboard is planned but not part of the initial implementation. The architecture is
+designed to support it cleanly when the time comes.
+
+### Design Principle
+
+The dashboard is a **read-mostly consumer** of existing ports — it observes gateway state
+without modifying agent behaviour. It plugs in as a `DashboardAdapter` behind `StatusPort`.
+No special-casing in the core is needed.
+
+### GatewayState
+
+The gateway process maintains a central `GatewayState` object updated by running components:
+
+```python
+@dataclass
+class GatewayState:
+    active_sessions: dict[str, SessionInfo]   # session_id → metadata
+    channel_status:  dict[str, ChannelStatus] # channel name → connected/error
+    cron_jobs:       list[CronJob]            # current job list
+    skills:          list[SkillMetadata]      # discovered skills
+    started_at:      datetime
+```
+
+`StatusPort` exposes read access to this object. The `GatewayState` is the single source
+of truth for any future dashboard adapter.
+
+### What the Dashboard Will Show
+
+- **Status panel:** active sessions, channel health, uptime
+- **Conversation history:** browse past exchanges per session
+- **Memory viewer:** read and edit `memory.md` per session
+- **Skill manager:** list skills, see availability, trigger skill-creator
+- **Cron manager:** view jobs, next-run times, enable/disable
+
+### Technology Decision (Deferred)
+
+The dashboard technology (web UI served by the gateway, TUI via Textual, or something else)
+is not yet decided. The `adapters/dashboard/` directory is a placeholder. The `StatusPort`
+interface is the only architectural commitment made now — any dashboard implementation
+simply implements that port.
+
 ## Data Models (core/models.py)
 
 ```python
@@ -225,6 +447,32 @@ class CronJob:
     timezone: str
     enabled: bool
     last_run: datetime | None
+
+@dataclass
+class SkillMetadata:
+    name: str
+    description: str
+    location: Path         # absolute path to SKILL.md
+    always: bool = False
+    available: bool = True
+    requires_bins: list[str] = field(default_factory=list)
+    requires_env: list[str] = field(default_factory=list)
+    emoji: str = ""
+
+@dataclass
+class SessionInfo:
+    session_id: str
+    channel: str
+    sender_id: str
+    started_at: datetime
+    message_count: int
+
+@dataclass
+class ChannelStatus:
+    name: str
+    enabled: bool
+    connected: bool
+    error: str | None = None
 ```
 
 ## Configuration (config/schema.py)
@@ -245,6 +493,9 @@ Per-field environment variable overrides supported via Pydantic Settings.
     "workspace": "~/.squidbot/workspace",
     "system_prompt_file": "AGENTS.md",
     "restrict_to_workspace": true
+  },
+  "skills": {
+    "extra_dirs": []
   },
   "tools": {
     "shell": { "enabled": true },
@@ -281,6 +532,9 @@ Per-field environment variable overrides supported via Pydantic Settings.
   }
 }
 ```
+
+`skills.extra_dirs` allows additional skill search paths beyond the two standard locations
+(bundled package skills and `{workspace}/skills/`).
 
 ## Security Model
 
@@ -326,6 +580,7 @@ Result returned as tool_result to parent
 | Matrix protocol | matrix-nio |
 | MCP client | mcp |
 | CLI framework | cyclopts |
+| YAML parsing | ruamel.yaml (YAML 1.2, round-trip safe) |
 | Build tool | uv |
 | Linter/formatter | ruff |
 | Type checker | mypy |
@@ -343,6 +598,12 @@ Result returned as tool_result to parent
 │       └── memory.md        # Agent-maintained memory file
 └── cron/
     └── jobs.json            # Scheduled task definitions
+
+~/.squidbot/workspace/
+├── AGENTS.md                # User's system prompt / agent instructions
+└── skills/                  # User-defined skills (override bundled by name)
+    └── <name>/
+        └── SKILL.md
 ```
 
 Session IDs are derived from channel type and sender: `matrix:@user:matrix.org`,
@@ -359,16 +620,18 @@ squidbot status               # Show configuration and channel status
 squidbot cron list            # List scheduled jobs
 squidbot cron add             # Add a new cron job
 squidbot cron remove <id>     # Remove a cron job
+squidbot skills list          # List all discovered skills and their availability
 ```
 
 ## Non-Goals (YAGNI)
 
 The following are explicitly out of scope for the initial implementation:
+
 - Voice/speech (TTS/STT)
-- Web UI / dashboard
+- Web UI / dashboard (architecture prepared, implementation deferred)
 - Multi-user support
 - Webhook endpoints
 - Container sandboxing (deferred, extractable via ToolPort)
 - Telegram, Discord, WhatsApp, Slack channels (can be added as adapters later)
-- ClawHub / skill registry integration
+- Skill registry / remote skill download (deferred, adapter-ready via SkillsPort)
 - Agent social networks
