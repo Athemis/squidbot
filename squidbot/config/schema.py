@@ -105,7 +105,7 @@ class Settings(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> "Settings":
+    def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> Settings:
         """
         Load settings from a JSON file.
 
