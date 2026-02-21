@@ -233,24 +233,30 @@ async def _make_agent_loop(settings: Settings):
 
 async def _run_agent(message: str | None, config_path: Path) -> None:
     """Run the CLI channel agent."""
-    from squidbot.adapters.channels.cli import CliChannel
+    from rich.console import Console
+    from rich.rule import Rule
+
+    from squidbot.adapters.channels.cli import CliChannel, RichCliChannel
 
     settings = Settings.load(config_path)
     agent_loop = await _make_agent_loop(settings)
-    channel = CliChannel()
 
     if message:
-        # Single-shot mode
+        # Single-shot mode: use plain CliChannel (streaming, no banner)
+        channel = CliChannel()
         await agent_loop.run(CliChannel.SESSION, message, channel)
         print()  # newline after streamed output
         return
 
-    # Interactive REPL mode
-    print("squidbot — type 'exit' or Ctrl+D to quit")
+    # Interactive REPL mode: Rich interface
+    console = Console()
+    console.print(f"[bold]squidbot[/bold] 0.1.0  •  model: [cyan]{settings.llm.model}[/cyan]")
+    console.print(Rule(style="dim"))
+    console.print("[dim]type 'exit' or Ctrl+D to quit[/dim]")
+
+    channel = RichCliChannel()
     async for inbound in channel.receive():
-        print("\nAssistant: ", end="", flush=True)
         await agent_loop.run(inbound.session, inbound.text, channel)
-        print()  # newline after streamed output
 
 
 async def _run_gateway(config_path: Path) -> None:

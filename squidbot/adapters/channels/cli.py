@@ -41,14 +41,14 @@ class CliChannel:
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
-            except (EOFError, KeyboardInterrupt):
+            except EOFError, KeyboardInterrupt:
                 break
 
     def _prompt(self) -> str | None:
         """Blocking prompt — runs in a thread executor."""
         try:
             return input("\nYou: ")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             return None
 
     async def send(self, message: OutboundMessage) -> None:
@@ -83,21 +83,20 @@ class RichCliChannel:
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
-            except (EOFError, KeyboardInterrupt):
+            except EOFError, KeyboardInterrupt:
                 break
 
     def _prompt(self) -> str | None:
         """Blocking prompt — runs in a thread executor."""
-        console = Console()
-        console.print(Rule(style="dim"))
         try:
             return Prompt.ask("[bold green]You[/bold green]")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             return None
 
     async def send(self, message: OutboundMessage) -> None:
         """Print the response as Markdown via Rich Console."""
         console = Console()
+        console.print(Rule(style="dim"))
         console.print("[bold cyan]squidbot ›[/bold cyan]")
         console.print(Markdown(message.text))
 
