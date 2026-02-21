@@ -144,6 +144,7 @@ class LLMPort(Protocol):
 
 class ChannelPort(Protocol):
     """Interface for inbound/outbound message channels."""
+    streaming: bool   # True if send() should be called per-chunk; False = collect then send
     async def receive(self) -> AsyncIterator[InboundMessage]: ...
     async def send(self, message: OutboundMessage) -> None: ...
     async def send_typing(self, session_id: str) -> None: ...
@@ -228,6 +229,12 @@ OutboundMessage sent
 **Token Pruning:** When history exceeds `max_context_tokens`, the oldest non-system messages
 are dropped. A warning is injected into the context before pruning to prompt the agent to
 consolidate important information into `memory.md`.
+
+**Streaming strategy:** Each `ChannelPort` adapter declares `streaming: bool`. When `True`
+(CLI), text chunks are forwarded to `channel.send()` as they arrive from the LLM, giving a
+typewriter feel. When `False` (Matrix, Email), chunks are accumulated and sent as a single
+message at the end of the turn. The agent loop checks `channel.streaming` to decide which
+path to take — no other logic changes.
 
 ## Memory System
 
@@ -333,6 +340,18 @@ squidbot/skills/                         # Bundled (read-only, shipped with pack
 └── <name>/SKILL.md
 ```
 
+### Skill Discovery: mtime Polling
+
+`FsSkillsLoader` caches loaded skill metadata and re-reads from disk only when a file's
+modification time (`mtime`) has changed. This means:
+
+- Skills added or edited while the gateway is running are picked up automatically
+- No restart required after creating a skill via `skill-creator`
+- No unnecessary filesystem I/O on every agent call
+
+The cache is keyed by `(path, mtime)`. On each `list_skills()` call, the loader stats
+all SKILL.md files and invalidates any entry whose mtime has changed.
+
 ### skill-creator: Agent-Created Skills
 
 The `skill-creator` bundled skill teaches the agent how to write new skills. When the user
@@ -341,8 +360,7 @@ workflow", the agent:
 
 1. Reads `skill-creator/SKILL.md` via `read_file`
 2. Writes `~/.squidbot/workspace/skills/<name>/SKILL.md` via `write_file`
-3. The new skill is auto-discovered on the next gateway start (no restart required for
-   bundled skill listing; hot-reload is a future enhancement)
+3. The new skill is auto-discovered on the next `list_skills()` call (mtime polling)
 
 The `skill-creator` SKILL.md explains:
 - The full SKILL.md format (frontmatter fields, body conventions)
@@ -444,6 +462,7 @@ class CronJob:
     name: str
     message: str
     schedule: str     # cron expression or "every N seconds"
+    channel: str      # e.g. "cli:local" or "matrix:@user:matrix.org"
     timezone: str
     enabled: bool
     last_run: datetime | None
@@ -581,6 +600,7 @@ Result returned as tool_result to parent
 | MCP client | mcp |
 | CLI framework | cyclopts |
 | YAML parsing | ruamel.yaml (YAML 1.2, round-trip safe) |
+| Cron parsing | croniter |
 | Build tool | uv |
 | Linter/formatter | ruff |
 | Type checker | mypy |
