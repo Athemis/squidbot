@@ -643,6 +643,58 @@ squidbot cron remove <id>     # Remove a cron job
 squidbot skills list          # List all discovered skills and their availability
 ```
 
+## Heartbeat
+
+The gateway runs a `HeartbeatService` alongside channels and the cron scheduler. Every
+`interval_minutes` (default: 30) it wakes the agent to check for outstanding tasks.
+
+### Mechanism
+
+1. Check `activeHours` — skip outside the configured time window.
+2. Read `HEARTBEAT.md` from the workspace. If the file is effectively empty (only blank
+   lines and Markdown headings), skip the tick to avoid unnecessary API calls.
+3. Send the heartbeat prompt to `AgentLoop.run()` in the last active user's session.
+4. If the response is `HEARTBEAT_OK` (at start or end of reply) → silent drop + DEBUG log.
+5. Otherwise → deliver the alert to the last active channel.
+
+### `LastChannelTracker`
+
+A lightweight object updated by the gateway on every inbound message. Stores the last
+`ChannelPort` and `Session`. The `HeartbeatService` reads these when firing. If no user
+has ever written (tracker empty), the tick is skipped.
+
+### Configuration
+
+```json
+{
+  "agents": {
+    "heartbeat": {
+      "enabled": true,
+      "interval_minutes": 30,
+      "prompt": "Read HEARTBEAT.md if it exists...",
+      "active_hours_start": "08:00",
+      "active_hours_end": "22:00",
+      "timezone": "Europe/Berlin"
+    }
+  }
+}
+```
+
+Timezone uses stdlib `zoneinfo` (no extra dependency). `"local"` uses the host timezone.
+
+### HEARTBEAT.md
+
+Optional file in the agent workspace. Think of it as a standing checklist:
+
+```md
+# Heartbeat checklist
+
+- Quick scan: anything urgent in inboxes?
+- If a task is blocked, note what is missing.
+```
+
+The agent can update this file itself via the `write_file` tool.
+
 ## Non-Goals (YAGNI)
 
 The following are explicitly out of scope for the initial implementation:
