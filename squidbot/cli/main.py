@@ -221,6 +221,11 @@ async def _make_agent_loop(settings: Settings):
     registry.register(WriteFileTool(workspace=workspace, restrict_to_workspace=restrict))
     registry.register(ListFilesTool(workspace=workspace, restrict_to_workspace=restrict))
 
+    if settings.tools.web_search.enabled:
+        from squidbot.adapters.tools.web_search import WebSearchTool  # noqa: PLC0415
+
+        registry.register(WebSearchTool(config=settings.tools.web_search))
+
     # Load system prompt
     system_prompt_path = workspace / settings.agents.system_prompt_file
     if system_prompt_path.exists():
