@@ -390,6 +390,8 @@ class MockLLM:
 
 class MockChannel:
     """Minimal mock channel that satisfies ChannelPort."""
+    streaming = False
+
     def __init__(self, messages: list[InboundMessage]):
         self._messages = messages
 
@@ -527,7 +529,13 @@ class ChannelPort(Protocol):
 
     A channel adapter handles the specifics of a messaging platform:
     authentication, message format conversion, and delivery.
+
+    The `streaming` attribute controls how the agent loop delivers responses:
+    - True (e.g. CLI): send() is called per text chunk as it arrives from the LLM
+    - False (e.g. Matrix, Email): chunks are accumulated and send() is called once
     """
+
+    streaming: bool  # True = stream chunks; False = collect then send
 
     async def receive(self) -> AsyncIterator[InboundMessage]:
         """Yield inbound messages as they arrive."""
@@ -2295,7 +2303,6 @@ Supports streaming output for a responsive feel.
 from __future__ import annotations
 
 import asyncio
-import sys
 from collections.abc import AsyncIterator
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
@@ -2310,13 +2317,13 @@ class CliChannel:
     """
 
     SESSION = Session(channel="cli", sender_id="local")
+    streaming = True  # stream text chunks to stdout as they arrive
 
     async def receive(self) -> AsyncIterator[InboundMessage]:
         """Yield messages from stdin, one per line."""
         while True:
             try:
-                loop = asyncio.get_event_loop()
-                line = await loop.run_in_executor(None, self._prompt)
+                line = await asyncio.to_thread(self._prompt)
                 if line is None:
                     break
                 text = line.strip()
