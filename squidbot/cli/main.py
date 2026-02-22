@@ -238,6 +238,31 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
+BOOTSTRAP_FILES_MAIN: list[str] = ["SOUL.md", "USER.md", "AGENTS.md", "ENVIRONMENT.md"]
+BOOTSTRAP_FILES_SUBAGENT: list[str] = ["AGENTS.md", "ENVIRONMENT.md"]
+
+
+def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
+    """
+    Load and concatenate bootstrap files from the workspace.
+
+    Missing files are silently skipped. Returns a fallback string if no
+    files are found.
+
+    Args:
+        workspace: Path to the agent workspace directory.
+        filenames: Ordered list of filenames to load.
+
+    Returns:
+        Concatenated prompt text, separated by horizontal rules.
+    """
+    parts = []
+    for name in filenames:
+        file_path = workspace / name
+        if file_path.exists():
+            parts.append(file_path.read_text(encoding="utf-8"))
+    return "\n\n---\n\n".join(parts) if parts else "You are a helpful personal AI assistant."
+
 
 def _print_banner(settings: Settings) -> None:
     """
@@ -421,12 +446,7 @@ async def _make_agent_loop(
                 registry.register(tool)
             mcp_connections.append(conn)
 
-    # Load system prompt (bootstrap_files loading added in later tasks)
-    system_prompt_path = workspace / "AGENTS.md"
-    if system_prompt_path.exists():
-        system_prompt = system_prompt_path.read_text(encoding="utf-8")
-    else:
-        system_prompt = "You are a helpful personal AI assistant."
+    system_prompt = _load_bootstrap_prompt(workspace, BOOTSTRAP_FILES_MAIN)
 
     # Spawn tool profile injection into system prompt
     if settings.tools.spawn.enabled and settings.tools.spawn.profiles:
