@@ -26,6 +26,8 @@ from squidbot.config.schema import DEFAULT_CONFIG_PATH, Settings
 if TYPE_CHECKING:
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
     from squidbot.core.agent import AgentLoop
+    from squidbot.core.models import CronJob
+    from squidbot.core.ports import ChannelPort
 
 app = cyclopts.App(name="squidbot", help="A lightweight personal AI assistant.")
 
@@ -341,6 +343,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     settings = Settings.load(config_path)
     agent_loop, mcp_connections = await _make_agent_loop(settings)
 
+    channel: ChannelPort
     if message:
         # Single-shot mode: use plain CliChannel (streaming, no banner)
         channel = CliChannel()
@@ -413,7 +416,7 @@ async def _run_gateway(config_path: Path) -> None:
     # Map of channel prefix → channel instance for cron job routing
     channel_registry: dict[str, object] = {}
 
-    async def on_cron_due(job) -> None:
+    async def on_cron_due(job: CronJob) -> None:
         """Deliver a scheduled message to the job's target channel."""
         channel_prefix = job.channel.split(":")[0]
         ch = channel_registry.get(channel_prefix)

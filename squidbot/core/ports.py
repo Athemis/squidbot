@@ -69,7 +69,7 @@ class ChannelPort(Protocol):
 
     streaming: bool  # True = stream chunks; False = collect then send
 
-    async def receive(self) -> AsyncIterator[InboundMessage]:
+    def receive(self) -> AsyncIterator[InboundMessage]:
         """Yield inbound messages as they arrive."""
         ...
 
