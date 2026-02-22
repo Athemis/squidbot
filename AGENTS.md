@@ -187,6 +187,34 @@ async def chat(self, messages: list[Message], tools: list[ToolDefinition]) -> ..
 
 ---
 
+## Logging (loguru)
+
+This project uses **loguru** for all log output. Key rules:
+
+- **Import:** `from loguru import logger` — no per-module `getLogger()` needed.
+- **String formatting:** Use brace-style `{}` or f-strings. loguru calls are equivalent to
+  `str.format()`, so `%s`/`%d` placeholders are **not** interpolated and will appear literally.
+
+  ```python
+  # Correct — brace style (lazy, idiomatic loguru)
+  logger.info("heartbeat: started (every {}m)", interval)
+
+  # Correct — f-string (eager, also fine)
+  logger.info(f"heartbeat: started (every {interval}m)")
+
+  # WRONG — percent style, will print literally
+  logger.info("heartbeat: started (every %dm)", interval)
+  ```
+
+- **Lazy evaluation:** Brace-style args are only formatted if the level is active, making it
+  slightly more efficient than f-strings in hot paths.
+- **Test safety:** loguru has no sink by default in test environments — all `logger.*` calls
+  are no-ops unless a sink is added explicitly.
+- **Setup:** `_setup_logging(level)` in `cli/main.py` is called once per CLI command.
+  It removes loguru's default handler and adds a custom stderr sink with timestamp + level.
+
+---
+
 ## Channel Streaming
 
 `ChannelPort.streaming` controls how `AgentLoop` delivers responses:
