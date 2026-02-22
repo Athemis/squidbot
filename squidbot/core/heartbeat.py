@@ -16,6 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from squidbot.config.schema import HeartbeatConfig
+from squidbot.core.agent import AgentLoop
 from squidbot.core.models import Session
 from squidbot.core.ports import ChannelPort
 
@@ -99,9 +100,9 @@ class _SinkChannel:
     def __init__(self) -> None:
         self.collected = ""
 
-    async def receive(self) -> AsyncIterator[object]:  # type: ignore[override]
+    async def receive(self) -> AsyncIterator[object]:
         return
-        yield  # noqa: unreachable
+        yield  # noqa: B901
 
     async def send(self, message: object) -> None:
         from squidbot.core.models import OutboundMessage  # noqa: PLC0415
@@ -124,7 +125,7 @@ class HeartbeatService:
 
     def __init__(
         self,
-        agent_loop: object,
+        agent_loop: AgentLoop,
         tracker: LastChannelTracker,
         workspace: Path,
         config: HeartbeatConfig,
@@ -237,8 +238,10 @@ class HeartbeatService:
         # 4. Run agent into a sink channel
         sink = _SinkChannel()
         try:
-            await self._agent_loop.run(  # type: ignore[union-attr]
-                self._tracker.session, self._config.prompt, sink
+            await self._agent_loop.run(
+                self._tracker.session,
+                self._config.prompt,
+                sink,  # type: ignore[arg-type]
             )
         except Exception as e:
             logger.error("heartbeat: agent error: %s", e)
@@ -254,10 +257,10 @@ class HeartbeatService:
         # Alert — deliver to the last active channel
         from squidbot.core.models import OutboundMessage  # noqa: PLC0415
 
+        channel = self._tracker.channel
+        session = self._tracker.session
         try:
-            await self._tracker.channel.send(  # type: ignore[union-attr]
-                OutboundMessage(session=self._tracker.session, text=response)
-            )
+            await channel.send(OutboundMessage(session=session, text=response))
         except Exception as e:
             logger.error("heartbeat: delivery error: %s", e)
 

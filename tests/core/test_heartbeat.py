@@ -293,3 +293,36 @@ async def test_tick_heartbeat_ok_in_middle_is_delivered(tmp_path):
     )  # type: ignore[arg-type]
     await svc._tick()
     assert ch.sent == ["Some text HEARTBEAT_OK more text"]
+
+
+# ---------------------------------------------------------------------------
+# Task 6: HeartbeatService.run()
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+async def test_run_loop_calls_tick_and_stops(tmp_path):
+    """run() should call _tick() at least once and stop when cancelled."""
+    tick_count = 0
+
+    class _CountingService(HeartbeatService):
+        async def _tick(self, now: datetime | None = None) -> None:
+            nonlocal tick_count
+            tick_count += 1
+
+    cfg = HeartbeatConfig(interval_minutes=0)  # 0 minutes = fire immediately
+    svc = _CountingService(
+        agent_loop=None,  # type: ignore[arg-type]
+        tracker=LastChannelTracker(),
+        workspace=tmp_path,
+        config=cfg,
+    )
+
+    async def _run_briefly() -> None:
+        await asyncio.wait_for(svc.run(), timeout=0.1)
+
+    with pytest.raises((asyncio.TimeoutError, asyncio.CancelledError)):
+        await _run_briefly()
+
+    assert tick_count >= 1
