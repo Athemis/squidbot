@@ -451,3 +451,31 @@ class TestEmailChannelSend:
         refs = sent["References"]
         assert "<prev@host>" in refs
         assert "<cur@host>" in refs
+
+
+class TestEmailChannelTlsWarnings:
+    def test_warns_when_tls_disabled(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config(tls=False)
+        with patch("squidbot.adapters.channels.email.logger") as mock_logger:
+            EmailChannel(config=config, tmp_dir=tmp_path)
+        mock_logger.warning.assert_called_once()
+        assert "TLS disabled" in mock_logger.warning.call_args[0][0]
+
+    def test_warns_when_tls_verify_disabled(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config(tls=True, tls_verify=False)
+        with patch("squidbot.adapters.channels.email.logger") as mock_logger:
+            EmailChannel(config=config, tmp_dir=tmp_path)
+        mock_logger.warning.assert_called_once()
+        assert "certificate verification disabled" in mock_logger.warning.call_args[0][0]
+
+    def test_no_warning_for_default_tls(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config(tls=True, tls_verify=True)
+        with patch("squidbot.adapters.channels.email.logger") as mock_logger:
+            EmailChannel(config=config, tmp_dir=tmp_path)
+        mock_logger.warning.assert_not_called()

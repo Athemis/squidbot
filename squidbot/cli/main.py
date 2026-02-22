@@ -461,6 +461,15 @@ async def _run_gateway(config_path: Path) -> None:
                 tg.create_task(_channel_loop(matrix_ch, agent_loop))
             else:
                 logger.info("matrix channel: disabled")
+            if settings.channels.email.enabled:
+                from squidbot.adapters.channels.email import EmailChannel  # noqa: PLC0415
+
+                email_ch = EmailChannel(config=settings.channels.email)
+                channel_registry["email"] = email_ch
+                logger.info("email channel: starting")
+                tg.create_task(_channel_loop(email_ch, agent_loop))
+            else:
+                logger.info("email channel: disabled")
     finally:
         for conn in mcp_connections:
             await conn.close()
