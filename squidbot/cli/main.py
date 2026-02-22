@@ -181,6 +181,29 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
+def _print_banner(settings: Settings) -> None:
+    """
+    Print the gateway startup banner to stderr.
+
+    Uses plain print() rather than loguru so the banner is not prefixed
+    with a timestamp and log level.
+
+    Args:
+        settings: Loaded application settings.
+    """
+    import sys
+    from importlib.metadata import version
+
+    ver = version("squidbot")
+    model = settings.llm.model
+    workspace = Path(settings.agents.workspace).expanduser()
+    print(f"🦑 squidbot v{ver}", file=sys.stderr)
+    print(f"   model:     {model}", file=sys.stderr)
+    print(f"   workspace: {workspace}", file=sys.stderr)
+    print(f"   {'─' * 40}", file=sys.stderr)
+    print(file=sys.stderr)
+
+
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
@@ -321,6 +344,7 @@ async def _run_gateway(config_path: Path) -> None:
     from squidbot.core.scheduler import CronScheduler  # noqa: PLC0415
 
     settings = Settings.load(config_path)
+    _print_banner(settings)
 
     # Startup summary
     logger.info("gateway starting")
