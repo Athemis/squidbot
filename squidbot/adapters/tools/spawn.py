@@ -261,7 +261,9 @@ class SpawnTool:
         profile_name: str | None = (
             kwargs.get("profile") if isinstance(kwargs.get("profile"), str) else None
         )
-        context: str = kwargs.get("context") if isinstance(kwargs.get("context"), str) else ""  # type: ignore[assignment]
+        context: str | None = (
+            kwargs.get("context") if isinstance(kwargs.get("context"), str) else None
+        )
         system_prompt_override: str | None = (
             kwargs.get("system_prompt") if isinstance(kwargs.get("system_prompt"), str) else None
         )

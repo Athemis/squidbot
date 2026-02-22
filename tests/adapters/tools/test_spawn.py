@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from collections.abc import AsyncIterator
 
 from squidbot.adapters.tools.spawn import CollectingChannel, JobStore, SpawnTool, SubAgentFactory
 from squidbot.config.schema import SpawnProfile
