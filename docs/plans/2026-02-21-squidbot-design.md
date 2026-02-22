@@ -646,8 +646,8 @@ Result returned as tool_result to parent
 
 ~/.squidbot/workspace/
 ├── BOOTSTRAP.md             # First-run ritual: intro + identity interview (delete when done)
-├── IDENTITY.md              # Bot name, creature, vibe, emoji (created during bootstrap)
 ├── SOUL.md                  # Bot values, character, how it operates (bundled default)
+├── IDENTITY.md              # Bot name, creature, vibe, emoji (created during bootstrap)
 ├── USER.md                  # Information about the user (built up over time)
 ├── AGENTS.md                # Operative instructions: tools, workflows, conventions
 ├── ENVIRONMENT.md           # Local setup notes: SSH hosts, devices, aliases (optional)
@@ -670,8 +670,8 @@ file set is fixed and convention-based, inspired by OpenClaw.
 
 | File | Purpose |
 |---|---|
-| `IDENTITY.md` | Bot name, creature, vibe, emoji (created during bootstrap) |
 | `SOUL.md` | Bot values, character, operating principles (bundled default) |
+| `IDENTITY.md` | Bot name, creature, vibe, emoji (created during bootstrap) |
 | `USER.md` | Information about the user (name, timezone, preferences) |
 | `AGENTS.md` | Operative instructions: tools, workflows, conventions |
 | `ENVIRONMENT.md` | Local setup notes: SSH hosts, devices, aliases |

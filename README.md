@@ -210,8 +210,8 @@ mtime polling — no restart needed after creating or editing a skill.
 
 ~/.squidbot/workspace/
 ├── BOOTSTRAP.md        # First-run ritual: identity interview (self-deletes when done)
-├── IDENTITY.md         # Bot name, creature, vibe, emoji — loaded first each session
-├── SOUL.md             # Bot values, character, operating principles
+├── SOUL.md             # Bot values, character, operating principles — loaded first each session
+├── IDENTITY.md         # Bot name, creature, vibe, emoji
 ├── USER.md             # Information about the user (built up over time)
 ├── AGENTS.md           # Operative instructions: tools, workflows, conventions
 ├── ENVIRONMENT.md      # Local setup notes: SSH hosts, devices, aliases (optional)
