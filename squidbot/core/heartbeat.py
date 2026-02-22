@@ -8,6 +8,9 @@ alerts to the last active channel. HEARTBEAT_OK responses are silently dropped.
 
 from __future__ import annotations
 
+from squidbot.core.models import Session
+from squidbot.core.ports import ChannelPort
+
 HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
 
 DEFAULT_HEARTBEAT_PROMPT = (
@@ -51,3 +54,27 @@ def _is_heartbeat_empty(content: str | None) -> bool:
             continue
         return False
     return True
+
+
+class LastChannelTracker:
+    """
+    Tracks the most recently active channel and session.
+
+    Updated by the gateway on every inbound message. Read by HeartbeatService
+    when determining where to deliver alerts.
+    """
+
+    def __init__(self) -> None:
+        self.channel: ChannelPort | None = None
+        self.session: Session | None = None
+
+    def update(self, channel: ChannelPort, session: Session) -> None:
+        """
+        Record the channel and session of the most recent inbound message.
+
+        Args:
+            channel: The channel the message arrived on.
+            session: The session (channel type + sender ID) of the message.
+        """
+        self.channel = channel
+        self.session = session
