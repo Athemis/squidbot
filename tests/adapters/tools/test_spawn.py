@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from squidbot.adapters.tools.spawn import CollectingChannel, JobStore
-from squidbot.core.models import OutboundMessage, Session
+from squidbot.core.models import OutboundMessage, Session, ToolResult
+from squidbot.core.registry import ToolRegistry
 
 
 @pytest.fixture
@@ -99,3 +101,77 @@ async def test_job_store_all_job_ids():
     store.start("x", noop())
     store.start("y", noop())
     assert set(store.all_job_ids()) == {"x", "y"}
+
+
+def _make_mock_registry(tool_names: list[str]) -> ToolRegistry:
+    """Build a ToolRegistry with lightweight mock tools."""
+    registry = ToolRegistry()
+    for name in tool_names:
+        tool = MagicMock()
+        tool.name = name
+        tool.description = f"Mock {name}"
+        tool.parameters = {"type": "object", "properties": {}}
+        tool.execute = AsyncMock(return_value=ToolResult(tool_call_id="", content="ok"))
+        registry.register(tool)
+    return registry
+
+
+def test_factory_build_returns_agent_loop():
+    from squidbot.core.agent import AgentLoop
+
+    from squidbot.adapters.tools.spawn import SubAgentFactory
+
+    llm = MagicMock()
+    memory = MagicMock()
+    registry = _make_mock_registry(["shell"])
+    factory = SubAgentFactory(
+        llm=llm, memory=memory, registry=registry, system_prompt="parent prompt", profiles={}
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=None)
+    assert isinstance(loop, AgentLoop)
+
+
+def test_factory_build_excludes_spawn_tools():
+    from squidbot.adapters.tools.spawn import SubAgentFactory
+
+    registry = _make_mock_registry(["shell", "spawn", "spawn_await"])
+    factory = SubAgentFactory(
+        llm=MagicMock(), memory=MagicMock(), registry=registry, system_prompt="p", profiles={}
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=None)
+    # The child registry must not contain spawn or spawn_await
+    defs = loop._registry.get_definitions()
+    names = [d.name for d in defs]
+    assert "spawn" not in names
+    assert "spawn_await" not in names
+    assert "shell" in names
+
+
+def test_factory_build_with_tools_filter():
+    from squidbot.adapters.tools.spawn import SubAgentFactory
+
+    registry = _make_mock_registry(["shell", "web_search", "read_file"])
+    factory = SubAgentFactory(
+        llm=MagicMock(), memory=MagicMock(), registry=registry, system_prompt="p", profiles={}
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=["shell"])
+    defs = loop._registry.get_definitions()
+    names = [d.name for d in defs]
+    assert names == ["shell"]
+
+
+def test_factory_build_with_system_prompt_override():
+    from squidbot.core.agent import AgentLoop
+
+    from squidbot.adapters.tools.spawn import SubAgentFactory
+
+    registry = _make_mock_registry([])
+    factory = SubAgentFactory(
+        llm=MagicMock(),
+        memory=MagicMock(),
+        registry=registry,
+        system_prompt="original",
+        profiles={},
+    )
+    loop = factory.build(system_prompt_override="override prompt", tools_filter=None)
+    assert loop._system_prompt == "override prompt"

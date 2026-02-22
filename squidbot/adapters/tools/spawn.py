@@ -13,7 +13,12 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
+from squidbot.config.schema import SpawnProfile
+from squidbot.core.agent import AgentLoop
+from squidbot.core.memory import MemoryManager
 from squidbot.core.models import InboundMessage, OutboundMessage
+from squidbot.core.ports import LLMPort
+from squidbot.core.registry import ToolRegistry
 
 
 class CollectingChannel:
@@ -94,3 +99,71 @@ class JobStore:
     def all_job_ids(self) -> list[str]:
         """Return all registered job IDs."""
         return list(self._tasks.keys())
+
+
+_SPAWN_TOOL_NAMES = {"spawn", "spawn_await"}
+
+
+class SubAgentFactory:
+    """
+    Builds fresh AgentLoop instances for sub-agents.
+
+    Each sub-agent gets its own registry (filtered copy of the parent's)
+    and optionally a different system prompt. spawn/spawn_await are always
+    excluded from sub-agent registries to prevent runaway nesting.
+    """
+
+    def __init__(
+        self,
+        llm: LLMPort,
+        memory: MemoryManager,
+        registry: ToolRegistry,
+        system_prompt: str,
+        profiles: dict[str, SpawnProfile],
+    ) -> None:
+        """
+        Args:
+            llm: LLM adapter shared with parent.
+            memory: Memory manager shared with parent.
+            registry: Parent's tool registry (source for sub-agent tools).
+            system_prompt: Parent's system prompt (default for sub-agents).
+            profiles: Named sub-agent profiles from config.
+        """
+        self._llm = llm
+        self._memory = memory
+        self._registry = registry
+        self._system_prompt = system_prompt
+        self._profiles = profiles
+
+    def build(
+        self,
+        system_prompt_override: str | None,
+        tools_filter: list[str] | None,
+    ) -> AgentLoop:
+        """
+        Build a fresh AgentLoop for a sub-agent.
+
+        Args:
+            system_prompt_override: If set, replaces the parent system prompt.
+            tools_filter: If set, only these tool names are available.
+                          spawn/spawn_await are always excluded regardless.
+
+        Returns:
+            A new AgentLoop with an isolated tool registry.
+        """
+        child_prompt = system_prompt_override or self._system_prompt
+
+        child_registry = ToolRegistry()
+        for tool in self._registry._tools.values():
+            if tool.name in _SPAWN_TOOL_NAMES:
+                continue
+            if tools_filter is not None and tool.name not in tools_filter:
+                continue
+            child_registry.register(tool)
+
+        return AgentLoop(
+            llm=self._llm,
+            memory=self._memory,
+            registry=child_registry,
+            system_prompt=child_prompt,
+        )
