@@ -308,3 +308,81 @@ class SpawnTool:
 
         self._job_store.start(job_id, _run())
         return ToolResult(tool_call_id="", content=job_id)
+
+
+class SpawnAwaitTool:
+    """
+    Waits for one or more background sub-agent jobs and returns their results.
+
+    Always returns is_error=False. Individual job failures are embedded in
+    the content as [job_id: ERROR] markers so the parent sees all results.
+    """
+
+    name = "spawn_await"
+    description = (
+        "Wait for background sub-agent jobs to complete and retrieve their results. "
+        "Pass a comma-separated list of job IDs, or '*' to wait for all pending jobs."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "job_ids": {
+                "type": "string",
+                "description": "Comma-separated job IDs to wait for, or '*' for all.",
+            },
+        },
+        "required": ["job_ids"],
+    }
+
+    def __init__(self, job_store: JobStore) -> None:
+        """
+        Args:
+            job_store: The shared job store from SpawnTool.
+        """
+        self._job_store = job_store
+
+    def to_definition(self) -> ToolDefinition:
+        """Return a ToolDefinition."""
+        return ToolDefinition(
+            name=self.name,
+            description=self.description,
+            parameters=self.parameters,
+        )
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        """
+        Wait for jobs and format results.
+
+        Args:
+            **kwargs: job_ids (required) — comma-separated IDs or '*'.
+
+        Returns:
+            ToolResult with all job results embedded. Never is_error=True
+            unless job_ids is missing.
+        """
+        job_ids_raw = kwargs.get("job_ids")
+        if not isinstance(job_ids_raw, str) or not job_ids_raw.strip():
+            return ToolResult(tool_call_id="", content="Error: job_ids is required", is_error=True)
+
+        if job_ids_raw.strip() == "*":
+            ids = self._job_store.all_job_ids()
+            if not ids:
+                return ToolResult(tool_call_id="", content="No jobs found.")
+        else:
+            ids = [i.strip() for i in job_ids_raw.split(",") if i.strip()]
+
+        results = await self._job_store.await_jobs(ids)
+
+        parts: list[str] = []
+        # Include NOT FOUND for any requested IDs that weren't in the store
+        for jid in ids:
+            if jid not in results:
+                parts.append(f"[{jid}: NOT FOUND]")
+
+        for jid, outcome in results.items():
+            if isinstance(outcome, BaseException):
+                parts.append(f"[{jid}: ERROR]\n{outcome}")
+            else:
+                parts.append(f"[{jid}: OK]\n{outcome}")
+
+        return ToolResult(tool_call_id="", content="\n\n".join(parts))
