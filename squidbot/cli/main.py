@@ -753,14 +753,35 @@ async def _run_onboard(config_path: Path) -> None:
     bootstrap_path = workspace / "BOOTSTRAP.md"
     already_set_up = (workspace / "IDENTITY.md").exists() and not bootstrap_path.exists()
 
-    # Copy bootstrap files from bundled workspace (skip if already present)
-    for filename in BOOTSTRAP_FILES_MAIN:
-        file_path = workspace / filename
-        if not file_path.exists():
-            template_path = _BUNDLED_WORKSPACE / filename
-            if template_path.exists():
-                file_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
-                print(f"Created {file_path}")
+    # Copy bootstrap files from bundled workspace
+    missing_files = [f for f in BOOTSTRAP_FILES_MAIN if not (workspace / f).exists()]
+    existing_files = [f for f in BOOTSTRAP_FILES_MAIN if (workspace / f).exists()]
+
+    # Missing files are created silently
+    for filename in missing_files:
+        template_path = _BUNDLED_WORKSPACE / filename
+        if template_path.exists():
+            (workspace / filename).write_text(
+                template_path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            print(f"Created {workspace / filename}")
+
+    # Existing files: ask to overwrite
+    if existing_files:
+        listed = ", ".join(existing_files)
+        overwrite_all = input(f"\nExisting files: {listed}. Overwrite all? [y/N] ").strip().lower()
+        for filename in existing_files:
+            if overwrite_all == "y":
+                do_overwrite = True
+            else:
+                do_overwrite = input(f"Overwrite {filename}? [y/N] ").strip().lower() == "y"
+            if do_overwrite:
+                template_path = _BUNDLED_WORKSPACE / filename
+                if template_path.exists():
+                    (workspace / filename).write_text(
+                        template_path.read_text(encoding="utf-8"), encoding="utf-8"
+                    )
+                    print(f"Updated {workspace / filename}")
     if bootstrap_path.exists():
         pass  # bootstrap already in progress — don't overwrite
     elif already_set_up:

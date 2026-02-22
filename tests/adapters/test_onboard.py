@@ -93,7 +93,7 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
         return s
 
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N"]),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
@@ -133,7 +133,17 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
     with (
         patch(
             "squidbot.cli.main.input",
-            side_effect=["https://second.example.com/v1", "sk-second", "gpt-4o", "N"],
+            side_effect=[
+                "https://second.example.com/v1",
+                "sk-second",
+                "gpt-4o",
+                "N",
+                "N",
+                "N",
+                "N",
+                "N",
+                "N",
+            ],
         ),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -184,7 +194,7 @@ async def test_onboard_does_not_overwrite_existing_files(tmp_path: Path) -> None
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N"]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -229,7 +239,7 @@ async def test_onboard_offers_bootstrap_rerun_when_already_set_up(tmp_path: Path
     (workspace / "IDENTITY.md").write_text("identity", encoding="utf-8")
 
     prompts: list[str] = []
-    inputs = ["", "", "", "N"]
+    inputs = ["", "", "", "N", "N", "N"]
 
     def capturing_input(prompt: str = "") -> str:
         prompts.append(prompt)
@@ -267,7 +277,7 @@ async def test_onboard_bootstrap_rerun_yes_creates_file(tmp_path: Path) -> None:
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "y"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "y"]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -291,7 +301,7 @@ async def test_onboard_bootstrap_rerun_no_does_not_create_file(tmp_path: Path) -
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N"]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
