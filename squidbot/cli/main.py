@@ -256,7 +256,7 @@ def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
     Returns:
         Concatenated prompt text, separated by horizontal rules.
     """
-    parts = []
+    parts: list[str] = []
     for name in filenames:
         file_path = workspace / name
         if file_path.exists():
