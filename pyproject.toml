@@ -15,6 +15,7 @@ dependencies = [
     "cronsim>=2.0",
     "duckduckgo-search>=8.0",
     "rich>=13.0",
+    "loguru>=0.7",
 ]
 
 [project.scripts]
