@@ -203,3 +203,127 @@ class TestMatrixChannelReceive:
         assert msg.metadata["matrix_thread_root"] == "$thread_root_123"
         assert msg.metadata["matrix_event_id"] == "$reply1"
         assert msg.metadata["matrix_room_id"] == "!room1:example.org"
+
+
+class TestMatrixChannelTyping:
+    """MatrixChannel.send_typing() manages the keepalive loop correctly."""
+
+    @pytest.mark.asyncio
+    async def test_send_typing_true_starts_task(self) -> None:
+        """send_typing(True) creates a background keepalive task."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.room_typing = AsyncMock(return_value=MagicMock())
+
+        # Seed the session_rooms so send_typing can find the room
+        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+
+        await ch.send_typing("matrix:@alice:example.org", typing=True)
+        await asyncio.sleep(0)  # let the event loop tick
+
+        assert "!room1:example.org" in ch._typing_tasks
+        assert not ch._typing_tasks["!room1:example.org"].done()
+
+        # Cleanup
+        await ch.send_typing("matrix:@alice:example.org", typing=False)
+
+    @pytest.mark.asyncio
+    async def test_send_typing_false_cancels_task_and_sends_stop(self) -> None:
+        """send_typing(False) cancels the keepalive task and sends stop event."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        stop_calls: list[tuple[str, bool]] = []
+
+        async def fake_room_typing(room_id: str, typing_state: bool, timeout: int = 0) -> MagicMock:
+            stop_calls.append((room_id, typing_state))
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.room_typing = fake_room_typing
+        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+
+        await ch.send_typing("matrix:@alice:example.org", typing=True)
+        await asyncio.sleep(0)
+        await ch.send_typing("matrix:@alice:example.org", typing=False)
+        await asyncio.sleep(0)
+
+        # The stop call (typing_state=False) must have been sent
+        assert any(room == "!room1:example.org" and state is False for room, state in stop_calls)
+        assert "!room1:example.org" not in ch._typing_tasks
+
+    @pytest.mark.asyncio
+    async def test_typing_keepalive_resends_after_interval(self) -> None:
+        """Keepalive loop calls room_typing again after TYPING_KEEPALIVE_S."""
+        from squidbot.adapters.channels import matrix as matrix_mod
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        call_count = 0
+
+        async def fake_room_typing(room_id: str, typing_state: bool, timeout: int = 0) -> MagicMock:
+            nonlocal call_count
+            if typing_state:
+                call_count += 1
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.room_typing = fake_room_typing
+        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+
+        original = matrix_mod._TYPING_KEEPALIVE_S
+        matrix_mod._TYPING_KEEPALIVE_S = 0.05  # speed up test
+
+        try:
+            await ch.send_typing("matrix:@alice:example.org", typing=True)
+            await asyncio.sleep(0.2)  # enough for 2+ keepalive ticks
+            assert call_count >= 2
+        finally:
+            matrix_mod._TYPING_KEEPALIVE_S = original
+            await ch.send_typing("matrix:@alice:example.org", typing=False)
+
+    @pytest.mark.asyncio
+    async def test_typing_429_retries_after_delay(self) -> None:
+        """Keepalive loop sleeps for retry_after_ms on 429 and retries."""
+        from squidbot.adapters.channels import matrix as matrix_mod
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        call_count = 0
+
+        rate_limit_resp = MagicMock(spec=["retry_after_ms"])
+        rate_limit_resp.retry_after_ms = 50  # 50ms retry
+
+        ok_resp = MagicMock()
+        # First call returns rate-limited, subsequent calls succeed
+        responses: list[Any] = [rate_limit_resp, ok_resp, ok_resp, ok_resp]
+
+        async def fake_room_typing(room_id: str, typing_state: bool, timeout: int = 0) -> Any:
+            nonlocal call_count
+            if typing_state:
+                call_count += 1
+                if responses:
+                    return responses.pop(0)
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.room_typing = fake_room_typing
+        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+
+        original = matrix_mod._TYPING_KEEPALIVE_S
+        matrix_mod._TYPING_KEEPALIVE_S = 0.01
+
+        try:
+            await ch.send_typing("matrix:@alice:example.org", typing=True)
+            await asyncio.sleep(0.3)
+            # Should have retried after the rate limit
+            assert call_count >= 2
+        finally:
+            matrix_mod._TYPING_KEEPALIVE_S = original
+            await ch.send_typing("matrix:@alice:example.org", typing=False)
