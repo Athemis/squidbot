@@ -343,8 +343,6 @@ class SpawnTool:
                     content=f"Error: unknown profile '{profile_name}'",
                     is_error=True,
                 )
-            if resolved_system_prompt is None and profile.system_prompt:
-                resolved_system_prompt = profile.system_prompt
             if profile.tools:
                 tools_filter = profile.tools
 

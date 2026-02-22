@@ -182,7 +182,7 @@ def test_factory_build_with_tools_filter(tmp_path):
     assert names == ["shell"]
 
 
-def test_factory_build_with_system_prompt_override(tmp_path):
+def test_factory_build_with_inline_system_prompt_only(tmp_path):
     llm = MagicMock()
     registry = _make_mock_registry([])
     factory = SubAgentFactory(
@@ -198,12 +198,28 @@ def test_factory_build_with_system_prompt_override(tmp_path):
     assert loop._system_prompt == "override prompt"
 
 
+def test_factory_build_inline_appended_to_bootstrap(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("bootstrap content")
+    llm = MagicMock()
+    registry = _make_mock_registry([])
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=registry,
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md"],
+        profiles={},
+        default_pool="default",
+        resolve_llm=lambda _: llm,
+    )
+    loop = factory.build(system_prompt_override="override prompt", tools_filter=None)
+    assert "bootstrap content" in loop._system_prompt
+    assert "override prompt" in loop._system_prompt
+
+
 def _make_factory(
     response: str = "sub result", tmp_path: Path | None = None
 ) -> tuple[SubAgentFactory, ToolRegistry]:
     """Return a factory whose sub-agents always respond with `response`."""
-    import tempfile
-
     registry = _make_mock_registry(["shell"])
 
     async def _gen() -> AsyncIterator[str]:
@@ -220,11 +236,12 @@ def _make_factory(
     memory.build_messages = AsyncMock(return_value=[])
     memory.persist_exchange = AsyncMock()
 
-    workspace = tmp_path if tmp_path is not None else Path(tempfile.mkdtemp())
+    if tmp_path is None:
+        raise ValueError("tmp_path is required; pass pytest's tmp_path fixture")
     factory = SubAgentFactory(
         memory=memory,
         registry=registry,
-        workspace=workspace,
+        workspace=tmp_path,
         default_bootstrap_files=[],
         profiles={},
         default_pool="default",
@@ -233,8 +250,8 @@ def _make_factory(
     return factory, registry
 
 
-async def test_spawn_tool_returns_job_id_immediately():
-    factory, _ = _make_factory()
+async def test_spawn_tool_returns_job_id_immediately(tmp_path):
+    factory, _ = _make_factory(tmp_path=tmp_path)
     job_store = JobStore()
     tool = SpawnTool(factory=factory, job_store=job_store)
     result = await tool.execute(task="do something")
@@ -242,24 +259,24 @@ async def test_spawn_tool_returns_job_id_immediately():
     assert len(result.content) > 0  # job_id returned
 
 
-async def test_spawn_tool_empty_task_is_error():
-    factory, _ = _make_factory()
+async def test_spawn_tool_empty_task_is_error(tmp_path):
+    factory, _ = _make_factory(tmp_path=tmp_path)
     job_store = JobStore()
     tool = SpawnTool(factory=factory, job_store=job_store)
     result = await tool.execute(task="")
     assert result.is_error
 
 
-async def test_spawn_tool_missing_task_is_error():
-    factory, _ = _make_factory()
+async def test_spawn_tool_missing_task_is_error(tmp_path):
+    factory, _ = _make_factory(tmp_path=tmp_path)
     job_store = JobStore()
     tool = SpawnTool(factory=factory, job_store=job_store)
     result = await tool.execute()
     assert result.is_error
 
 
-async def test_spawn_tool_unknown_profile_is_error():
-    factory, _ = _make_factory()
+async def test_spawn_tool_unknown_profile_is_error(tmp_path):
+    factory, _ = _make_factory(tmp_path=tmp_path)
     job_store = JobStore()
     tool = SpawnTool(factory=factory, job_store=job_store)
     result = await tool.execute(task="do it", profile="nonexistent")
@@ -267,8 +284,8 @@ async def test_spawn_tool_unknown_profile_is_error():
     assert "nonexistent" in result.content
 
 
-async def test_spawn_tool_registers_job():
-    factory, _ = _make_factory()
+async def test_spawn_tool_registers_job(tmp_path):
+    factory, _ = _make_factory(tmp_path=tmp_path)
     job_store = JobStore()
     tool = SpawnTool(factory=factory, job_store=job_store)
     result = await tool.execute(task="work")
@@ -318,8 +335,8 @@ async def test_spawn_tool_no_profile_enum_when_no_profiles(tmp_path):
     assert "enum" not in profile_param
 
 
-async def test_spawn_await_collects_result():
-    factory, _ = _make_factory(response="done")
+async def test_spawn_await_collects_result(tmp_path):
+    factory, _ = _make_factory(response="done", tmp_path=tmp_path)
     job_store = JobStore()
     spawn = SpawnTool(factory=factory, job_store=job_store)
     await_tool = SpawnAwaitTool(job_store=job_store)
@@ -333,8 +350,8 @@ async def test_spawn_await_collects_result():
     assert "done" in result.content
 
 
-async def test_spawn_await_wildcard_collects_all():
-    factory, _ = _make_factory(response="x")
+async def test_spawn_await_wildcard_collects_all(tmp_path):
+    factory, _ = _make_factory(response="x", tmp_path=tmp_path)
     job_store = JobStore()
     spawn = SpawnTool(factory=factory, job_store=job_store)
     await_tool = SpawnAwaitTool(job_store=job_store)
