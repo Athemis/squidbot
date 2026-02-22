@@ -16,6 +16,20 @@ def _config(
     return WebSearchConfig(enabled=True, provider=provider, url=url, api_key=api_key)
 
 
+class TestWebSearchToolMissingArgs:
+    async def test_no_query_key_returns_error(self) -> None:
+        tool = WebSearchTool(config=_config())
+        result = await tool.execute()
+        assert result.is_error
+        assert "query is required" in result.content
+
+    async def test_query_none_returns_error(self) -> None:
+        tool = WebSearchTool(config=_config())
+        result = await tool.execute(query=None)
+        assert result.is_error
+        assert "query is required" in result.content
+
+
 class TestWebSearchToolInterface:
     def test_name(self):
         tool = WebSearchTool(config=_config())
