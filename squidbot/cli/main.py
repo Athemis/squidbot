@@ -268,12 +268,16 @@ async def _run_gateway(config_path: Path) -> None:
     """Start all enabled channels concurrently."""
     from squidbot.adapters.channels.cli import CliChannel
     from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.core.heartbeat import HeartbeatService, LastChannelTracker
     from squidbot.core.models import Session
     from squidbot.core.scheduler import CronScheduler
 
     settings = Settings.load(config_path)
     agent_loop = await _make_agent_loop(settings)
     storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+    workspace = Path(settings.agents.workspace).expanduser()
+
+    tracker = LastChannelTracker()
 
     # Map of channel prefix → channel instance for cron job routing
     channel_registry: dict[str, object] = {}
@@ -282,6 +286,7 @@ async def _run_gateway(config_path: Path) -> None:
 
     async def run_channel(channel: CliChannel) -> None:
         async for inbound in channel.receive():
+            tracker.update(channel, inbound.session)  # type: ignore[arg-type]
             await agent_loop.run(inbound.session, inbound.text, channel)
 
     async def on_cron_due(job) -> None:
@@ -289,7 +294,7 @@ async def _run_gateway(config_path: Path) -> None:
         channel_prefix = job.channel.split(":")[0]
         ch = channel_registry.get(channel_prefix)
         if ch is None:
-            return  # target channel not active
+            return
         session = Session(
             channel=channel_prefix,
             sender_id=job.channel.split(":", 1)[1],
@@ -297,10 +302,17 @@ async def _run_gateway(config_path: Path) -> None:
         await agent_loop.run(session, job.message, ch)  # type: ignore[arg-type]
 
     scheduler = CronScheduler(storage=storage)
+    heartbeat = HeartbeatService(
+        agent_loop=agent_loop,
+        tracker=tracker,
+        workspace=workspace,
+        config=settings.agents.heartbeat,
+    )
 
     async with asyncio.TaskGroup() as tg:
         tg.create_task(run_channel(cli_channel))
         tg.create_task(scheduler.run(on_due=on_cron_due))
+        tg.create_task(heartbeat.run())
 
 
 async def _run_onboard(config_path: Path) -> None:
