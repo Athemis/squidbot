@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from squidbot.adapters.tools.spawn import CollectingChannel
+from squidbot.adapters.tools.spawn import CollectingChannel, JobStore
 from squidbot.core.models import OutboundMessage, Session
 
 
@@ -41,3 +43,59 @@ async def test_collecting_channel_receive_yields_nothing():
 async def test_collecting_channel_send_typing_is_noop(session):
     ch = CollectingChannel()
     await ch.send_typing(session.id)  # must not raise
+
+
+async def test_job_store_start_and_await():
+    store = JobStore()
+
+    async def work() -> str:
+        return "result"
+
+    store.start("job1", work())
+    results = await store.await_jobs(["job1"])
+    assert results == {"job1": "result"}
+
+
+async def test_job_store_await_multiple():
+    store = JobStore()
+
+    async def slow() -> str:
+        await asyncio.sleep(0)
+        return "slow"
+
+    async def fast() -> str:
+        return "fast"
+
+    store.start("a", fast())
+    store.start("b", slow())
+    results = await store.await_jobs(["a", "b"])
+    assert results["a"] == "fast"
+    assert results["b"] == "slow"
+
+
+async def test_job_store_exception_captured():
+    store = JobStore()
+
+    async def boom() -> str:
+        raise ValueError("oops")
+
+    store.start("bad", boom())
+    results = await store.await_jobs(["bad"])
+    assert isinstance(results["bad"], ValueError)
+
+
+async def test_job_store_unknown_job_id():
+    store = JobStore()
+    results = await store.await_jobs(["nonexistent"])
+    assert "nonexistent" not in results or results["nonexistent"] is None
+
+
+async def test_job_store_all_job_ids():
+    store = JobStore()
+
+    async def noop() -> str:
+        return ""
+
+    store.start("x", noop())
+    store.start("y", noop())
+    assert set(store.all_job_ids()) == {"x", "y"}
