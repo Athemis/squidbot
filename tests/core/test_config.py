@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from squidbot.config.schema import (
     HeartbeatConfig,
     LLMConfig,
@@ -135,3 +137,84 @@ def test_spawn_settings_in_tools_config():
 def test_spawn_profile_empty_tools_means_all():
     p = SpawnProfile()
     assert p.tools == []  # empty = inherit all
+
+
+from pydantic import ValidationError  # noqa: E402
+
+
+def test_validation_unknown_default_pool():
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "llm": {
+                    "default_pool": "missing",
+                    "providers": {"p": {"api_base": "http://x", "api_key": "k"}},
+                    "models": {"m": {"provider": "p", "model": "x"}},
+                    "pools": {"smart": [{"model": "m"}]},
+                }
+            }
+        )
+
+
+def test_validation_pool_references_unknown_model():
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "llm": {
+                    "default_pool": "smart",
+                    "providers": {"p": {"api_base": "http://x", "api_key": "k"}},
+                    "models": {"m": {"provider": "p", "model": "x"}},
+                    "pools": {"smart": [{"model": "ghost"}]},
+                }
+            }
+        )
+
+
+def test_validation_model_references_unknown_provider():
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "llm": {
+                    "default_pool": "smart",
+                    "providers": {},
+                    "models": {"m": {"provider": "no_provider", "model": "x"}},
+                    "pools": {"smart": [{"model": "m"}]},
+                }
+            }
+        )
+
+
+def test_validation_heartbeat_pool_unknown():
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "llm": {
+                    "default_pool": "smart",
+                    "providers": {"p": {"api_base": "http://x", "api_key": "k"}},
+                    "models": {"m": {"provider": "p", "model": "x"}},
+                    "pools": {"smart": [{"model": "m"}]},
+                },
+                "agents": {"heartbeat": {"pool": "missing"}},
+            }
+        )
+
+
+def test_validation_spawn_profile_pool_unknown():
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "llm": {
+                    "default_pool": "smart",
+                    "providers": {"p": {"api_base": "http://x", "api_key": "k"}},
+                    "models": {"m": {"provider": "p", "model": "x"}},
+                    "pools": {"smart": [{"model": "m"}]},
+                },
+                "tools": {"spawn": {"profiles": {"researcher": {"pool": "missing"}}}},
+            }
+        )
+
+
+def test_validation_empty_pools_is_valid():
+    """Empty pools config (unconfigured) should not fail validation."""
+    s = Settings.model_validate({})
+    assert s.llm.pools == {}

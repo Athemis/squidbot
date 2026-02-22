@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DEFAULT_CONFIG_PATH = Path.home() / ".squidbot" / "config.json"
 
@@ -178,6 +178,51 @@ class Settings(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+
+    @model_validator(mode="after")
+    def _validate_llm_references(self) -> Settings:
+        """
+        Validate all pool/model/provider cross-references at config load time.
+
+        Raises:
+            ValueError: If any referenced pool, model, or provider is missing,
+                        or if any pool-aware component references an unknown pool.
+        """
+        llm = self.llm
+        # Only validate if any pools are configured
+        if not llm.pools:
+            return self
+
+        # default_pool must exist in pools
+        if llm.default_pool and llm.default_pool not in llm.pools:
+            raise ValueError(f"llm.default_pool '{llm.default_pool}' not found in llm.pools")
+
+        # Every pool entry's model must exist in llm.models
+        for pool_name, entries in llm.pools.items():
+            for entry in entries:
+                if entry.model not in llm.models:
+                    raise ValueError(f"Pool '{pool_name}' references unknown model '{entry.model}'")
+
+        # Every model's provider must exist in llm.providers
+        for model_name, model_cfg in llm.models.items():
+            if model_cfg.provider not in llm.providers:
+                raise ValueError(
+                    f"Model '{model_name}' references unknown provider '{model_cfg.provider}'"
+                )
+
+        # heartbeat.pool must exist (if set)
+        hb_pool = self.agents.heartbeat.pool
+        if hb_pool and hb_pool not in llm.pools:
+            raise ValueError(f"agents.heartbeat.pool '{hb_pool}' not found in llm.pools")
+
+        # spawn profile pools must exist (if set)
+        for prof_name, prof in self.tools.spawn.profiles.items():
+            if prof.pool and prof.pool not in llm.pools:
+                raise ValueError(
+                    f"tools.spawn.profiles.{prof_name}.pool '{prof.pool}' not found in llm.pools"
+                )
+
+        return self
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> Settings:
