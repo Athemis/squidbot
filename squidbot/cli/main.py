@@ -240,6 +240,20 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 
 BOOTSTRAP_FILES_MAIN: list[str] = ["SOUL.md", "USER.md", "AGENTS.md", "ENVIRONMENT.md"]
 BOOTSTRAP_FILES_SUBAGENT: list[str] = ["AGENTS.md", "ENVIRONMENT.md"]
+BOOTSTRAP_TEMPLATES: dict[str, str] = {
+    "SOUL.md": (
+        "# Soul\n\nDescribe the bot's personality, values, and communication style here.\n"
+    ),
+    "USER.md": (
+        "# User\n\nAdd information about yourself here: name, timezone, preferences, context.\n"
+    ),
+    "AGENTS.md": (
+        "# Agent Instructions\n\nAdd operative instructions here: tools, workflows, conventions.\n"
+    ),
+    "ENVIRONMENT.md": (
+        "# Environment\n\nAdd your local setup notes here: SSH hosts, device names, aliases.\n"
+    ),
+}
 
 
 def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
@@ -727,6 +741,15 @@ async def _run_onboard(config_path: Path) -> None:
 
     settings.save(config_path)
     print(f"\nConfiguration saved to {config_path}")
+
+    workspace = Path(settings.agents.workspace).expanduser()
+    workspace.mkdir(parents=True, exist_ok=True)
+    for filename, template in BOOTSTRAP_TEMPLATES.items():
+        file_path = workspace / filename
+        if not file_path.exists():
+            file_path.write_text(template, encoding="utf-8")
+            print(f"Created {file_path}")
+
     print("Run 'squidbot agent' to start chatting!")
 
 
