@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from squidbot.cli.main import BOOTSTRAP_FILES_MAIN, BOOTSTRAP_FILES_SUBAGENT, _load_bootstrap_prompt
+from squidbot.cli.main import (
+    BOOTSTRAP_FILES_MAIN,
+    BOOTSTRAP_FILES_ONBOARD,
+    BOOTSTRAP_FILES_SUBAGENT,
+    _load_bootstrap_prompt,
+)
 
 
 def test_load_bootstrap_prompt_all_present(tmp_path: Path) -> None:
@@ -44,7 +49,19 @@ def test_bootstrap_files_main_order() -> None:
         "USER.md",
         "AGENTS.md",
         "ENVIRONMENT.md",
+        "BOOTSTRAP.md",
     ]
+
+
+def test_bootstrap_files_onboard_excludes_bootstrap_md() -> None:
+    assert BOOTSTRAP_FILES_ONBOARD == [
+        "SOUL.md",
+        "IDENTITY.md",
+        "USER.md",
+        "AGENTS.md",
+        "ENVIRONMENT.md",
+    ]
+    assert "BOOTSTRAP.md" not in BOOTSTRAP_FILES_ONBOARD
 
 
 def test_bootstrap_files_subagent() -> None:

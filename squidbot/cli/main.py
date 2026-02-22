@@ -244,6 +244,15 @@ BOOTSTRAP_FILES_MAIN: list[str] = [
     "USER.md",
     "AGENTS.md",
     "ENVIRONMENT.md",
+    "BOOTSTRAP.md",  # loaded last if present; self-deletes after first-run interview
+]
+# Files copied by the onboard wizard — excludes BOOTSTRAP.md (managed separately)
+BOOTSTRAP_FILES_ONBOARD: list[str] = [
+    "SOUL.md",
+    "IDENTITY.md",
+    "USER.md",
+    "AGENTS.md",
+    "ENVIRONMENT.md",
 ]
 BOOTSTRAP_FILES_SUBAGENT: list[str] = ["AGENTS.md", "ENVIRONMENT.md"]
 _BUNDLED_WORKSPACE = Path(__file__).parent.parent / "workspace"
@@ -753,9 +762,9 @@ async def _run_onboard(config_path: Path) -> None:
     bootstrap_path = workspace / "BOOTSTRAP.md"
     already_set_up = (workspace / "IDENTITY.md").exists() and not bootstrap_path.exists()
 
-    # Copy bootstrap files from bundled workspace
-    missing_files = [f for f in BOOTSTRAP_FILES_MAIN if not (workspace / f).exists()]
-    existing_files = [f for f in BOOTSTRAP_FILES_MAIN if (workspace / f).exists()]
+    # Copy bootstrap files from bundled workspace (BOOTSTRAP.md managed separately below)
+    missing_files = [f for f in BOOTSTRAP_FILES_ONBOARD if not (workspace / f).exists()]
+    existing_files = [f for f in BOOTSTRAP_FILES_ONBOARD if (workspace / f).exists()]
 
     # Missing files are created silently
     for filename in missing_files:
