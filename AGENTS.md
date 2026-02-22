@@ -35,6 +35,8 @@ uv tool install --reinstall /home/alex/git/squidbot
 
 **Use Conventional Commits:** `type(scope): description` — types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `deps`. Examples: `feat: add RichCliChannel`, `fix: handle KeyboardInterrupt in _prompt`, `deps: add rich as explicit dependency`.
 
+**GPG signing is enabled globally (`commit.gpgsign=true`). Never use `--no-gpg-sign`. Commits without a signature are a bug.** Simply run `git commit -m "..."` — signing happens automatically.
+
 ---
 
 ## Architecture — Hexagonal (Ports & Adapters)
@@ -115,8 +117,14 @@ from collections.abc import AsyncIterator
 - Use `Protocol` for ports (structural subtyping); adapters do **not** inherit from ports.
 - `# type: ignore[assignment]` is acceptable in tests when assigning incomplete mocks.
 - Use `dict[str, Any]` and `list[Any]` for inherently untyped JSON-shaped data.
+- Use `TYPE_CHECKING` blocks for annotations that would create circular imports or
+  runtime cost — safe because `from __future__ import annotations` makes all annotations
+  lazy strings. Example: `if TYPE_CHECKING: from squidbot.core.ports import ChannelPort`.
 - Known pyright false positives exist for async generator protocols — do not attempt
   to fix LSP errors that do not appear in `mypy` or `ruff`.
+- `ChannelPort.receive()` is `def` (not `async def`) returning `AsyncIterator` — the
+  concrete implementations are async generator functions, which return `AsyncIterator`
+  directly when called (no `await` needed).
 
 ---
 
@@ -184,44 +192,70 @@ async def chat(self, messages: list[Message], tools: list[ToolDefinition]) -> ..
   Patch at the usage namespace: `patch("squidbot.adapters.channels.cli.Console")`.
 - **TDD:** write the failing test first, verify it fails, then implement.
 - **Test doubles** live in the test file that uses them — not in shared fixtures files.
+- Tool tests call `await tool.execute(key=value)` — keyword args go straight into `**kwargs`.
 
 ---
 
 ## Logging (loguru)
 
-This project uses **loguru** for all log output. Key rules:
-
 - **Import:** `from loguru import logger` — no per-module `getLogger()` needed.
-- **String formatting:** Use brace-style `{}` or f-strings. loguru calls are equivalent to
-  `str.format()`, so `%s`/`%d` placeholders are **not** interpolated and will appear literally.
-
-  ```python
-  # Correct — brace style (lazy, idiomatic loguru)
-  logger.info("heartbeat: started (every {}m)", interval)
-
-  # Correct — f-string (eager, also fine)
-  logger.info(f"heartbeat: started (every {interval}m)")
-
-  # WRONG — percent style, will print literally
-  logger.info("heartbeat: started (every %dm)", interval)
-  ```
-
-- **Lazy evaluation:** Brace-style args are only formatted if the level is active, making it
-  slightly more efficient than f-strings in hot paths.
-- **Test safety:** loguru has no sink by default in test environments — all `logger.*` calls
-  are no-ops unless a sink is added explicitly.
-- **Setup:** `_setup_logging(level)` in `cli/main.py` is called once per CLI command.
-  It removes loguru's default handler and adds a custom stderr sink with timestamp + level.
+- **String formatting:** Use brace-style `{}` or f-strings — **not** `%s`/`%d` (those
+  are not interpolated by loguru and will appear literally in output).
+  - `logger.info("started (every {}m)", interval)` — correct, lazy
+  - `logger.info(f"started (every {interval}m)")` — correct, eager
+  - `logger.info("started (every %dm)", interval)` — **wrong**, prints literally
+- **Test safety:** loguru has no sink by default in tests — all `logger.*` calls are no-ops.
+- **Setup:** `_setup_logging(level)` in `cli/main.py` configures a stderr sink once at startup.
 
 ---
 
 ## Channel Streaming
 
 `ChannelPort.streaming` controls how `AgentLoop` delivers responses:
+- `streaming = True` (`CliChannel`): `send()` called per text chunk as it arrives.
+- `streaming = False` (`RichCliChannel`, Matrix, Email): chunks accumulated, `send()` called
+  once with complete text. Required for Markdown rendering.
 
-- `streaming = True` (e.g. `CliChannel`): `send()` called per text chunk as it arrives.
-- `streaming = False` (e.g. `RichCliChannel`, Matrix, Email): chunks accumulated,
-  `send()` called once with the complete text. Required for Markdown rendering.
+---
+
+## Tool Implementation Pattern
+
+All tool `execute()` methods use `**kwargs: Any` to conform to `ToolPort`. Extract and
+validate parameters internally:
+
+```python
+async def execute(self, **kwargs: Any) -> ToolResult:
+    # Required string parameter
+    val_raw = kwargs.get("param_name")
+    if not isinstance(val_raw, str) or not val_raw:
+        return ToolResult(tool_call_id="", content="Error: param_name is required", is_error=True)
+    val: str = val_raw
+
+    # Optional string parameter with default
+    opt: str = kwargs.get("opt_param") if isinstance(kwargs.get("opt_param"), str) else "."
+
+    # Optional int parameter with safe coercion
+    try:
+        count: int = int(kwargs.get("count", 5))
+    except (TypeError, ValueError):
+        count = 5
+```
+
+Always return `ToolResult(tool_call_id="", ...)` — `tool_call_id` is overwritten by
+`ToolRegistry.dispatch()` with the real ID from the LLM call.
+
+---
+
+## MCP Servers
+
+External MCP tools are wired in `_make_agent_loop()` via `McpServerConnection`. Each
+server's tools become `McpToolAdapter` instances registered in `ToolRegistry`. Config
+lives under `tools.mcp_servers` in `squidbot.yaml`. Two transports:
+- `stdio`: spawns a subprocess (`command` + `args`)
+- `http`: SSE endpoint (`url`)
+
+`McpConnectionProtocol` is a small structural Protocol in `adapters/tools/mcp.py` that lets
+`main.py` type the connection list without importing the concrete class.
 
 ---
 
