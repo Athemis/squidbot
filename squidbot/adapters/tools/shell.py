@@ -52,7 +52,12 @@ class ShellTool:
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Run the command and return combined stdout/stderr."""
         command: str = str(kwargs.get("command", ""))
-        timeout: int = int(kwargs.get("timeout", 30))
+        if not command:
+            return ToolResult(tool_call_id="", content="Error: command is required", is_error=True)
+        try:
+            timeout: int = int(kwargs.get("timeout", 30))
+        except TypeError, ValueError:
+            timeout = 30
         cwd = str(self._workspace) if self._restrict and self._workspace else None
         try:
             proc = await asyncio.create_subprocess_shell(

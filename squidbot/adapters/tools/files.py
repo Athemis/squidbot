@@ -48,6 +48,8 @@ class ReadFileTool:
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         path: str = str(kwargs.get("path", ""))
+        if not path:
+            return ToolResult(tool_call_id="", content="Error: path is required", is_error=True)
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(
@@ -89,6 +91,10 @@ class WriteFileTool:
     async def execute(self, **kwargs: Any) -> ToolResult:
         path: str = str(kwargs.get("path", ""))
         content: str = str(kwargs.get("content", ""))
+        if not path:
+            return ToolResult(tool_call_id="", content="Error: path is required", is_error=True)
+        if not content:
+            return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(

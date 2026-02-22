@@ -88,7 +88,12 @@ class WebSearchTool:
             kwargs: Must contain "query" (str) and optionally "max_results" (int, default 5).
         """
         query: str = str(kwargs.get("query", ""))
-        max_results: int = int(kwargs.get("max_results", 5))
+        if not query:
+            return ToolResult(tool_call_id="", content="Error: query is required", is_error=True)
+        try:
+            max_results: int = int(kwargs.get("max_results", 5))
+        except TypeError, ValueError:
+            max_results = 5
         try:
             results = await self._backend(query, max_results)
         except Exception as e:
