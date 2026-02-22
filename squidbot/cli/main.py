@@ -181,6 +181,9 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
 def _setup_logging(level: str) -> None:
     """
     Configure loguru for gateway/agent output.
@@ -191,16 +194,25 @@ def _setup_logging(level: str) -> None:
 
     Args:
         level: Log level string (case-insensitive), e.g. "INFO", "DEBUG".
+
+    Raises:
+        SystemExit: If the level is not a valid log level name.
     """
     import logging
     import sys
 
     from loguru import logger
 
+    normalised = level.upper()
+    if normalised not in _VALID_LOG_LEVELS:
+        valid = ", ".join(sorted(_VALID_LOG_LEVELS))
+        print(f"error: invalid --log-level '{level}'. Valid values: {valid}", file=sys.stderr)
+        raise SystemExit(1)
+
     logger.remove()  # remove loguru's built-in default handler
     logger.add(
         sys.stderr,
-        level=level.upper(),
+        level=normalised,
         format=("<green>{time:YYYY-MM-DD HH:mm:ss}</green> <level>{level:<8}</level> {message}"),
         colorize=True,
     )
