@@ -546,6 +546,8 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     try:
         # If BOOTSTRAP.md exists, trigger the bootstrap interview before the user speaks
         if (workspace / "BOOTSTRAP.md").exists():
+            console.print("[dim]first run — starting bootstrap interview…[/dim]")
+            console.print(Rule(style="dim"))
             await agent_loop.run(
                 CliChannel.SESSION,
                 "BOOTSTRAP.md exists. Follow it now.",
