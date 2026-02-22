@@ -161,7 +161,7 @@ class HeartbeatService:
             try:
                 local_now = now.astimezone(ZoneInfo(tz_name))
             except ZoneInfoNotFoundError, KeyError:
-                logger.warning(f"heartbeat: unknown timezone {tz_name!r}, falling back to local")
+                logger.warning("heartbeat: unknown timezone {!r}, falling back to local", tz_name)
                 local_now = now.astimezone()
 
         start_h, start_m = (int(x) for x in self._config.active_hours_start.split(":"))
@@ -243,7 +243,7 @@ class HeartbeatService:
                 sink,  # type: ignore[arg-type]
             )
         except Exception as e:
-            logger.error(f"heartbeat: agent error: {e}")
+            logger.error("heartbeat: agent error: {}", e)
             return
 
         response = sink.collected
@@ -261,7 +261,7 @@ class HeartbeatService:
         try:
             await channel.send(OutboundMessage(session=session, text=response))
         except Exception as e:
-            logger.error(f"heartbeat: delivery error: {e}")
+            logger.error("heartbeat: delivery error: {}", e)
 
     async def run(self) -> None:
         """
@@ -275,11 +275,11 @@ class HeartbeatService:
             return
 
         interval_s = self._config.interval_minutes * 60
-        logger.info(f"heartbeat: started (every {self._config.interval_minutes}m)")
+        logger.info("heartbeat: started (every {}m)", self._config.interval_minutes)
 
         while True:
             await asyncio.sleep(interval_s)
             try:
                 await self._tick()
             except Exception as e:
-                logger.error(f"heartbeat: unexpected error in tick: {e}")
+                logger.error("heartbeat: unexpected error in tick: {}", e)
