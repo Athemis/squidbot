@@ -112,6 +112,7 @@ class JobStore:
 _SPAWN_TOOL_NAMES = {"spawn", "spawn_await"}
 
 
+# NOTE: Intentionally duplicated from cli/main.py — adapters cannot import from cli/
 def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
     """
     Load and concatenate bootstrap files from the workspace.
@@ -184,7 +185,8 @@ class SubAgentFactory:
         Build a fresh AgentLoop for a sub-agent.
 
         Args:
-            system_prompt_override: If set, replaces the parent system prompt.
+            system_prompt_override: If set, appended as the final stage of the assembled
+                system prompt.
             tools_filter: If set, only these tool names are available.
                           spawn/spawn_await are always excluded regardless.
             profile_name: Named profile to use for pool and tool configuration.
@@ -212,6 +214,7 @@ class SubAgentFactory:
             if file_path.exists():
                 prompt_parts.append(file_path.read_text(encoding="utf-8"))
 
+        # system_prompt_override (from LLM tool call) takes precedence over profile.system_prompt
         inline = system_prompt_override or (profile.system_prompt if profile else "")
         if inline:
             prompt_parts.append(inline)
