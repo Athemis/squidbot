@@ -302,9 +302,14 @@ def _setup_logging(level: str) -> None:
 
 async def _make_agent_loop(
     settings: Settings,
+    storage_dir: Path | None = None,
 ) -> tuple[AgentLoop, list[McpConnectionProtocol]]:
     """
     Construct the agent loop from configuration.
+
+    Args:
+        settings: Loaded application settings.
+        storage_dir: Override the storage directory. Defaults to ~/.squidbot.
 
     Returns:
         Tuple of (agent_loop, mcp_connections). Callers must close mcp_connections
@@ -328,8 +333,8 @@ async def _make_agent_loop(
     workspace.mkdir(parents=True, exist_ok=True)
 
     # Build storage directory
-    storage_dir = Path.home() / ".squidbot"
-    storage = JsonlMemory(base_dir=storage_dir)
+    _storage_dir = storage_dir or Path.home() / ".squidbot"
+    storage = JsonlMemory(base_dir=_storage_dir)
 
     # Skills loader (extra dirs → workspace/skills → bundled)
     bundled_skills = Path(__file__).parent.parent / "skills"
@@ -379,7 +384,42 @@ async def _make_agent_loop(
     else:
         system_prompt = "You are a helpful personal AI assistant."
 
+    # Spawn tool profile injection into system prompt
+    if settings.tools.spawn.enabled and settings.tools.spawn.profiles:
+        profile_lines = []
+        for pname, prof in settings.tools.spawn.profiles.items():
+            tools_str = ", ".join(prof.tools) if prof.tools else "all"
+            profile_lines.append(
+                f'  <profile name="{pname}">{prof.system_prompt} Tools: {tools_str}.</profile>'
+            )
+        profiles_xml = (
+            "<available_spawn_profiles>\n"
+            + "\n".join(profile_lines)
+            + "\n</available_spawn_profiles>"
+        )
+        system_prompt = system_prompt + "\n\n" + profiles_xml
+
     agent_loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt=system_prompt)
+
+    if settings.tools.spawn.enabled:
+        from squidbot.adapters.tools.spawn import (  # noqa: PLC0415
+            JobStore,
+            SpawnAwaitTool,
+            SpawnTool,
+            SubAgentFactory,
+        )
+
+        spawn_factory = SubAgentFactory(
+            llm=llm,
+            memory=memory,
+            registry=registry,
+            system_prompt=system_prompt,
+            profiles=settings.tools.spawn.profiles,
+        )
+        job_store = JobStore()
+        registry.register(SpawnTool(factory=spawn_factory, job_store=job_store))
+        registry.register(SpawnAwaitTool(job_store=job_store))
+
     return agent_loop, mcp_connections
 
 

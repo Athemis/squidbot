@@ -199,10 +199,10 @@ class SpawnTool:
         """
         self._factory = factory
         self._job_store = job_store
+        self.parameters: dict[str, Any] = self._build_parameters()
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        """Build tool parameter schema dynamically (profile enum from configured profiles)."""
+    def _build_parameters(self) -> dict[str, Any]:
+        """Build tool parameter schema (profile enum from configured profiles)."""
         profile_prop: dict[str, Any] = {
             "type": "string",
             "description": "Named sub-agent profile. Omit to inherit parent context.",
