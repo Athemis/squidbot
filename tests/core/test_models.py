@@ -1,5 +1,6 @@
 from datetime import datetime
-from squidbot.core.models import Message, Session, CronJob, ToolCall, ToolDefinition
+
+from squidbot.core.models import CronJob, Message, Session, ToolCall, ToolDefinition
 
 
 def test_message_basic():

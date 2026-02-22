@@ -1,7 +1,6 @@
 import json
-import pytest
-from pathlib import Path
-from squidbot.config.schema import Settings, LLMConfig, ChannelConfig
+
+from squidbot.config.schema import LLMConfig, Settings
 
 
 def test_default_llm_config():

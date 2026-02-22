@@ -7,13 +7,13 @@ in-memory test doubles. No network calls, no filesystem I/O.
 
 from __future__ import annotations
 
-import pytest
 from collections.abc import AsyncIterator
+
+import pytest
 
 from squidbot.core.agent import AgentLoop
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
-    InboundMessage,
     Message,
     OutboundMessage,
     Session,

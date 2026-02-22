@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from squidbot.core.heartbeat import LastChannelTracker, _is_heartbeat_empty
+import asyncio
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from squidbot.config.schema import HeartbeatConfig
+from squidbot.core.heartbeat import HeartbeatService, LastChannelTracker, _is_heartbeat_empty
 from squidbot.core.models import OutboundMessage, Session
 
 
@@ -97,12 +104,6 @@ def test_tracker_last_update_wins():
     assert tracker.session is s2
 
 
-from squidbot.config.schema import HeartbeatConfig
-from datetime import datetime, timezone as tz
-from pathlib import Path
-from squidbot.core.heartbeat import HeartbeatService
-
-
 def _make_service(cfg: HeartbeatConfig) -> HeartbeatService:
     """Helper: build a HeartbeatService with stub agent_loop and tracker."""
     return HeartbeatService(
@@ -118,7 +119,7 @@ def test_active_hours_always_on():
     svc = _make_service(
         HeartbeatConfig(active_hours_start="00:00", active_hours_end="24:00", timezone="UTC")
     )
-    dt = datetime(2026, 2, 22, 3, 0, tzinfo=tz.utc)
+    dt = datetime(2026, 2, 22, 3, 0, tzinfo=UTC)
     assert svc._is_in_active_hours(now=dt) is True
 
 
@@ -126,7 +127,7 @@ def test_active_hours_inside_window():
     svc = _make_service(
         HeartbeatConfig(active_hours_start="08:00", active_hours_end="22:00", timezone="UTC")
     )
-    dt = datetime(2026, 2, 22, 12, 0, tzinfo=tz.utc)
+    dt = datetime(2026, 2, 22, 12, 0, tzinfo=UTC)
     assert svc._is_in_active_hours(now=dt) is True
 
 
@@ -134,7 +135,7 @@ def test_active_hours_before_window():
     svc = _make_service(
         HeartbeatConfig(active_hours_start="08:00", active_hours_end="22:00", timezone="UTC")
     )
-    dt = datetime(2026, 2, 22, 7, 59, tzinfo=tz.utc)
+    dt = datetime(2026, 2, 22, 7, 59, tzinfo=UTC)
     assert svc._is_in_active_hours(now=dt) is False
 
 
@@ -142,7 +143,7 @@ def test_active_hours_after_window():
     svc = _make_service(
         HeartbeatConfig(active_hours_start="08:00", active_hours_end="22:00", timezone="UTC")
     )
-    dt = datetime(2026, 2, 22, 22, 0, tzinfo=tz.utc)
+    dt = datetime(2026, 2, 22, 22, 0, tzinfo=UTC)
     assert svc._is_in_active_hours(now=dt) is False
 
 
@@ -151,7 +152,7 @@ def test_active_hours_zero_width_always_skips():
     svc = _make_service(
         HeartbeatConfig(active_hours_start="08:00", active_hours_end="08:00", timezone="UTC")
     )
-    dt = datetime(2026, 2, 22, 8, 0, tzinfo=tz.utc)
+    dt = datetime(2026, 2, 22, 8, 0, tzinfo=UTC)
     assert svc._is_in_active_hours(now=dt) is False
 
 
@@ -174,8 +175,6 @@ def test_heartbeat_config_in_agent_config():
 # ---------------------------------------------------------------------------
 # Task 5: HeartbeatService._tick()
 # ---------------------------------------------------------------------------
-
-import asyncio
 
 
 class _FakeAgentLoop:
@@ -210,7 +209,7 @@ async def test_tick_skips_outside_active_hours(tmp_path):
     tracker.update(ch, session)  # type: ignore[arg-type]
     cfg = HeartbeatConfig(active_hours_start="08:00", active_hours_end="09:00", timezone="UTC")
     svc = HeartbeatService(agent_loop=agent, tracker=tracker, workspace=tmp_path, config=cfg)  # type: ignore[arg-type]
-    dt = datetime(2026, 2, 22, 3, 0, tzinfo=tz.utc)
+    dt = datetime(2026, 2, 22, 3, 0, tzinfo=UTC)
     await svc._tick(now=dt)
     assert agent.calls == []
 
@@ -298,8 +297,6 @@ async def test_tick_heartbeat_ok_in_middle_is_delivered(tmp_path):
 # ---------------------------------------------------------------------------
 # Task 6: HeartbeatService.run()
 # ---------------------------------------------------------------------------
-
-import pytest
 
 
 async def test_run_loop_calls_tick_and_stops(tmp_path):

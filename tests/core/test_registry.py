@@ -1,4 +1,3 @@
-import pytest
 from squidbot.core.models import ToolResult
 from squidbot.core.registry import ToolRegistry
 

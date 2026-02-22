@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from pathlib import Path
-from squidbot.core.skills import SkillMetadata, build_skills_xml
+
 from squidbot.adapters.skills.fs import FsSkillsLoader
+from squidbot.core.skills import build_skills_xml
 
 
 @pytest.fixture
@@ -76,7 +76,8 @@ def test_unavailable_skill_shows_requires(tmp_path):
     skill = tmp_path / "gh-tool"
     skill.mkdir()
     (skill / "SKILL.md").write_text(
-        "---\nname: gh-tool\ndescription: 'Needs gh'\nrequires:\n  bins: [__nonexistent_bin__]\n---\n"
+        "---\nname: gh-tool\ndescription: 'Needs gh'\nrequires:\n"
+        "  bins: [__nonexistent_bin__]\n---\n"
     )
     loader = FsSkillsLoader(search_dirs=[tmp_path])
     skills = loader.list_skills()

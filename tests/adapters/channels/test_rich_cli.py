@@ -19,7 +19,7 @@ class TestRichCliChannelAttributes:
 
     def test_session_is_cli_local(self):
         ch = RichCliChannel()
-        assert ch.SESSION == Session(channel="cli", sender_id="local")
+        assert Session(channel="cli", sender_id="local") == ch.SESSION
 
 
 class TestRichCliChannelSend:

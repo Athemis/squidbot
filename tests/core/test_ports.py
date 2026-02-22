@@ -5,16 +5,16 @@ This ensures our Protocol definitions are complete and usable.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
+
 from squidbot.core.models import (
-    Message,
     InboundMessage,
+    Message,
     OutboundMessage,
     ToolDefinition,
     ToolResult,
 )
-from squidbot.core.ports import LLMPort, ChannelPort, ToolPort, MemoryPort, SkillsPort
+from squidbot.core.ports import ChannelPort, LLMPort, MemoryPort, SkillsPort, ToolPort
 
 
 class MockLLM:

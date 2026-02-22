@@ -1,7 +1,8 @@
+
 import pytest
-from pathlib import Path
+
+from squidbot.adapters.tools.files import ListFilesTool, ReadFileTool, WriteFileTool
 from squidbot.adapters.tools.shell import ShellTool
-from squidbot.adapters.tools.files import ReadFileTool, WriteFileTool, ListFilesTool
 
 
 @pytest.fixture

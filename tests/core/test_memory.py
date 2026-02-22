@@ -6,8 +6,9 @@ without touching the filesystem.
 """
 
 import pytest
-from squidbot.core.models import Message
+
 from squidbot.core.memory import MemoryManager
+from squidbot.core.models import Message
 
 
 class InMemoryStorage:
