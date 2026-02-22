@@ -17,7 +17,8 @@ from typing import Any
 
 from loguru import logger
 from mcp import ClientSession
-from mcp.client.stdio import stdio_client
+from mcp.client.sse import sse_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from squidbot.config.schema import McpServerConfig
 from squidbot.core.models import ToolResult
@@ -107,14 +108,17 @@ class McpServerConnection:
 
     async def _connect(self) -> list[McpToolAdapter]:
         """Internal connect — raises on failure."""
+        if self._config.transport not in ("stdio", "http"):
+            raise ValueError(
+                f"Unknown transport: {self._config.transport!r}. Use 'stdio' or 'http'."
+            )
+
         from contextlib import AsyncExitStack  # noqa: PLC0415
 
         stack = AsyncExitStack()
         self._exit_stack = stack
 
         if self._config.transport == "stdio":
-            from mcp.client.stdio import StdioServerParameters  # noqa: PLC0415
-
             params = StdioServerParameters(
                 command=self._config.command,
                 args=self._config.args,
@@ -123,15 +127,8 @@ class McpServerConnection:
             )
             read, write = await stack.enter_async_context(stdio_client(params))
 
-        elif self._config.transport == "http":
-            from mcp.client.sse import sse_client  # noqa: PLC0415
-
+        else:  # http
             read, write = await stack.enter_async_context(sse_client(self._config.url))
-
-        else:
-            raise ValueError(
-                f"Unknown transport: {self._config.transport!r}. Use 'stdio' or 'http'."
-            )
 
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()

@@ -150,3 +150,48 @@ class TestMcpServerConnectionConfig:
             tools = await conn.connect()
 
         assert tools == []
+
+    # TODO: no test for HTTP transport path (requires patching sse_client)
+
+
+class TestMcpServerConnectionClose:
+    async def test_close_connected_instance_clears_state(self):
+        """close() calls aclose() and resets _exit_stack and _session to None."""
+        cfg = McpServerConfig(transport="stdio", command="uvx")
+        conn = McpServerConnection(name="test", config=cfg)
+
+        mock_stack = AsyncMock()
+        mock_stack.aclose = AsyncMock()
+        conn._exit_stack = mock_stack
+        conn._session = MagicMock()  # type: ignore[assignment]
+
+        await conn.close()
+
+        mock_stack.aclose.assert_called_once()
+        assert conn._exit_stack is None
+        assert conn._session is None
+
+    async def test_close_suppresses_aclose_error_and_clears_state(self):
+        """close() logs a warning when aclose() raises but still clears state."""
+        cfg = McpServerConfig(transport="stdio", command="uvx")
+        conn = McpServerConnection(name="test", config=cfg)
+
+        mock_stack = AsyncMock()
+        mock_stack.aclose = AsyncMock(side_effect=Exception("cleanup failed"))
+        conn._exit_stack = mock_stack
+        conn._session = MagicMock()  # type: ignore[assignment]
+
+        await conn.close()  # must not raise
+
+        assert conn._exit_stack is None
+        assert conn._session is None
+
+    async def test_close_on_unconnected_instance_is_safe(self):
+        """close() on a fresh (never connected) instance does nothing."""
+        cfg = McpServerConfig(transport="stdio", command="uvx")
+        conn = McpServerConnection(name="test", config=cfg)
+
+        await conn.close()  # must not raise
+
+        assert conn._exit_stack is None
+        assert conn._session is None
