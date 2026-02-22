@@ -210,21 +210,44 @@ parameter. When `None`, heartbeat uses the main agent's LLM (current behaviour).
 this run instead of `self._llm`. This is the OpenClaw pattern: no second AgentLoop,
 just a per-call override.
 
-### `squidbot/adapters/tools/spawn.py` — `llm_override` in `SubAgentFactory`
+### `squidbot/adapters/tools/spawn.py` — pool-aware `SubAgentFactory`
 
-`SubAgentFactory.build(profile_name)` resolves the pool from `profile.pool or
-settings.llm.default_pool` via a `_resolve_llm` callable injected at construction:
+`SubAgentFactory` currently takes a fixed `llm: LLMPort`. It gains two new
+constructor parameters: `default_pool: str` and `resolve_llm: Callable[[str], LLMPort]`.
+The fixed `llm` parameter is removed.
+
+`build()` currently takes `system_prompt_override` and `tools_filter`. Its signature
+is unchanged, but internally it now resolves the LLM from the profile's pool:
 
 ```python
 class SubAgentFactory:
-    def __init__(self, ..., resolve_llm: Callable[[str], LLMPort]) -> None: ...
+    def __init__(
+        self,
+        memory: MemoryManager,
+        registry: ToolRegistry,
+        system_prompt: str,
+        profiles: dict[str, SpawnProfile],
+        default_pool: str,
+        resolve_llm: Callable[[str], LLMPort],
+    ) -> None: ...
 
-    def build(self, profile_name: str | None) -> AgentLoop:
+    def build(
+        self,
+        system_prompt_override: str | None,
+        tools_filter: list[str] | None,
+        profile_name: str | None = None,
+    ) -> AgentLoop:
         profile = self._profiles.get(profile_name) if profile_name else None
-        pool = profile.pool if (profile and profile.pool) else self._default_pool
+        pool = (profile.pool if profile and profile.pool else None) or self._default_pool
         llm = self._resolve_llm(pool)
-        ...
+        # ... rest unchanged: child registry, system prompt ...
+        return AgentLoop(llm=llm, ...)
 ```
+
+`SpawnTool.execute()` passes `profile_name` to `factory.build()` so the correct
+pool is resolved per call. Previously `build()` did not receive the profile name —
+profile resolution happened in `execute()` and only `system_prompt_override` and
+`tools_filter` were forwarded.
 
 `_make_agent_loop()` passes `functools.partial(_resolve_llm, settings)` as
 `resolve_llm`. This avoids circular imports and keeps the factory testable.
