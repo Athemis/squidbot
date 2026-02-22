@@ -479,3 +479,106 @@ class TestEmailChannelTlsWarnings:
         with patch("squidbot.adapters.channels.email.logger") as mock_logger:
             EmailChannel(config=config, tmp_dir=tmp_path)
         mock_logger.warning.assert_not_called()
+
+
+class TestEmailChannelIdleFallback:
+    async def test_idle_unsupported_sets_flag(self, tmp_path: Path) -> None:
+        """_idle_once() sets _idle_supported=False when server reports IDLE not supported."""
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+
+        fake_imap = MagicMock()
+        fake_imap.idle_start = AsyncMock(side_effect=Exception("IDLE not supported by server"))
+        ch._imap = fake_imap  # type: ignore[assignment]
+
+        assert ch._idle_supported is True
+        await ch._idle_once()
+        assert ch._idle_supported is False
+
+    async def test_idle_other_error_propagates(self, tmp_path: Path) -> None:
+        """_idle_once() re-raises exceptions not related to IDLE support."""
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+
+        fake_imap = MagicMock()
+        fake_imap.idle_start = AsyncMock(side_effect=OSError("connection reset"))
+        ch._imap = fake_imap  # type: ignore[assignment]
+
+        with pytest.raises(OSError, match="connection reset"):
+            await ch._idle_once()
+        assert ch._idle_supported is True  # flag unchanged
+
+
+class TestEmailChannelReconnectBackoff:
+    async def test_backoff_doubles_on_each_failure(self, tmp_path: Path) -> None:
+        """_imap_loop() sleeps 1s, 2s, 4s on consecutive connection failures."""
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+
+        call_count = 0
+        sleep_calls: list[float] = []
+
+        async def fake_connect() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:
+                raise OSError("connection refused")
+            # 4th call: cancel to stop the loop
+            raise asyncio.CancelledError
+
+        async def fake_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+
+        with (
+            patch.object(ch, "_connect_imap", side_effect=fake_connect),
+            patch("squidbot.adapters.channels.email.asyncio.sleep", side_effect=fake_sleep),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await ch._imap_loop()
+
+        assert sleep_calls == [1.0, 2.0, 4.0]
+
+    async def test_backoff_resets_after_successful_connect(self, tmp_path: Path) -> None:
+        """_imap_loop() resets backoff to 1s after a successful connection."""
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+
+        connect_count = 0
+        sleep_calls: list[float] = []
+
+        async def fake_connect() -> None:
+            nonlocal connect_count
+            connect_count += 1
+            # 1st connect succeeds (backoff should reset)
+            # but _fetch_unseen will fail, causing reconnect with fresh backoff
+
+        fetch_count = 0
+
+        async def fake_fetch() -> None:
+            nonlocal fetch_count
+            fetch_count += 1
+            if fetch_count == 1:
+                raise OSError("timeout")  # triggers backoff sleep of 1.0
+            raise asyncio.CancelledError  # stop the loop on 2nd attempt
+
+        async def fake_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+
+        with (
+            patch.object(ch, "_connect_imap", side_effect=fake_connect),
+            patch.object(ch, "_fetch_unseen", side_effect=fake_fetch),
+            patch("squidbot.adapters.channels.email.asyncio.sleep", side_effect=fake_sleep),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await ch._imap_loop()
+
+        # After first successful connect + fetch failure, backoff starts at 1.0 again
+        assert sleep_calls == [1.0]
