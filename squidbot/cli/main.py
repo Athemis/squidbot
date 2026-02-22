@@ -737,15 +737,34 @@ async def _run_onboard(config_path: Path) -> None:
 
     workspace = Path(settings.agents.workspace).expanduser()
     workspace.mkdir(parents=True, exist_ok=True)
-    # Copy bootstrap files + one-time ritual files from bundled workspace
-    _ONBOARD_FILES = [*BOOTSTRAP_FILES_MAIN, "BOOTSTRAP.md"]
-    for filename in _ONBOARD_FILES:
+
+    # Copy bootstrap files from bundled workspace (skip if already present)
+    for filename in BOOTSTRAP_FILES_MAIN:
         file_path = workspace / filename
         if not file_path.exists():
             template_path = _BUNDLED_WORKSPACE / filename
             if template_path.exists():
                 file_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
                 print(f"Created {file_path}")
+
+    # Copy BOOTSTRAP.md — first run only, or offer to re-run if already set up
+    bootstrap_path = workspace / "BOOTSTRAP.md"
+    already_set_up = (workspace / "IDENTITY.md").exists() and not bootstrap_path.exists()
+    if bootstrap_path.exists():
+        pass  # bootstrap already in progress — don't overwrite
+    elif already_set_up:
+        answer = (
+            input("\nWorkspace already set up. Re-run bootstrap interview? [y/N] ").strip().lower()
+        )
+        if answer == "y":
+            template_path = _BUNDLED_WORKSPACE / "BOOTSTRAP.md"
+            bootstrap_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"Created {bootstrap_path}")
+            print("Start 'squidbot agent' to begin the bootstrap interview.")
+    else:
+        template_path = _BUNDLED_WORKSPACE / "BOOTSTRAP.md"
+        bootstrap_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"Created {bootstrap_path}")
 
     print("Run 'squidbot agent' to start chatting!")
 
