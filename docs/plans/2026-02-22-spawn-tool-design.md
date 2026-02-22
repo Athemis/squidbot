@@ -55,7 +55,11 @@ Starts a sub-agent as a background asyncio Task. Returns immediately with a `job
 | `system_prompt` | string | no | Overrides profile or inherited system prompt |
 | `tools` | string | no | Comma-separated tool whitelist; overrides profile tools |
 
-**Precedence for system_prompt:** explicit `system_prompt` param > profile > parent inherited.  
+**System prompt assembly (in order, all combined):**
+1. `bootstrap_files` from profile (or default sub-agent allowlist: `AGENTS.md` + `ENVIRONMENT.md`)
+2. `system_prompt_file` from profile (loaded from workspace, appended)
+3. `system_prompt` param (explicit override, appended last)
+
 **Precedence for tools:** explicit `tools` param > profile tools > all tools (parent registry).
 
 **Returns:** `job_id` (short UUID, e.g. `"a3f9c1"`)
@@ -95,13 +99,15 @@ Individual job failures are signalled via `[job_id: ERROR]` markers in the conte
 
 ### `SpawnProfile`
 
-Simple dataclass (also used in config schema):
+Pydantic model (defined in `config/schema.py`):
 
 ```python
-@dataclass
-class SpawnProfile:
-    system_prompt: str = ""
-    tools: list[str] = field(default_factory=list)  # empty = all tools
+class SpawnProfile(BaseModel):
+    system_prompt: str = ""           # inline prompt, appended last
+    system_prompt_file: str = ""      # filename relative to workspace, appended second
+    bootstrap_files: list[str] = []   # bootstrap file list; empty = default sub-agent allowlist
+    tools: list[str] = []             # empty = all tools
+    pool: str = ""                    # empty = llm.default_pool
 ```
 
 ### `CollectingChannel`
@@ -119,10 +125,15 @@ Builds fresh `AgentLoop` instances for sub-agents:
 
 ```python
 class SubAgentFactory:
-    def __init__(self, llm, memory, registry, system_prompt, profiles)
-    def build(self, system_prompt_override, tools_filter) -> AgentLoop
+    def __init__(
+        self, memory, registry, workspace, default_bootstrap_files,
+        profiles, default_pool, resolve_llm
+    )
+    def build(self, system_prompt_override, tools_filter, profile_name) -> AgentLoop
 ```
 
+- `workspace` + `default_bootstrap_files` replace the old `system_prompt` parameter
+- `build()` assembles the child prompt from bootstrap files + profile overrides (see above)
 - `build()` creates a filtered `ToolRegistry` if `tools_filter` is given (keeps only named tools)
 - Always excludes `spawn` and `spawn_await` from sub-agent registries to prevent runaway nesting
 - Returns a fresh `AgentLoop` with isolated session context

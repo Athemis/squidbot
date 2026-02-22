@@ -529,7 +529,6 @@ Per-field environment variable overrides supported via Pydantic Settings.
   },
   "agents": {
     "workspace": "~/.squidbot/workspace",
-    "system_prompt_file": "AGENTS.md",
     "restrict_to_workspace": true
   },
   "skills": {
@@ -646,7 +645,11 @@ Result returned as tool_result to parent
     └── jobs.json            # Scheduled task definitions
 
 ~/.squidbot/workspace/
-├── AGENTS.md                # User's system prompt / agent instructions
+├── SOUL.md                  # Bot personality, values, tone, identity (optional)
+├── USER.md                  # Information about the user (optional)
+├── AGENTS.md                # Operative instructions: tools, workflows, conventions
+├── ENVIRONMENT.md           # Local setup notes: SSH hosts, devices, aliases (optional)
+├── HEARTBEAT.md             # Standing checklist for heartbeat (optional)
 └── skills/                  # User-defined skills (override bundled by name)
     └── <name>/
         └── SKILL.md
@@ -654,6 +657,47 @@ Result returned as tool_result to parent
 
 Session IDs are derived from channel type and sender: `matrix:@user:matrix.org`,
 `email:user@example.com`, `cli:local`.
+
+## Bootstrap Files
+
+The agent's system prompt is assembled automatically from an ordered set of workspace files.
+Missing files are silently skipped. The `system_prompt_file` config field is removed — the
+file set is fixed and convention-based, inspired by OpenClaw.
+
+### Main agent (loading order)
+
+| File | Purpose |
+|---|---|
+| `SOUL.md` | Bot personality, values, tone, identity |
+| `USER.md` | Information about the user (name, timezone, preferences) |
+| `AGENTS.md` | Operative instructions: tools, workflows, conventions |
+| `ENVIRONMENT.md` | Local setup notes: SSH hosts, devices, aliases |
+
+Files are concatenated in this order, separated by `---`. If none exist, a minimal
+fallback prompt is used.
+
+### Sub-agents (default allowlist)
+
+Sub-agents receive only `AGENTS.md` + `ENVIRONMENT.md` by default — no personality,
+no user context. This matches OpenClaw's `MINIMAL_BOOTSTRAP_ALLOWLIST` pattern.
+
+Per-profile overrides are available in `SpawnProfile`:
+
+```yaml
+tools:
+  spawn:
+    profiles:
+      researcher:
+        bootstrap_files: ["SOUL.md", "AGENTS.md"]  # replaces default allowlist
+        system_prompt_file: "RESEARCHER.md"         # loaded and appended
+        system_prompt: "Focus on academic sources." # inline, appended last
+        pool: smart
+```
+
+Prompt assembly order for sub-agents:
+1. `bootstrap_files` (profile list, or default `["AGENTS.md", "ENVIRONMENT.md"]`)
+2. `system_prompt_file` (loaded from workspace, appended if present)
+3. `system_prompt` (inline string, appended if set)
 
 ## CLI Commands
 
