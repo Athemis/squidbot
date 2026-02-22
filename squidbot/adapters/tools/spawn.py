@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from typing import Any
 
 from squidbot.config.schema import SpawnProfile
@@ -111,6 +112,28 @@ class JobStore:
 _SPAWN_TOOL_NAMES = {"spawn", "spawn_await"}
 
 
+def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
+    """
+    Load and concatenate bootstrap files from the workspace.
+
+    Missing files are silently skipped. Returns a fallback string if no
+    files are found.
+
+    Args:
+        workspace: Path to the agent workspace directory.
+        filenames: Ordered list of filenames to load.
+
+    Returns:
+        Concatenated prompt text, separated by horizontal rules.
+    """
+    parts: list[str] = []
+    for name in filenames:
+        file_path = workspace / name
+        if file_path.exists():
+            parts.append(file_path.read_text(encoding="utf-8"))
+    return "\n\n---\n\n".join(parts) if parts else "You are a helpful personal AI assistant."
+
+
 class SubAgentFactory:
     """
     Builds fresh AgentLoop instances for sub-agents.
@@ -127,7 +150,8 @@ class SubAgentFactory:
         self,
         memory: MemoryManager,
         registry: ToolRegistry,
-        system_prompt: str,
+        workspace: Path,
+        default_bootstrap_files: list[str],
         profiles: dict[str, SpawnProfile],
         default_pool: str,
         resolve_llm: Callable[[str], LLMPort],
@@ -136,14 +160,16 @@ class SubAgentFactory:
         Args:
             memory: Memory manager shared with parent.
             registry: Parent's tool registry (source for sub-agent tools).
-            system_prompt: Parent's system prompt (default for sub-agents).
+            workspace: Path to the agent workspace directory for loading bootstrap files.
+            default_bootstrap_files: Ordered list of filenames to load when no profile overrides.
             profiles: Named sub-agent profiles from config.
             default_pool: Name of the LLM pool to use when no profile pool is set.
             resolve_llm: Callable that resolves a pool name to an LLMPort adapter.
         """
         self._memory = memory
         self._registry = registry
-        self._system_prompt = system_prompt
+        self._workspace = workspace
+        self._default_bootstrap_files = default_bootstrap_files
         self._profiles = profiles
         self._default_pool = default_pool
         self._resolve_llm = resolve_llm
@@ -170,7 +196,29 @@ class SubAgentFactory:
         pool = (profile.pool if profile and profile.pool else None) or self._default_pool
         llm = self._resolve_llm(pool)
 
-        child_prompt = system_prompt_override or self._system_prompt
+        # Assemble system prompt: bootstrap files → system_prompt_file → inline
+        bootstrap_files = (
+            profile.bootstrap_files
+            if (profile and profile.bootstrap_files)
+            else self._default_bootstrap_files
+        )
+        prompt_parts: list[str] = []
+        if bootstrap_files:
+            base = _load_bootstrap_prompt(self._workspace, bootstrap_files)
+            prompt_parts.append(base)
+
+        if profile and profile.system_prompt_file:
+            file_path = self._workspace / profile.system_prompt_file
+            if file_path.exists():
+                prompt_parts.append(file_path.read_text(encoding="utf-8"))
+
+        inline = system_prompt_override or (profile.system_prompt if profile else "")
+        if inline:
+            prompt_parts.append(inline)
+
+        child_prompt = (
+            "\n\n---\n\n".join(prompt_parts) or "You are a helpful personal AI assistant."
+        )
 
         child_registry = ToolRegistry()
         for tool in self._registry._tools.values():

@@ -484,7 +484,8 @@ async def _make_agent_loop(
         spawn_factory = SubAgentFactory(
             memory=memory,
             registry=registry,
-            system_prompt=system_prompt,
+            workspace=workspace,
+            default_bootstrap_files=BOOTSTRAP_FILES_SUBAGENT,
             profiles=settings.tools.spawn.profiles,
             default_pool=settings.llm.default_pool,
             resolve_llm=functools.partial(_resolve_llm, settings),

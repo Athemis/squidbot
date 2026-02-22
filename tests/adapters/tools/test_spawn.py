@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -125,14 +126,15 @@ def _make_mock_registry(tool_names: list[str]) -> ToolRegistry:
     return registry
 
 
-def test_factory_build_returns_agent_loop():
+def test_factory_build_returns_agent_loop(tmp_path):
     llm = MagicMock()
     memory = MagicMock()
     registry = _make_mock_registry(["shell"])
     factory = SubAgentFactory(
         memory=memory,
         registry=registry,
-        system_prompt="parent prompt",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -141,13 +143,14 @@ def test_factory_build_returns_agent_loop():
     assert isinstance(loop, AgentLoop)
 
 
-def test_factory_build_excludes_spawn_tools():
+def test_factory_build_excludes_spawn_tools(tmp_path):
     llm = MagicMock()
     registry = _make_mock_registry(["shell", "spawn", "spawn_await"])
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=registry,
-        system_prompt="p",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -161,13 +164,14 @@ def test_factory_build_excludes_spawn_tools():
     assert "shell" in names
 
 
-def test_factory_build_with_tools_filter():
+def test_factory_build_with_tools_filter(tmp_path):
     llm = MagicMock()
     registry = _make_mock_registry(["shell", "web_search", "read_file"])
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=registry,
-        system_prompt="p",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -178,13 +182,14 @@ def test_factory_build_with_tools_filter():
     assert names == ["shell"]
 
 
-def test_factory_build_with_system_prompt_override():
+def test_factory_build_with_system_prompt_override(tmp_path):
     llm = MagicMock()
     registry = _make_mock_registry([])
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=registry,
-        system_prompt="original",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -193,8 +198,12 @@ def test_factory_build_with_system_prompt_override():
     assert loop._system_prompt == "override prompt"
 
 
-def _make_factory(response: str = "sub result") -> tuple[SubAgentFactory, ToolRegistry]:
+def _make_factory(
+    response: str = "sub result", tmp_path: Path | None = None
+) -> tuple[SubAgentFactory, ToolRegistry]:
     """Return a factory whose sub-agents always respond with `response`."""
+    import tempfile
+
     registry = _make_mock_registry(["shell"])
 
     async def _gen() -> AsyncIterator[str]:
@@ -211,10 +220,12 @@ def _make_factory(response: str = "sub result") -> tuple[SubAgentFactory, ToolRe
     memory.build_messages = AsyncMock(return_value=[])
     memory.persist_exchange = AsyncMock()
 
+    workspace = tmp_path if tmp_path is not None else Path(tempfile.mkdtemp())
     factory = SubAgentFactory(
         memory=memory,
         registry=registry,
-        system_prompt="parent",
+        workspace=workspace,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -265,7 +276,7 @@ async def test_spawn_tool_registers_job():
     assert job_id in job_store.all_job_ids()
 
 
-async def test_spawn_tool_profile_enum_in_definition():
+async def test_spawn_tool_profile_enum_in_definition(tmp_path):
     llm = MagicMock()
     registry = _make_mock_registry([])
     profiles = {
@@ -275,7 +286,8 @@ async def test_spawn_tool_profile_enum_in_definition():
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=registry,
-        system_prompt="p",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles=profiles,
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -287,13 +299,14 @@ async def test_spawn_tool_profile_enum_in_definition():
     assert set(profile_param["enum"]) == {"coder", "writer"}
 
 
-async def test_spawn_tool_no_profile_enum_when_no_profiles():
+async def test_spawn_tool_no_profile_enum_when_no_profiles(tmp_path):
     llm = MagicMock()
     registry = _make_mock_registry([])
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=registry,
-        system_prompt="p",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -335,7 +348,7 @@ async def test_spawn_await_wildcard_collects_all():
     assert f"[{id2}: OK]" in result.content
 
 
-async def test_spawn_await_error_embedded_not_is_error():
+async def test_spawn_await_error_embedded_not_is_error(tmp_path):
     registry = _make_mock_registry([])
 
     async def boom_chat(
@@ -353,7 +366,8 @@ async def test_spawn_await_error_embedded_not_is_error():
     factory = SubAgentFactory(
         memory=memory,
         registry=registry,
-        system_prompt="p",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=lambda _: llm,
@@ -396,7 +410,7 @@ async def test_spawn_await_missing_job_ids_is_error():
     assert result.is_error
 
 
-def test_factory_uses_profile_pool():
+def test_factory_uses_profile_pool(tmp_path):
     """build() calls resolve_llm with profile.pool when set."""
     calls: list[str] = []
 
@@ -407,7 +421,8 @@ def test_factory_uses_profile_pool():
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=ToolRegistry(),
-        system_prompt="test",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={"researcher": SpawnProfile(pool="smart")},
         default_pool="default",
         resolve_llm=fake_resolve,
@@ -416,7 +431,7 @@ def test_factory_uses_profile_pool():
     assert calls == ["smart"]
 
 
-def test_factory_uses_default_pool_when_profile_has_no_pool():
+def test_factory_uses_default_pool_when_profile_has_no_pool(tmp_path):
     calls: list[str] = []
 
     def fake_resolve(pool_name: str) -> MagicMock:
@@ -426,7 +441,8 @@ def test_factory_uses_default_pool_when_profile_has_no_pool():
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=ToolRegistry(),
-        system_prompt="test",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={"researcher": SpawnProfile(pool="")},
         default_pool="default",
         resolve_llm=fake_resolve,
@@ -435,7 +451,7 @@ def test_factory_uses_default_pool_when_profile_has_no_pool():
     assert calls == ["default"]
 
 
-def test_factory_uses_default_pool_when_no_profile():
+def test_factory_uses_default_pool_when_no_profile(tmp_path):
     calls: list[str] = []
 
     def fake_resolve(pool_name: str) -> MagicMock:
@@ -445,10 +461,95 @@ def test_factory_uses_default_pool_when_no_profile():
     factory = SubAgentFactory(
         memory=MagicMock(),
         registry=ToolRegistry(),
-        system_prompt="test",
+        workspace=tmp_path,
+        default_bootstrap_files=[],
         profiles={},
         default_pool="default",
         resolve_llm=fake_resolve,
     )
     factory.build(system_prompt_override=None, tools_filter=None, profile_name=None)
     assert calls == ["default"]
+
+
+def test_subagent_uses_default_bootstrap_files(tmp_path):
+    """No profile → loads AGENTS.md + ENVIRONMENT.md from workspace."""
+    (tmp_path / "AGENTS.md").write_text("agents instructions")
+    (tmp_path / "ENVIRONMENT.md").write_text("env notes")
+
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md", "ENVIRONMENT.md"],
+        profiles={},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=None)
+    assert "agents instructions" in loop._system_prompt
+    assert "env notes" in loop._system_prompt
+
+
+def test_subagent_profile_bootstrap_files_override(tmp_path):
+    """profile.bootstrap_files replaces default allowlist."""
+    (tmp_path / "SOUL.md").write_text("soul content")
+    (tmp_path / "AGENTS.md").write_text("agents")
+
+    profile = SpawnProfile(bootstrap_files=["SOUL.md"])
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md", "ENVIRONMENT.md"],
+        profiles={"custom": profile},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=None, profile_name="custom")
+    assert "soul content" in loop._system_prompt
+    assert "agents" not in loop._system_prompt
+
+
+def test_subagent_profile_system_prompt_file(tmp_path):
+    """profile.system_prompt_file is loaded and appended."""
+    (tmp_path / "AGENTS.md").write_text("agents")
+    (tmp_path / "RESEARCHER.md").write_text("researcher instructions")
+
+    profile = SpawnProfile(system_prompt_file="RESEARCHER.md")
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md", "ENVIRONMENT.md"],
+        profiles={"researcher": profile},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
+    assert "agents" in loop._system_prompt
+    assert "researcher instructions" in loop._system_prompt
+
+
+def test_subagent_profile_all_combined(tmp_path):
+    """bootstrap_files + system_prompt_file + system_prompt all combined."""
+    (tmp_path / "SOUL.md").write_text("soul")
+    (tmp_path / "EXTRA.md").write_text("extra file")
+
+    profile = SpawnProfile(
+        bootstrap_files=["SOUL.md"],
+        system_prompt_file="EXTRA.md",
+        system_prompt="inline instructions",
+    )
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md", "ENVIRONMENT.md"],
+        profiles={"combo": profile},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+    loop = factory.build(system_prompt_override=None, tools_filter=None, profile_name="combo")
+    assert "soul" in loop._system_prompt
+    assert "extra file" in loop._system_prompt
+    assert "inline instructions" in loop._system_prompt
