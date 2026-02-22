@@ -418,9 +418,42 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
             await conn.close()
 
 
+async def _channel_loop_with_state(
+    channel: ChannelPort,
+    loop: Any,
+    state: GatewayState,
+) -> None:
+    """
+    Drive a single channel and update GatewayState on each message.
+
+    Creates a SessionInfo entry on first message from a session, then increments
+    message_count on subsequent messages.
+
+    Args:
+        channel: The channel adapter to drive.
+        loop: The agent loop to handle each message.
+        state: Live gateway state — updated in-place.
+    """
+    from squidbot.core.models import SessionInfo  # noqa: PLC0415
+
+    async for inbound in channel.receive():
+        sid = inbound.session.id
+        if sid in state.active_sessions:
+            state.active_sessions[sid].message_count += 1
+        else:
+            state.active_sessions[sid] = SessionInfo(
+                session_id=sid,
+                channel=inbound.session.channel,
+                sender_id=inbound.session.sender_id,
+                started_at=datetime.now(),
+                message_count=1,
+            )
+        await loop.run(inbound.session, inbound.text, channel)
+
+
 async def _channel_loop(channel: ChannelPort, loop: Any) -> None:
     """
-    Drive a single channel: receive messages and run the agent for each.
+    Drive a single channel without state tracking (used by agent command).
 
     Args:
         channel: The channel adapter to drive.
@@ -466,6 +499,8 @@ async def _run_gateway(config_path: Path) -> None:
     else:
         logger.info("heartbeat: disabled")
 
+    from squidbot.core.models import ChannelStatus  # noqa: PLC0415
+
     storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
     cron_jobs = await storage.load_cron_jobs()
     logger.info("cron: {} jobs loaded", len(cron_jobs))
@@ -474,6 +509,14 @@ async def _run_gateway(config_path: Path) -> None:
     workspace = Path(settings.agents.workspace).expanduser()
 
     tracker = LastChannelTracker()
+
+    # Live gateway state — updated by _channel_loop_with_state and channel setup
+    state = GatewayState(
+        active_sessions={},
+        channel_status=[],
+        cron_jobs_cache=list(cron_jobs),
+        started_at=datetime.now(),
+    )
 
     # Map of channel prefix → channel instance for cron job routing
     channel_registry: dict[str, object] = {}
@@ -507,18 +550,30 @@ async def _run_gateway(config_path: Path) -> None:
 
                 matrix_ch = MatrixChannel(config=settings.channels.matrix)
                 channel_registry["matrix"] = matrix_ch
+                state.channel_status.append(
+                    ChannelStatus(name="matrix", enabled=True, connected=True)
+                )
                 logger.info("matrix channel: starting")
-                tg.create_task(_channel_loop(matrix_ch, agent_loop))
+                tg.create_task(_channel_loop_with_state(matrix_ch, agent_loop, state))
             else:
+                state.channel_status.append(
+                    ChannelStatus(name="matrix", enabled=False, connected=False)
+                )
                 logger.info("matrix channel: disabled")
             if settings.channels.email.enabled:
                 from squidbot.adapters.channels.email import EmailChannel  # noqa: PLC0415
 
                 email_ch = EmailChannel(config=settings.channels.email)
                 channel_registry["email"] = email_ch
+                state.channel_status.append(
+                    ChannelStatus(name="email", enabled=True, connected=True)
+                )
                 logger.info("email channel: starting")
-                tg.create_task(_channel_loop(email_ch, agent_loop))
+                tg.create_task(_channel_loop_with_state(email_ch, agent_loop, state))
             else:
+                state.channel_status.append(
+                    ChannelStatus(name="email", enabled=False, connected=False)
+                )
                 logger.info("email channel: disabled")
     finally:
         for conn in mcp_connections:

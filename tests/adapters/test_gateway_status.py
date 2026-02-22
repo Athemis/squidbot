@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
 from squidbot.core.skills import SkillMetadata
+
+
+async def _noop(*args: object, **kwargs: object) -> None:
+    """Async no-op for test doubles."""
 
 
 class TestGatewayStatusAdapter:
@@ -93,3 +97,65 @@ class TestGatewayStatusAdapter:
         adapter = GatewayStatusAdapter(state=state, skills_loader=loader)
         assert adapter.get_skills() == [skill]
         loader.list_skills.assert_called_once()
+
+
+class TestChannelLoopWithState:
+    async def test_first_message_creates_session_info(self) -> None:
+        from squidbot.cli.main import GatewayState, _channel_loop_with_state
+        from squidbot.core.models import InboundMessage, Session
+
+        state = GatewayState(
+            active_sessions={},
+            channel_status=[],
+            cron_jobs_cache=[],
+            started_at=datetime(2026, 1, 1),
+        )
+
+        session = Session(channel="email", sender_id="user@example.com")
+        inbound = InboundMessage(session=session, text="Hello")
+
+        fake_loop = MagicMock()
+        fake_loop.run = AsyncMock()
+
+        async def fake_receive():  # type: ignore[return]
+            yield inbound
+
+        fake_channel = MagicMock()
+        fake_channel.receive = fake_receive
+
+        await _channel_loop_with_state(fake_channel, fake_loop, state)  # type: ignore[arg-type]
+
+        assert "email:user@example.com" in state.active_sessions
+        info = state.active_sessions["email:user@example.com"]
+        assert info.message_count == 1
+        assert info.channel == "email"
+        assert info.sender_id == "user@example.com"
+
+    async def test_second_message_increments_count(self) -> None:
+        from squidbot.cli.main import GatewayState, _channel_loop_with_state
+        from squidbot.core.models import InboundMessage, Session
+
+        state = GatewayState(
+            active_sessions={},
+            channel_status=[],
+            cron_jobs_cache=[],
+            started_at=datetime(2026, 1, 1),
+        )
+
+        session = Session(channel="email", sender_id="user@example.com")
+        msg1 = InboundMessage(session=session, text="First")
+        msg2 = InboundMessage(session=session, text="Second")
+
+        fake_loop = MagicMock()
+        fake_loop.run = AsyncMock()
+
+        async def fake_receive():  # type: ignore[return]
+            yield msg1
+            yield msg2
+
+        fake_channel = MagicMock()
+        fake_channel.receive = fake_receive
+
+        await _channel_loop_with_state(fake_channel, fake_loop, state)  # type: ignore[arg-type]
+
+        assert state.active_sessions["email:user@example.com"].message_count == 2
