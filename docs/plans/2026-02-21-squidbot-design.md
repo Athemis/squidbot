@@ -120,8 +120,7 @@ squidbot/
 │   │   └── test_skills.py
 │   └── integration/        # Integration tests (require API keys / services)
 │       └── test_openai.py
-├── workspace/              # Default user workspace (committed skeleton)
-│   └── AGENTS.md           # Default system prompt / agent instructions
+├── squidbot/workspace/     # Bundled workspace templates (shipped with package)
 ├── pyproject.toml
 └── README.md
 ```
