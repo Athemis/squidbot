@@ -199,11 +199,16 @@ tools:
     enabled: false
     profiles:
       researcher:
-        system_prompt: "You are a research specialist. Focus on finding accurate information."
+        bootstrap_files:              # overrides default sub-agent allowlist
+          - "SOUL.md"
+          - "AGENTS.md"
+        system_prompt_file: "RESEARCHER.md"   # loaded from workspace, appended
+        system_prompt: "Focus on academic sources."  # inline, appended last
         tools:
           - web_search
           - shell
           - read_file
+        pool: "smart"
       coder:
         system_prompt: "You are a coding specialist. Write clean, tested code."
         tools:
@@ -229,8 +234,11 @@ if settings.tools.spawn.enabled:
         llm=llm,
         memory=memory,
         registry=registry,
-        system_prompt=system_prompt,
+        workspace=workspace,
+        default_bootstrap_files=["AGENTS.md", "ENVIRONMENT.md"],
         profiles=settings.tools.spawn.profiles,
+        default_pool=settings.llm.default_pool,
+        resolve_llm=resolve_llm,
     )
     job_store = JobStore()
     registry.register(SpawnTool(factory=factory, job_store=job_store))
@@ -244,7 +252,7 @@ Profile injection into the system prompt also happens here, before `AgentLoop` i
 ## Default Behaviour (no profile)
 
 When `spawn` is called without a `profile`:
-- Sub-agent inherits the parent's `system_prompt` verbatim
+- Sub-agent loads the default bootstrap allowlist: `AGENTS.md` + `ENVIRONMENT.md`
 - Sub-agent gets all tools from the parent registry (minus `spawn`/`spawn_await`)
 - `context` and `system_prompt` override params still apply
 

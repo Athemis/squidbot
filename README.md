@@ -68,8 +68,7 @@ llm:
       - model: llama
 
 agents:
-  workspace: "~/.squidbot/workspace"   # AGENTS.md lives here
-  system_prompt_file: "AGENTS.md"
+  workspace: "~/.squidbot/workspace"   # bootstrap files live here
   restrict_to_workspace: true
 
   heartbeat:
@@ -111,8 +110,12 @@ tools:
     profiles:
       researcher:
         pool: "smart"                   # optional — defaults to llm.default_pool
-        system_prompt_override: ""
-        tools_filter: []
+        bootstrap_files:                # overrides default sub-agent allowlist
+          - "SOUL.md"
+          - "AGENTS.md"
+        system_prompt_file: "RESEARCHER.md"   # loaded from workspace, appended
+        system_prompt: ""                     # inline, appended last
+        tools: []                             # empty = all tools
 
 channels:
   matrix:
@@ -206,7 +209,10 @@ mtime polling — no restart needed after creating or editing a skill.
 └── cron/jobs.json      # Scheduled task definitions
 
 ~/.squidbot/workspace/
-├── AGENTS.md           # System prompt
+├── SOUL.md             # Bot personality, values, tone, identity (optional)
+├── USER.md             # Information about the user (optional)
+├── AGENTS.md           # Operative instructions: tools, workflows, conventions
+├── ENVIRONMENT.md      # Local setup notes: SSH hosts, devices, aliases (optional)
 ├── HEARTBEAT.md        # Optional standing checklist for heartbeat
 └── skills/             # User-defined skills (override bundled by name)
 ```
