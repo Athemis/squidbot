@@ -9,18 +9,17 @@ alerts to the last active channel. HEARTBEAT_OK responses are silently dropped.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from loguru import logger
+
 from squidbot.config.schema import HeartbeatConfig
 from squidbot.core.agent import AgentLoop
 from squidbot.core.models import Session
 from squidbot.core.ports import ChannelPort
-
-logger = logging.getLogger(__name__)
 
 HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
 
@@ -161,7 +160,7 @@ class HeartbeatService:
         else:
             try:
                 local_now = now.astimezone(ZoneInfo(tz_name))
-            except (ZoneInfoNotFoundError, KeyError):
+            except ZoneInfoNotFoundError, KeyError:
                 logger.warning("heartbeat: unknown timezone %r, falling back to local", tz_name)
                 local_now = now.astimezone()
 
