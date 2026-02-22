@@ -166,10 +166,11 @@ async def chat(self, messages: list[Message], tools: list[ToolDefinition]) -> ..
 - **Scheduler suppresses all errors** in `_tick()` — a failed cron job must not crash the loop.
 - **Broad `except Exception as e`** is acceptable at adapter boundaries and scheduler ticks.
   Narrow exceptions are preferred everywhere else.
-- **Multiple exceptions:** always use the tuple form: `except (EOFError, KeyboardInterrupt):`.
-  The bare-comma form `except EOFError, KeyboardInterrupt:` is valid Python 3 syntax but
-  has completely different semantics (catches only `EOFError`, binds it to the name
-  `KeyboardInterrupt`) — it is a bug, not a style choice.
+- **Multiple exceptions:** prefer the tuple form `except (EOFError, KeyboardInterrupt):` for
+  readability. In Python 3.14+, the bare-comma form `except EOFError, KeyboardInterrupt:` is
+  also valid and catches both exceptions — it is **not** a bug on this project. Do not flag
+  or auto-fix it. (Note: in Python 2 and Python 3.0–3.13 the bare-comma form had different
+  or invalid semantics; the equivalence was restored in 3.14.)
 
 ---
 
