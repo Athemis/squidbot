@@ -670,14 +670,15 @@ file set is fixed and convention-based, inspired by OpenClaw.
 
 | File | Purpose |
 |---|---|
+| `IDENTITY.md` | Bot name, creature, vibe, emoji (created during bootstrap) |
 | `SOUL.md` | Bot values, character, operating principles (bundled default) |
 | `USER.md` | Information about the user (name, timezone, preferences) |
 | `AGENTS.md` | Operative instructions: tools, workflows, conventions |
 | `ENVIRONMENT.md` | Local setup notes: SSH hosts, devices, aliases |
 
-`IDENTITY.md` and `BOOTSTRAP.md` are workspace files but are not part of the
-bootstrap loading order — `IDENTITY.md` is referenced by `AGENTS.md` at
-session start, and `BOOTSTRAP.md` is a one-time ritual that self-destructs.
+`BOOTSTRAP.md` is not part of the loading order — it is a one-time first-run
+ritual that the agent follows to develop its identity and learn about the user,
+then deletes itself.
 
 Files are concatenated in this order, separated by `---`. If none exist, a minimal
 fallback prompt is used.
@@ -705,10 +706,24 @@ Prompt assembly order for sub-agents:
 2. `system_prompt_file` (loaded from workspace, appended if present)
 3. `system_prompt` (inline string, appended if set)
 
+## Onboard Wizard
+
+`squidbot onboard` is an idempotent interactive setup wizard. On first run it
+creates the config file and workspace. On subsequent runs it loads existing
+values as defaults — pressing Enter keeps the current value.
+
+Workspace files created by `onboard` (skipped if already present):
+- `IDENTITY.md`, `SOUL.md`, `USER.md`, `AGENTS.md`, `ENVIRONMENT.md` — bootstrap files
+- `BOOTSTRAP.md` — first-run identity interview ritual
+
+If the workspace is already set up (`IDENTITY.md` exists, `BOOTSTRAP.md` gone),
+`onboard` offers to re-run the bootstrap interview (`[y/N]`). Answering `y`
+restores `BOOTSTRAP.md`; the agent runs the interview on the next `squidbot agent`.
+
 ## CLI Commands
 
 ```
-squidbot onboard              # Interactive setup wizard
+squidbot onboard              # Interactive setup wizard (idempotent)
 squidbot agent                # Start interactive CLI chat
 squidbot agent -m "..."       # Single message, then exit
 squidbot gateway              # Start gateway (all enabled channels)
