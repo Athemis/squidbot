@@ -16,17 +16,15 @@ DEFAULT_HEARTBEAT_PROMPT = (
     "If nothing needs attention, reply with just: HEARTBEAT_OK"
 )
 
-# Lines considered "empty" for HEARTBEAT.md skip logic (bare unchecked boxes)
-_EMPTY_BARE_CHECKBOXES = {"- [ ]", "* [ ]"}
-# Prefixes for completed checkboxes — always non-actionable regardless of text
-_DONE_CHECKBOX_PREFIXES = ("- [x]", "* [x]", "- [X]", "* [X]")
+# Lines considered "empty" for HEARTBEAT.md skip logic
+_EMPTY_CHECKBOX_PATTERNS = {"- [ ]", "* [ ]", "- [x]", "* [x]"}
 
 
 def _is_heartbeat_empty(content: str | None) -> bool:
     """
     Return True if HEARTBEAT.md has no actionable content.
 
-    Skips blank lines, Markdown headings, HTML comments, bare empty checkboxes,
+    Skips blank lines, Markdown headings, HTML comments, empty checkboxes,
     and completed (checked) checkboxes regardless of trailing text.
     """
     if not content:
@@ -39,9 +37,10 @@ def _is_heartbeat_empty(content: str | None) -> bool:
             continue
         if line.startswith("<!--"):
             continue
-        if line in _EMPTY_BARE_CHECKBOXES:
+        if line in _EMPTY_CHECKBOX_PATTERNS:
             continue
-        if line.startswith(_DONE_CHECKBOX_PREFIXES):
+        # Checked checkboxes with text (e.g. "- [x] done") are also non-actionable
+        if line.startswith(("- [x]", "* [x]", "- [X]", "* [X]")):
             continue
         return False
     return True
