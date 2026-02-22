@@ -17,10 +17,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cyclopts
 
 from squidbot.config.schema import DEFAULT_CONFIG_PATH, Settings
+
+if TYPE_CHECKING:
+    from squidbot.core.agent import AgentLoop
 
 app = cyclopts.App(name="squidbot", help="A lightweight personal AI assistant.")
 
@@ -243,16 +247,28 @@ def _setup_logging(level: str) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-async def _make_agent_loop(settings: Settings):
-    """Construct the agent loop from configuration."""
-    from squidbot.adapters.llm.openai import OpenAIAdapter
-    from squidbot.adapters.persistence.jsonl import JsonlMemory
-    from squidbot.adapters.skills.fs import FsSkillsLoader
-    from squidbot.adapters.tools.files import ListFilesTool, ReadFileTool, WriteFileTool
-    from squidbot.adapters.tools.shell import ShellTool
-    from squidbot.core.agent import AgentLoop
-    from squidbot.core.memory import MemoryManager
-    from squidbot.core.registry import ToolRegistry
+async def _make_agent_loop(
+    settings: Settings,
+) -> tuple[AgentLoop, list[object]]:
+    """
+    Construct the agent loop from configuration.
+
+    Returns:
+        Tuple of (agent_loop, mcp_connections). Callers must close mcp_connections
+        on shutdown by calling conn.close() on each.
+    """
+    from squidbot.adapters.llm.openai import OpenAIAdapter  # noqa: PLC0415
+    from squidbot.adapters.persistence.jsonl import JsonlMemory  # noqa: PLC0415
+    from squidbot.adapters.skills.fs import FsSkillsLoader  # noqa: PLC0415
+    from squidbot.adapters.tools.files import (  # noqa: PLC0415
+        ListFilesTool,
+        ReadFileTool,
+        WriteFileTool,
+    )
+    from squidbot.adapters.tools.shell import ShellTool  # noqa: PLC0415
+    from squidbot.core.agent import AgentLoop  # noqa: PLC0415
+    from squidbot.core.memory import MemoryManager  # noqa: PLC0415
+    from squidbot.core.registry import ToolRegistry  # noqa: PLC0415
 
     # Resolve workspace path
     workspace = Path(settings.agents.workspace).expanduser()
@@ -291,6 +307,18 @@ async def _make_agent_loop(settings: Settings):
 
         registry.register(WebSearchTool(config=settings.tools.web_search))
 
+    # MCP servers
+    mcp_connections: list[object] = []
+    if settings.tools.mcp_servers:
+        from squidbot.adapters.tools.mcp import McpServerConnection  # noqa: PLC0415
+
+        for server_name, server_cfg in settings.tools.mcp_servers.items():
+            conn = McpServerConnection(name=server_name, config=server_cfg)
+            tools = await conn.connect()
+            for tool in tools:
+                registry.register(tool)
+            mcp_connections.append(conn)
+
     # Load system prompt
     system_prompt_path = workspace / settings.agents.system_prompt_file
     if system_prompt_path.exists():
@@ -298,24 +326,27 @@ async def _make_agent_loop(settings: Settings):
     else:
         system_prompt = "You are a helpful personal AI assistant."
 
-    return AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt=system_prompt)
+    agent_loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt=system_prompt)
+    return agent_loop, mcp_connections
 
 
 async def _run_agent(message: str | None, config_path: Path) -> None:
     """Run the CLI channel agent."""
-    from rich.console import Console
-    from rich.rule import Rule
+    from rich.console import Console  # noqa: PLC0415
+    from rich.rule import Rule  # noqa: PLC0415
 
-    from squidbot.adapters.channels.cli import CliChannel, RichCliChannel
+    from squidbot.adapters.channels.cli import CliChannel, RichCliChannel  # noqa: PLC0415
 
     settings = Settings.load(config_path)
-    agent_loop = await _make_agent_loop(settings)
+    agent_loop, mcp_connections = await _make_agent_loop(settings)
 
     if message:
         # Single-shot mode: use plain CliChannel (streaming, no banner)
         channel = CliChannel()
         await agent_loop.run(CliChannel.SESSION, message, channel)
         print()  # newline after streamed output
+        for conn in mcp_connections:
+            await conn.close()  # type: ignore[union-attr]
         return
 
     # Interactive REPL mode: Rich interface
@@ -327,6 +358,9 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     channel = RichCliChannel()
     async for inbound in channel.receive():
         await agent_loop.run(inbound.session, inbound.text, channel)
+
+    for conn in mcp_connections:
+        await conn.close()  # type: ignore[union-attr]
 
 
 async def _run_gateway(config_path: Path) -> None:
@@ -369,7 +403,7 @@ async def _run_gateway(config_path: Path) -> None:
     cron_jobs = await storage.load_cron_jobs()
     logger.info("cron: {} jobs loaded", len(cron_jobs))
 
-    agent_loop = await _make_agent_loop(settings)
+    agent_loop, mcp_connections = await _make_agent_loop(settings)
     workspace = Path(settings.agents.workspace).expanduser()
 
     tracker = LastChannelTracker()
@@ -400,6 +434,9 @@ async def _run_gateway(config_path: Path) -> None:
     async with asyncio.TaskGroup() as tg:
         tg.create_task(scheduler.run(on_due=on_cron_due))
         tg.create_task(heartbeat.run())
+
+    for conn in mcp_connections:
+        await conn.close()  # type: ignore[union-attr]
 
 
 async def _run_onboard(config_path: Path) -> None:
