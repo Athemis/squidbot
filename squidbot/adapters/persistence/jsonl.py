@@ -21,13 +21,14 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from squidbot.core.models import CronJob, Message, ToolCall
 
 
 def _serialize_message(message: Message) -> str:
     """Serialize a Message to a JSON line."""
-    d: dict = {
+    d: dict[str, Any] = {
         "role": message.role,
         "content": message.content,
         "timestamp": message.timestamp.isoformat(),

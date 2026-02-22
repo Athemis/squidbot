@@ -21,6 +21,7 @@ from squidbot.core.models import (
     ToolDefinition,
     ToolResult,
 )
+from squidbot.core.skills import SkillMetadata
 
 
 class LLMPort(Protocol):
@@ -38,7 +39,7 @@ class LLMPort(Protocol):
         tools: list[ToolDefinition],
         *,
         stream: bool = True,
-    ) -> AsyncIterator[str | list]:
+    ) -> AsyncIterator[str | list[Any]]:
         """
         Send messages to the LLM and receive a response stream.
 
@@ -153,7 +154,7 @@ class SkillsPort(Protocol):
     parse their frontmatter, and cache results keyed by (path, mtime).
     """
 
-    def list_skills(self) -> list:
+    def list_skills(self) -> list[SkillMetadata]:
         """
         Return all discovered SkillMetadata objects.
 
