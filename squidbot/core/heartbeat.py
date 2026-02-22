@@ -161,7 +161,7 @@ class HeartbeatService:
         else:
             try:
                 local_now = now.astimezone(ZoneInfo(tz_name))
-            except ZoneInfoNotFoundError, KeyError:
+            except (ZoneInfoNotFoundError, KeyError):
                 logger.warning("heartbeat: unknown timezone %r, falling back to local", tz_name)
                 local_now = now.astimezone()
 
