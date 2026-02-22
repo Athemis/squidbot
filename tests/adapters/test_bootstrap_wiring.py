@@ -38,7 +38,13 @@ def test_load_bootstrap_prompt_empty_filenames_returns_fallback(tmp_path: Path) 
 
 
 def test_bootstrap_files_main_order() -> None:
-    assert BOOTSTRAP_FILES_MAIN == ["SOUL.md", "USER.md", "AGENTS.md", "ENVIRONMENT.md"]
+    assert BOOTSTRAP_FILES_MAIN == [
+        "IDENTITY.md",
+        "SOUL.md",
+        "USER.md",
+        "AGENTS.md",
+        "ENVIRONMENT.md",
+    ]
 
 
 def test_bootstrap_files_subagent() -> None:

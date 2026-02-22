@@ -238,7 +238,13 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
-BOOTSTRAP_FILES_MAIN: list[str] = ["SOUL.md", "USER.md", "AGENTS.md", "ENVIRONMENT.md"]
+BOOTSTRAP_FILES_MAIN: list[str] = [
+    "IDENTITY.md",
+    "SOUL.md",
+    "USER.md",
+    "AGENTS.md",
+    "ENVIRONMENT.md",
+]
 BOOTSTRAP_FILES_SUBAGENT: list[str] = ["AGENTS.md", "ENVIRONMENT.md"]
 _BUNDLED_WORKSPACE = Path(__file__).parent.parent / "workspace"
 
@@ -731,7 +737,9 @@ async def _run_onboard(config_path: Path) -> None:
 
     workspace = Path(settings.agents.workspace).expanduser()
     workspace.mkdir(parents=True, exist_ok=True)
-    for filename in BOOTSTRAP_FILES_MAIN:
+    # Copy bootstrap files + one-time ritual files from bundled workspace
+    _ONBOARD_FILES = [*BOOTSTRAP_FILES_MAIN, "BOOTSTRAP.md"]
+    for filename in _ONBOARD_FILES:
         file_path = workspace / filename
         if not file_path.exists():
             template_path = _BUNDLED_WORKSPACE / filename
