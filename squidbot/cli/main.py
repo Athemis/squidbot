@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import cyclopts
 
@@ -368,6 +368,18 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
             await conn.close()
 
 
+async def _channel_loop(channel: ChannelPort, loop: Any) -> None:
+    """
+    Drive a single channel: receive messages and run the agent for each.
+
+    Args:
+        channel: The channel adapter to drive.
+        loop: The agent loop to handle each message.
+    """
+    async for inbound in channel.receive():
+        await loop.run(inbound.session, inbound.text, channel)
+
+
 async def _run_gateway(config_path: Path) -> None:
     """Start all enabled channels concurrently.
 
@@ -440,6 +452,15 @@ async def _run_gateway(config_path: Path) -> None:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(scheduler.run(on_due=on_cron_due))
             tg.create_task(heartbeat.run())
+            if settings.channels.matrix.enabled:
+                from squidbot.adapters.channels.matrix import MatrixChannel  # noqa: PLC0415
+
+                matrix_ch = MatrixChannel(config=settings.channels.matrix)
+                channel_registry["matrix"] = matrix_ch
+                logger.info("matrix channel: starting")
+                tg.create_task(_channel_loop(matrix_ch, agent_loop))
+            else:
+                logger.info("matrix channel: disabled")
     finally:
         for conn in mcp_connections:
             await conn.close()
