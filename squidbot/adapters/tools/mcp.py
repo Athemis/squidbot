@@ -13,6 +13,7 @@ Connections are established once at startup and held open for the process lifeti
 
 from __future__ import annotations
 
+from contextlib import AsyncExitStack
 from typing import Any
 
 from loguru import logger
@@ -112,8 +113,6 @@ class McpServerConnection:
             raise ValueError(
                 f"Unknown transport: {self._config.transport!r}. Use 'stdio' or 'http'."
             )
-
-        from contextlib import AsyncExitStack  # noqa: PLC0415
 
         stack = AsyncExitStack()
         self._exit_stack = stack
