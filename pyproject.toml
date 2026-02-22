@@ -16,6 +16,9 @@ dependencies = [
     "duckduckgo-search>=8.0",
     "rich>=13.0",
     "loguru>=0.7",
+    "python-magic>=0.4",
+    "Pillow>=10.0",
+    "markdown-it-py>=3.0",
 ]
 
 [project.scripts]

@@ -83,13 +83,16 @@ class ToolsConfig(BaseModel):
 
 
 class MatrixChannelConfig(BaseModel):
+    """Configuration for the Matrix channel adapter."""
+
     enabled: bool = False
     homeserver: str = "https://matrix.org"
     user_id: str = ""
     access_token: str = ""
     device_id: str = "SQUIDBOT01"
-    allow_from: list[str] = Field(default_factory=list)
+    room_ids: list[str] = Field(default_factory=list)
     group_policy: str = "mention"  # "open", "mention", "allowlist"
+    allowlist: list[str] = Field(default_factory=list)
 
 
 class EmailChannelConfig(BaseModel):
