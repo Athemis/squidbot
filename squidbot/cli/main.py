@@ -341,7 +341,11 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
             )
         )
 
-    return adapters[0]
+    if len(adapters) == 1:
+        return adapters[0]
+    from squidbot.adapters.llm.pool import PooledLLMAdapter  # noqa: PLC0415
+
+    return PooledLLMAdapter(adapters)
 
 
 async def _make_agent_loop(

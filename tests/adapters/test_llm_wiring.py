@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from squidbot.adapters.llm.openai import OpenAIAdapter
+from squidbot.adapters.llm.pool import PooledLLMAdapter
 from squidbot.cli.main import _resolve_llm
 from squidbot.config.schema import (
     LLMConfig,
@@ -67,3 +68,9 @@ def test_correct_adapter_credentials():
     assert isinstance(llm, OpenAIAdapter)
     # Can't check private attrs directly, but we can verify it constructed without error
     # and is the right type
+
+
+def test_multi_entry_pool_returns_pooled_adapter():
+    s = _make_settings({"smart": [LLMPoolEntry(model="opus"), LLMPoolEntry(model="haiku")]})
+    llm = _resolve_llm(s, "smart")
+    assert isinstance(llm, PooledLLMAdapter)
