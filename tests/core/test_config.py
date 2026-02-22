@@ -1,34 +1,82 @@
 import json
 
-from squidbot.config.schema import LLMConfig, Settings, SpawnProfile, SpawnSettings, ToolsConfig
+from squidbot.config.schema import (
+    HeartbeatConfig,
+    LLMConfig,
+    LLMModelConfig,
+    LLMPoolEntry,
+    LLMProviderConfig,
+    Settings,
+    SpawnProfile,
+    SpawnSettings,
+    ToolsConfig,
+)
 
 
-def test_default_llm_config():
+def test_llm_config_defaults():
     cfg = LLMConfig()
-    assert cfg.model == "anthropic/claude-opus-4-5"
-    assert cfg.max_tokens == 8192
-    assert cfg.max_context_tokens == 100_000
+    assert cfg.default_pool == "default"
+    assert cfg.providers == {}
+    assert cfg.models == {}
+    assert cfg.pools == {}
 
 
-def test_settings_from_dict():
+def test_llm_provider_config():
+    p = LLMProviderConfig(api_base="https://openrouter.ai/api/v1", api_key="sk-test")
+    assert p.api_base == "https://openrouter.ai/api/v1"
+    assert p.api_key == "sk-test"
+
+
+def test_llm_model_config_defaults():
+    m = LLMModelConfig(provider="openrouter", model="anthropic/claude-opus-4-5")
+    assert m.max_tokens == 8192
+    assert m.max_context_tokens == 100_000
+
+
+def test_llm_pool_entry():
+    e = LLMPoolEntry(model="opus")
+    assert e.model == "opus"
+
+
+def test_settings_full_pool_config():
     raw = {
         "llm": {
-            "api_base": "https://openrouter.ai/api/v1",
-            "api_key": "sk-test",
-            "model": "openai/gpt-4o",
+            "default_pool": "smart",
+            "providers": {
+                "openrouter": {"api_base": "https://openrouter.ai/api/v1", "api_key": "sk-test"}
+            },
+            "models": {"opus": {"provider": "openrouter", "model": "anthropic/claude-opus-4-5"}},
+            "pools": {"smart": [{"model": "opus"}]},
         }
     }
-    settings = Settings.model_validate(raw)
-    assert settings.llm.api_key == "sk-test"
-    assert settings.llm.model == "openai/gpt-4o"
+    s = Settings.model_validate(raw)
+    assert s.llm.default_pool == "smart"
+    assert s.llm.providers["openrouter"].api_key == "sk-test"
+    assert s.llm.models["opus"].model == "anthropic/claude-opus-4-5"
+    assert s.llm.pools["smart"][0].model == "opus"
+
+
+def test_heartbeat_config_pool_default():
+    cfg = HeartbeatConfig()
+    assert cfg.pool == ""
+
+
+def test_spawn_profile_pool_default():
+    p = SpawnProfile()
+    assert p.pool == ""
+
+
+def test_spawn_profile_with_pool():
+    p = SpawnProfile(system_prompt="You are a coder.", pool="fast")
+    assert p.pool == "fast"
 
 
 def test_settings_loads_from_json_file(tmp_path):
-    config = {"llm": {"api_key": "sk-from-file"}}
+    config = {"llm": {"default_pool": "default"}}
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps(config))
     settings = Settings.load(config_file)
-    assert settings.llm.api_key == "sk-from-file"
+    assert settings.llm.default_pool == "default"
 
 
 def test_matrix_channel_disabled_by_default():

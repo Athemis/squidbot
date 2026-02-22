@@ -17,14 +17,35 @@ from pydantic import BaseModel, Field
 DEFAULT_CONFIG_PATH = Path.home() / ".squidbot" / "config.json"
 
 
-class LLMConfig(BaseModel):
-    """Configuration for the language model endpoint."""
+class LLMProviderConfig(BaseModel):
+    """API endpoint credentials for an LLM provider."""
 
-    api_base: str = "https://api.openai.com/v1"
+    api_base: str
     api_key: str = ""
-    model: str = "anthropic/claude-opus-4-5"
+
+
+class LLMModelConfig(BaseModel):
+    """A named model definition referencing a provider."""
+
+    provider: str
+    model: str
     max_tokens: int = 8192
     max_context_tokens: int = 100_000
+
+
+class LLMPoolEntry(BaseModel):
+    """One entry in a pool's fallback list — references a named model."""
+
+    model: str
+
+
+class LLMConfig(BaseModel):
+    """Root LLM configuration using the provider/model/pool hierarchy."""
+
+    default_pool: str = "default"
+    providers: dict[str, LLMProviderConfig] = Field(default_factory=dict)
+    models: dict[str, LLMModelConfig] = Field(default_factory=dict)
+    pools: dict[str, list[LLMPoolEntry]] = Field(default_factory=dict)
 
 
 class HeartbeatConfig(BaseModel):
@@ -40,6 +61,7 @@ class HeartbeatConfig(BaseModel):
     active_hours_start: str = "00:00"  # HH:MM inclusive
     active_hours_end: str = "24:00"  # HH:MM exclusive; 24:00 = end of day
     timezone: str = "local"  # IANA tz name or "local" (host timezone)
+    pool: str = ""  # empty = use llm.default_pool
 
 
 class AgentConfig(BaseModel):
@@ -80,6 +102,7 @@ class SpawnProfile(BaseModel):
 
     system_prompt: str = ""
     tools: list[str] = Field(default_factory=list)
+    pool: str = ""  # empty = use llm.default_pool
 
 
 class SpawnSettings(BaseModel):
