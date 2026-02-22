@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from squidbot.core.models import CronJob, Message, Session, ToolCall, ToolDefinition
+from squidbot.core.models import (
+    CronJob,
+    InboundMessage,
+    Message,
+    OutboundMessage,
+    Session,
+    ToolCall,
+    ToolDefinition,
+)
 
 
 def test_message_basic():
@@ -42,3 +50,30 @@ def test_tool_definition():
         },
     )
     assert tool.name == "shell"
+
+
+def test_inbound_message_metadata_default_empty():
+    session = Session(channel="test", sender_id="user")
+    msg = InboundMessage(session=session, text="hello")
+    assert msg.metadata == {}
+
+
+def test_inbound_message_metadata_custom():
+    session = Session(channel="test", sender_id="user")
+    msg = InboundMessage(session=session, text="hi", metadata={"matrix_event_id": "$abc"})
+    assert msg.metadata["matrix_event_id"] == "$abc"
+
+
+def test_outbound_message_attachment_default_none():
+    session = Session(channel="test", sender_id="user")
+    msg = OutboundMessage(session=session, text="hi")
+    assert msg.attachment is None
+    assert msg.metadata == {}
+
+
+def test_outbound_message_attachment_set():
+    from pathlib import Path
+
+    session = Session(channel="test", sender_id="user")
+    msg = OutboundMessage(session=session, text="", attachment=Path("/tmp/foo.jpg"))
+    assert msg.attachment == Path("/tmp/foo.jpg")

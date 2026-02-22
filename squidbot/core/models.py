@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 
@@ -77,6 +78,7 @@ class InboundMessage:
     session: Session
     text: str
     received_at: datetime = field(default_factory=datetime.now)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -85,6 +87,8 @@ class OutboundMessage:
 
     session: Session
     text: str
+    attachment: Path | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
