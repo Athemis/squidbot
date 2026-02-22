@@ -209,8 +209,10 @@ mtime polling — no restart needed after creating or editing a skill.
 └── cron/jobs.json      # Scheduled task definitions
 
 ~/.squidbot/workspace/
-├── SOUL.md             # Bot personality, values, tone, identity (optional)
-├── USER.md             # Information about the user (optional)
+├── BOOTSTRAP.md        # First-run ritual: identity interview (delete when done)
+├── IDENTITY.md         # Bot name, creature, vibe, emoji (created during bootstrap)
+├── SOUL.md             # Bot values, character, operating principles (bundled default)
+├── USER.md             # Information about the user (built up over time)
 ├── AGENTS.md           # Operative instructions: tools, workflows, conventions
 ├── ENVIRONMENT.md      # Local setup notes: SSH hosts, devices, aliases (optional)
 ├── HEARTBEAT.md        # Optional standing checklist for heartbeat

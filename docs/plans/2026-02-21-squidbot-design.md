@@ -645,8 +645,10 @@ Result returned as tool_result to parent
     └── jobs.json            # Scheduled task definitions
 
 ~/.squidbot/workspace/
-├── SOUL.md                  # Bot personality, values, tone, identity (optional)
-├── USER.md                  # Information about the user (optional)
+├── BOOTSTRAP.md             # First-run ritual: intro + identity interview (delete when done)
+├── IDENTITY.md              # Bot name, creature, vibe, emoji (created during bootstrap)
+├── SOUL.md                  # Bot values, character, how it operates (bundled default)
+├── USER.md                  # Information about the user (built up over time)
 ├── AGENTS.md                # Operative instructions: tools, workflows, conventions
 ├── ENVIRONMENT.md           # Local setup notes: SSH hosts, devices, aliases (optional)
 ├── HEARTBEAT.md             # Standing checklist for heartbeat (optional)
@@ -668,10 +670,14 @@ file set is fixed and convention-based, inspired by OpenClaw.
 
 | File | Purpose |
 |---|---|
-| `SOUL.md` | Bot personality, values, tone, identity |
+| `SOUL.md` | Bot values, character, operating principles (bundled default) |
 | `USER.md` | Information about the user (name, timezone, preferences) |
 | `AGENTS.md` | Operative instructions: tools, workflows, conventions |
 | `ENVIRONMENT.md` | Local setup notes: SSH hosts, devices, aliases |
+
+`IDENTITY.md` and `BOOTSTRAP.md` are workspace files but are not part of the
+bootstrap loading order — `IDENTITY.md` is referenced by `AGENTS.md` at
+session start, and `BOOTSTRAP.md` is a one-time ritual that self-destructs.
 
 Files are concatenated in this order, separated by `---`. If none exist, a minimal
 fallback prompt is used.
