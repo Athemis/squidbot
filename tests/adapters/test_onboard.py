@@ -299,3 +299,86 @@ async def test_onboard_bootstrap_rerun_no_does_not_create_file(tmp_path: Path) -
         await _run_onboard(config_path)
 
     assert not (workspace / "BOOTSTRAP.md").exists()
+
+
+# ── Overwrite prompt ──────────────────────────────────────────────────────────
+
+
+async def test_onboard_overwrite_all_yes_replaces_existing_files(tmp_path: Path) -> None:
+    """'y' to overwrite-all → existing files are replaced with bundled templates."""
+    config_path = tmp_path / "squidbot.yaml"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "SOUL.md").write_text("old soul", encoding="utf-8")
+    (workspace / "AGENTS.md").write_text("old agents", encoding="utf-8")
+
+    settings = _make_settings(workspace)
+    with (
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "y"]),
+        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("builtins.print"),
+    ):
+        await _run_onboard(config_path)
+
+    assert (workspace / "SOUL.md").read_text(encoding="utf-8") != "old soul"
+    assert (workspace / "AGENTS.md").read_text(encoding="utf-8") != "old agents"
+
+
+async def test_onboard_overwrite_all_no_then_per_file_yes_replaces(tmp_path: Path) -> None:
+    """'n' to overwrite-all, then 'y' per file → that file is replaced."""
+    config_path = tmp_path / "squidbot.yaml"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "SOUL.md").write_text("old soul", encoding="utf-8")
+
+    settings = _make_settings(workspace)
+    # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=y
+    with (
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "y"]),
+        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("builtins.print"),
+    ):
+        await _run_onboard(config_path)
+
+    assert (workspace / "SOUL.md").read_text(encoding="utf-8") != "old soul"
+
+
+async def test_onboard_overwrite_all_no_then_per_file_no_keeps(tmp_path: Path) -> None:
+    """'n' to overwrite-all, then 'n' per file → file is kept."""
+    config_path = tmp_path / "squidbot.yaml"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "SOUL.md").write_text("old soul", encoding="utf-8")
+
+    settings = _make_settings(workspace)
+    # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=n
+    with (
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "n"]),
+        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("builtins.print"),
+    ):
+        await _run_onboard(config_path)
+
+    assert (workspace / "SOUL.md").read_text(encoding="utf-8") == "old soul"
+
+
+async def test_onboard_no_overwrite_prompt_when_no_existing_files(tmp_path: Path) -> None:
+    """Fresh workspace (no existing files) → no overwrite prompt shown."""
+    config_path = tmp_path / "squidbot.yaml"
+    workspace = tmp_path / "workspace"
+
+    prompts: list[str] = []
+
+    def capturing_input(prompt: str = "") -> str:
+        prompts.append(prompt)
+        return ""
+
+    settings = _make_settings(workspace)
+    with (
+        patch("squidbot.cli.main.input", side_effect=capturing_input),
+        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("builtins.print"),
+    ):
+        await _run_onboard(config_path)
+
+    assert not any("overwrite" in p.lower() for p in prompts)
