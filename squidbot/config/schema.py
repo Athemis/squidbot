@@ -75,11 +75,29 @@ class McpServerConfig(BaseModel):
     url: str = ""
 
 
+class SpawnProfile(BaseModel):
+    """Configuration for a named sub-agent profile."""
+
+    system_prompt: str = ""
+    tools: list[str] = Field(
+        default_factory=list,
+        description="Tool names the sub-agent may use. Empty list means all tools.",
+    )
+
+
+class SpawnSettings(BaseModel):
+    """Configuration for the spawn tool."""
+
+    enabled: bool = False
+    profiles: dict[str, SpawnProfile] = Field(default_factory=dict)
+
+
 class ToolsConfig(BaseModel):
     shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
     files: ShellToolConfig = Field(default_factory=ShellToolConfig)  # reuse enabled flag
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
+    spawn: SpawnSettings = Field(default_factory=SpawnSettings)
 
 
 class MatrixChannelConfig(BaseModel):
