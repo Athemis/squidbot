@@ -326,21 +326,24 @@ async def _run_gateway(config_path: Path) -> None:
     logger.info("gateway starting")
     matrix_state = "enabled" if settings.channels.matrix.enabled else "disabled"
     email_state = "enabled" if settings.channels.email.enabled else "disabled"
-    logger.info(f"matrix: {matrix_state}")
-    logger.info(f"email: {email_state}")
+    logger.info("matrix: {}", matrix_state)
+    logger.info("email: {}", email_state)
 
     hb = settings.agents.heartbeat
     if hb.enabled:
         logger.info(
-            f"heartbeat: every {hb.interval_minutes}m, "
-            f"active {hb.active_hours_start}-{hb.active_hours_end} {hb.timezone}"
+            "heartbeat: every {}m, active {}-{} {}",
+            hb.interval_minutes,
+            hb.active_hours_start,
+            hb.active_hours_end,
+            hb.timezone,
         )
     else:
         logger.info("heartbeat: disabled")
 
     storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
     cron_jobs = await storage.load_cron_jobs()
-    logger.info(f"cron: {len(cron_jobs)} jobs loaded")
+    logger.info("cron: {} jobs loaded", len(cron_jobs))
 
     agent_loop = await _make_agent_loop(settings)
     workspace = Path(settings.agents.workspace).expanduser()
