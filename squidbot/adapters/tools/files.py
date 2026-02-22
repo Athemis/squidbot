@@ -8,6 +8,7 @@ the workspace directory and path traversal outside it is blocked.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from squidbot.core.models import ToolDefinition, ToolResult
 
@@ -45,7 +46,8 @@ class ReadFileTool:
             name=self.name, description=self.description, parameters=self.parameters
         )
 
-    async def execute(self, path: str, **_: object) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = str(kwargs.get("path", ""))
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(
@@ -84,7 +86,9 @@ class WriteFileTool:
             name=self.name, description=self.description, parameters=self.parameters
         )
 
-    async def execute(self, path: str, content: str, **_: object) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = str(kwargs.get("path", ""))
+        content: str = str(kwargs.get("content", ""))
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(
@@ -124,7 +128,8 @@ class ListFilesTool:
             name=self.name, description=self.description, parameters=self.parameters
         )
 
-    async def execute(self, path: str = ".", **_: object) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        path: str = str(kwargs.get("path", "."))
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(

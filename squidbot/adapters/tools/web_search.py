@@ -80,14 +80,15 @@ class WebSearchTool:
             name=self.name, description=self.description, parameters=self.parameters
         )
 
-    async def execute(self, query: str, max_results: int = 5, **_: object) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """
         Run a web search and return formatted results.
 
         Args:
-            query: The search query string.
-            max_results: Maximum number of results to return.
+            kwargs: Must contain "query" (str) and optionally "max_results" (int, default 5).
         """
+        query: str = str(kwargs.get("query", ""))
+        max_results: int = int(kwargs.get("max_results", 5))
         try:
             results = await self._backend(query, max_results)
         except Exception as e:

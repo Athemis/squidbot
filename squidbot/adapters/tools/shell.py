@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from squidbot.core.models import ToolDefinition, ToolResult
 
@@ -48,8 +49,10 @@ class ShellTool:
             parameters=self.parameters,
         )
 
-    async def execute(self, command: str, timeout: int = 30, **_: object) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Run the command and return combined stdout/stderr."""
+        command: str = str(kwargs.get("command", ""))
+        timeout: int = int(kwargs.get("timeout", 30))
         cwd = str(self._workspace) if self._restrict and self._workspace else None
         try:
             proc = await asyncio.create_subprocess_shell(

@@ -4,6 +4,8 @@ Memory write tool — allows the agent to update its long-term memory document.
 
 from __future__ import annotations
 
+from typing import Any
+
 from squidbot.core.models import ToolDefinition, ToolResult
 from squidbot.core.ports import MemoryPort
 
@@ -45,6 +47,7 @@ class MemoryWriteTool:
             parameters=self.parameters,
         )
 
-    async def execute(self, content: str, **_: object) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        content: str = str(kwargs.get("content", ""))
         await self._storage.save_memory_doc(self._session_id, content)
         return ToolResult(tool_call_id="", content="Memory updated successfully.")
