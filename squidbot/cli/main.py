@@ -546,7 +546,11 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     try:
         # If BOOTSTRAP.md exists, trigger the bootstrap interview before the user speaks
         if (workspace / "BOOTSTRAP.md").exists():
-            await agent_loop.run(CliChannel.SESSION, "_start_", channel)
+            await agent_loop.run(
+                CliChannel.SESSION,
+                "BOOTSTRAP.md exists. Follow it now.",
+                channel,
+            )
         async for inbound in channel.receive():
             await agent_loop.run(inbound.session, inbound.text, channel)
     finally:
