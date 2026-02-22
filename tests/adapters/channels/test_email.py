@@ -185,3 +185,8 @@ class TestExtractAttachments:
         saved = [f for f in tmp_path.iterdir()]
         assert len(saved) == 1
         assert saved[0].read_bytes() == b"pdfcontent"
+        # filename follows squidbot-<sha8>.ext pattern
+        assert saved[0].name.startswith("squidbot-")
+        assert saved[0].name.endswith(".pdf")
+        # annotation line ends with the saved path
+        assert lines[0].endswith(str(saved[0]))
