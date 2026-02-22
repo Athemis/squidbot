@@ -123,3 +123,24 @@ class CronJob:
     enabled: bool = True
     timezone: str = "UTC"
     last_run: datetime | None = None
+
+
+@dataclass
+class SessionInfo:
+    """Runtime metadata for a session seen since gateway start."""
+
+    session_id: str
+    channel: str
+    sender_id: str
+    started_at: datetime
+    message_count: int
+
+
+@dataclass
+class ChannelStatus:
+    """Runtime status of a channel adapter."""
+
+    name: str
+    enabled: bool
+    connected: bool
+    error: str | None = None

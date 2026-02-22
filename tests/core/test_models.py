@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 from datetime import datetime
 
 from squidbot.core.models import (
+    ChannelStatus,
     CronJob,
     InboundMessage,
     Message,
     OutboundMessage,
     Session,
+    SessionInfo,
     ToolCall,
     ToolDefinition,
 )
@@ -77,3 +81,34 @@ def test_outbound_message_attachment_set():
     session = Session(channel="test", sender_id="user")
     msg = OutboundMessage(session=session, text="", attachment=Path("/tmp/foo.jpg"))
     assert msg.attachment == Path("/tmp/foo.jpg")
+
+
+class TestSessionInfo:
+    def test_fields(self) -> None:
+        now = datetime(2026, 1, 1, 12, 0, 0)
+        info = SessionInfo(
+            session_id="matrix:@alice:example.com",
+            channel="matrix",
+            sender_id="@alice:example.com",
+            started_at=now,
+            message_count=3,
+        )
+        assert info.session_id == "matrix:@alice:example.com"
+        assert info.channel == "matrix"
+        assert info.sender_id == "@alice:example.com"
+        assert info.started_at == now
+        assert info.message_count == 3
+
+
+class TestChannelStatus:
+    def test_connected_with_no_error(self) -> None:
+        status = ChannelStatus(name="matrix", enabled=True, connected=True)
+        assert status.name == "matrix"
+        assert status.enabled is True
+        assert status.connected is True
+        assert status.error is None
+
+    def test_error_field(self) -> None:
+        status = ChannelStatus(name="email", enabled=True, connected=False, error="timeout")
+        assert status.error == "timeout"
+        assert status.connected is False
