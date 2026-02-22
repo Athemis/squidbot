@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -327,3 +328,139 @@ class TestMatrixChannelTyping:
         finally:
             matrix_mod._TYPING_KEEPALIVE_S = original
             await ch.send_typing("matrix:@alice:example.org", typing=False)
+
+
+class TestMatrixChannelSend:
+    """MatrixChannel.send() posts correct Matrix events."""
+
+    @pytest.mark.asyncio
+    async def test_send_text_posts_formatted_message(self) -> None:
+        """send() calls room_send with m.text + HTML formatted_body."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        sent: list[dict[str, Any]] = []
+
+        async def fake_room_send(
+            room_id: str, message_type: str, content: dict[str, Any]
+        ) -> MagicMock:
+            sent.append({"room_id": room_id, "type": message_type, "content": content})
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.room_send = fake_room_send
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="**hello**",
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+        await ch.send(msg)
+
+        assert len(sent) == 1
+        assert sent[0]["type"] == "m.room.message"
+        assert sent[0]["content"]["msgtype"] == "m.text"
+        assert sent[0]["content"]["body"] == "**hello**"
+        assert "<strong>hello</strong>" in sent[0]["content"]["formatted_body"]
+
+    @pytest.mark.asyncio
+    async def test_send_text_with_thread_root_adds_relates_to(self) -> None:
+        """send() with matrix_thread_root adds m.relates_to to the event."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        sent: list[dict[str, Any]] = []
+
+        async def fake_room_send(
+            room_id: str, message_type: str, content: dict[str, Any]
+        ) -> MagicMock:
+            sent.append(content)
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.room_send = fake_room_send
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="reply",
+            metadata={
+                "matrix_room_id": "!room1:example.org",
+                "matrix_thread_root": "$thread_root_456",
+            },
+        )
+        await ch.send(msg)
+
+        assert sent[0]["m.relates_to"]["rel_type"] == "m.thread"
+        assert sent[0]["m.relates_to"]["event_id"] == "$thread_root_456"
+        assert sent[0]["m.relates_to"]["is_falling_back"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_without_room_id_logs_and_drops(self) -> None:
+        """send() with no matrix_room_id in metadata drops the message."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.room_send = AsyncMock()
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(session=session, text="hello", metadata={})
+        await ch.send(msg)
+
+        ch._client.room_send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_attachment_uploads_and_sends_media_event(self, tmp_path: Path) -> None:
+        """send() with attachment uploads the file and sends a media event."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        # Create a minimal valid JPEG (enough for magic to detect)
+        jpg = tmp_path / "test.jpg"
+        jpg.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\xd9")  # minimal JPEG
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        sent: list[dict[str, Any]] = []
+
+        async def fake_upload(
+            data_provider: Any, content_type: str, filename: str, filesize: int
+        ) -> tuple[MagicMock, Any]:
+            resp = MagicMock()
+            resp.content_uri = "mxc://example.org/TestMediaId"
+            return resp, None
+
+        async def fake_room_send(
+            room_id: str, message_type: str, content: dict[str, Any]
+        ) -> MagicMock:
+            sent.append(content)
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = fake_room_send
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=jpg,
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        with patch("magic.from_file", return_value="image/jpeg"):
+            await ch.send(msg)
+
+        # Should have sent one media event
+        media_events = [e for e in sent if e.get("msgtype") == "m.image"]
+        assert len(media_events) == 1
+        assert media_events[0]["url"] == "mxc://example.org/TestMediaId"
+        assert media_events[0]["filename"] == "test.jpg"
