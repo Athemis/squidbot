@@ -8,9 +8,10 @@
 implements `ChannelPort` structurally, uses `matrix-nio` for all Matrix I/O. Core models get
 two new fields (`InboundMessage.metadata`, `OutboundMessage.attachment` + `.metadata`). The
 typing keepalive loop runs inside `MatrixChannel`, invisible to the core. Attachments use
-`python-magic` for MIME, Pillow for image dimensions, ffprobe for video/audio metadata.
+`mimetypes.guess_type` for MIME (with optional `python-magic` for content-based detection),
+Pillow for image dimensions, ffprobe for video/audio metadata.
 
-**Tech Stack:** matrix-nio, python-magic, Pillow, ffprobe (subprocess), markdown-it-py,
+**Tech Stack:** matrix-nio, mimetypes (stdlib), python-magic (optional), Pillow, ffprobe (subprocess), markdown-it-py,
 asyncio, pytest + unittest.mock
 
 **Design doc:** `docs/plans/2026-02-22-matrix-channel-design.md`
@@ -161,10 +162,11 @@ Note: `allow_from` is renamed to `allowlist` and `room_ids` is added. The existi
 
 **Step 2: Add new dependencies to `pyproject.toml`**
 
-In the `dependencies` list (currently ends at `"loguru>=0.7"`), add:
+In the `dependencies` list, add only `Pillow` (hard dependency for image dimensions).
+`python-magic` is optional — not added to `pyproject.toml`; users can install it separately
+for more accurate content-based MIME detection.
 
 ```toml
-    "python-magic>=0.4",
     "Pillow>=10.0",
 ```
 
@@ -174,7 +176,7 @@ In the `dependencies` list (currently ends at `"loguru>=0.7"`), add:
 uv sync
 ```
 
-Expected: resolves and installs `python-magic` and `Pillow`.
+Expected: resolves and installs `Pillow`.
 
 **Step 4: Run full suite**
 
@@ -188,7 +190,7 @@ Expected: all pass, no lint errors.
 
 ```bash
 git add squidbot/config/schema.py pyproject.toml uv.lock
-git commit --no-gpg-sign -m "feat: add room_ids+allowlist to MatrixChannelConfig, add python-magic and Pillow deps"
+git commit --no-gpg-sign -m "feat: add room_ids+allowlist to MatrixChannelConfig, add Pillow dep"
 ```
 
 ---
@@ -479,6 +481,23 @@ def _render_markdown(text: str) -> str:
     return _md.render(text).strip()
 
 
+def _detect_mime(path: Path) -> str:
+    """
+    Detect the MIME type of a file.
+
+    Uses python-magic if available (content-based detection), falls back to
+    mimetypes.guess_type() (extension-based) with application/octet-stream as
+    final fallback.
+    """
+    try:
+        import magic  # noqa: PLC0415
+
+        return str(magic.from_file(str(path), mime=True))
+    except ImportError:
+        mime, _ = mimetypes.guess_type(path.name)
+        return mime or "application/octet-stream"
+
+
 def _mime_to_msgtype(mime: str) -> str:
     """Map a MIME type to a Matrix message type."""
     if mime.startswith("image/"):
@@ -761,9 +780,7 @@ class MatrixChannel:
     ) -> None:
         """Upload a file and send it as a typed media event."""
         assert self._client is not None
-        import magic  # noqa: PLC0415
-
-        mime: str = magic.from_file(str(path), mime=True)
+        mime: str = _detect_mime(path)
         msgtype = _mime_to_msgtype(mime)
         info = _media_metadata(path, mime)
 
@@ -1267,7 +1284,7 @@ class TestMatrixChannelSend:
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
-        with patch("magic.from_file", return_value="image/jpeg"):
+        with patch("mimetypes.guess_type", return_value=("image/jpeg", None)):
             await ch.send(msg)
 
         # Should have sent one media event
@@ -1283,7 +1300,9 @@ class TestMatrixChannelSend:
 uv run pytest tests/adapters/channels/test_matrix.py::TestMatrixChannelSend -v
 ```
 
-Fix failures. The attachment test patches `magic.from_file` so no real file analysis is needed.
+Fix failures. The attachment test patches `mimetypes.guess_type` (the stdlib fallback)
+so no real file analysis is needed. If `python-magic` is installed in the test environment,
+patch `squidbot.adapters.channels.matrix.magic.from_file` instead.
 
 **Step 3: Run full suite + lint + types**
 

@@ -157,7 +157,10 @@ Markdown → HTML via `markdown-it-py` (already transitively available via `rich
 
 When `OutboundMessage.attachment` is a `Path`:
 
-1. **MIME detection:** `python-magic` (`magic.from_file(path, mime=True)`).
+1. **MIME detection:** `mimetypes.guess_type(path.name)` (stdlib, extension-based), with
+   `application/octet-stream` as fallback. If `python-magic` is installed, it is used instead
+   for content-based detection (more reliable for files without extensions or with wrong
+   extensions). `python-magic` is an optional dependency — not required for correct operation.
 2. **Metadata extraction:**
    - Images (`image/*`): `PIL.Image.open(path)` → `w`, `h`.
    - Videos (`video/*`): `subprocess.run(["ffprobe", ...])` with JSON output →
@@ -255,8 +258,8 @@ Per-room state allows the bot to type in multiple rooms simultaneously without i
 
 | Package | Use | Optional? |
 |---------|-----|-----------|
-| `python-magic>=0.4` | MIME detection for outgoing attachments | No (required for correct msgtype) |
-| `Pillow>=10.0` | Image dimensions (w, h) for m.image | Yes (omit w/h if unavailable) |
+| `python-magic>=0.4` | Content-based MIME detection (more accurate) | Yes (falls back to `mimetypes.guess_type` + `application/octet-stream`) |
+| `Pillow>=10.0` | Image dimensions (w, h) for m.image | No (layout-critical; omitting w/h causes client layout jumps) |
 
 `ffprobe` is an external binary (part of `ffmpeg`). It is invoked via `subprocess.run()`
 with a try/except around `FileNotFoundError`. Video/audio duration and dimensions are
@@ -292,6 +295,6 @@ Key test cases:
 | `squidbot/core/models.py` | Add `metadata: dict[str, Any]` to `InboundMessage`; add `attachment: Path \| None` and `metadata: dict[str, Any]` to `OutboundMessage` |
 | `squidbot/adapters/channels/matrix.py` | New file: `MatrixChannel` |
 | `squidbot/cli/main.py` | Wire `MatrixChannel` in `_run_gateway()`; add `_channel_loop()` helper |
-| `pyproject.toml` | Add `python-magic>=0.4`, `Pillow>=10.0` to dependencies |
+| `pyproject.toml` | Add `Pillow>=10.0` to dependencies (`python-magic` is optional, not in pyproject.toml) |
 | `tests/adapters/channels/test_matrix.py` | New file: unit tests |
 | `tests/core/test_models.py` | Extend existing tests for new fields |
