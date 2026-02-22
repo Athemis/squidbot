@@ -14,7 +14,7 @@ Connections are established once at startup and held open for the process lifeti
 from __future__ import annotations
 
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import Any, Protocol
 
 from loguru import logger
 from mcp import ClientSession
@@ -23,6 +23,14 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from squidbot.config.schema import McpServerConfig
 from squidbot.core.models import ToolResult
+
+
+class McpConnectionProtocol(Protocol):
+    """Protocol for MCP server connections that can be closed."""
+
+    async def close(self) -> None:
+        """Close the server connection and clean up resources."""
+        ...
 
 
 class McpToolAdapter:

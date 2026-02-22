@@ -24,6 +24,7 @@ import cyclopts
 from squidbot.config.schema import DEFAULT_CONFIG_PATH, Settings
 
 if TYPE_CHECKING:
+    from squidbot.adapters.tools.mcp import McpConnectionProtocol
     from squidbot.core.agent import AgentLoop
 
 app = cyclopts.App(name="squidbot", help="A lightweight personal AI assistant.")
@@ -249,7 +250,7 @@ def _setup_logging(level: str) -> None:
 
 async def _make_agent_loop(
     settings: Settings,
-) -> tuple[AgentLoop, list[object]]:
+) -> tuple[AgentLoop, list[McpConnectionProtocol]]:
     """
     Construct the agent loop from configuration.
 
@@ -308,7 +309,7 @@ async def _make_agent_loop(
         registry.register(WebSearchTool(config=settings.tools.web_search))
 
     # MCP servers
-    mcp_connections: list[object] = []
+    mcp_connections: list[McpConnectionProtocol] = []
     if settings.tools.mcp_servers:
         from squidbot.adapters.tools.mcp import McpServerConnection  # noqa: PLC0415
 
@@ -346,7 +347,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         await agent_loop.run(CliChannel.SESSION, message, channel)
         print()  # newline after streamed output
         for conn in mcp_connections:
-            await conn.close()  # type: ignore[union-attr]
+            await conn.close()
         return
 
     # Interactive REPL mode: Rich interface
@@ -356,11 +357,12 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     console.print("[dim]type 'exit' or Ctrl+D to quit[/dim]")
 
     channel = RichCliChannel()
-    async for inbound in channel.receive():
-        await agent_loop.run(inbound.session, inbound.text, channel)
-
-    for conn in mcp_connections:
-        await conn.close()  # type: ignore[union-attr]
+    try:
+        async for inbound in channel.receive():
+            await agent_loop.run(inbound.session, inbound.text, channel)
+    finally:
+        for conn in mcp_connections:
+            await conn.close()
 
 
 async def _run_gateway(config_path: Path) -> None:
@@ -431,12 +433,13 @@ async def _run_gateway(config_path: Path) -> None:
         config=settings.agents.heartbeat,
     )
 
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(scheduler.run(on_due=on_cron_due))
-        tg.create_task(heartbeat.run())
-
-    for conn in mcp_connections:
-        await conn.close()  # type: ignore[union-attr]
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(scheduler.run(on_due=on_cron_due))
+            tg.create_task(heartbeat.run())
+    finally:
+        for conn in mcp_connections:
+            await conn.close()
 
 
 async def _run_onboard(config_path: Path) -> None:
