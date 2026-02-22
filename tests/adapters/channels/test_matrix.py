@@ -456,7 +456,7 @@ class TestMatrixChannelSend:
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
-        with patch("magic.from_file", return_value="image/jpeg"):
+        with patch("squidbot.adapters.channels.matrix._detect_mime", return_value="image/jpeg"):
             await ch.send(msg)
 
         # Should have sent one media event
