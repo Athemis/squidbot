@@ -444,17 +444,36 @@ simply implements that port.
 @dataclass
 class Message:
     role: Literal["system", "user", "assistant", "tool"]
-    content: str | list[ContentBlock]
+    content: str
     tool_calls: list[ToolCall] | None = None
-    tool_call_id: str | None = None
+    tool_call_id: str | None = None       # set when role == "tool"
     timestamp: datetime = field(default_factory=datetime.now)
 
 @dataclass
 class Session:
-    id: str           # "{channel_type}:{sender_id}"
     channel: str
     sender_id: str
-    created_at: datetime
+    created_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def id(self) -> str:
+        return f"{self.channel}:{self.sender_id}"
+
+@dataclass
+class InboundMessage:
+    session: Session
+    text: str
+    received_at: datetime = field(default_factory=datetime.now)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    # Matrix keys: matrix_event_id, matrix_room_id, matrix_thread_root
+
+@dataclass
+class OutboundMessage:
+    session: Session
+    text: str
+    attachment: Path | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    # Matrix keys: matrix_reaction, matrix_reply_to, matrix_thread_root
 
 @dataclass
 class CronJob:
@@ -534,8 +553,9 @@ Per-field environment variable overrides supported via Pydantic Settings.
       "user_id": "@bot:matrix.org",
       "access_token": "syt_...",
       "device_id": "SQUIDBOT01",
-      "allow_from": [],
-      "group_policy": "mention"
+      "room_ids": [],
+      "group_policy": "mention",
+      "allowlist": []
     },
     "email": {
       "enabled": false,
@@ -561,7 +581,7 @@ Per-field environment variable overrides supported via Pydantic Settings.
 
 - `restrict_to_workspace: true` limits all file operations to the configured workspace path
 - Shell commands run on the host — the user trusts their own setup
-- `allow_from` whitelists per channel (empty = allow all, non-empty = explicit allowlist)
+- `allowlist` per channel when `group_policy: allowlist` (empty = no filter for other policies)
 - No pairing codes or complex auth — for personal use, allowlists are sufficient
 - TLS verification always on by default for all HTTP clients
 
@@ -597,10 +617,16 @@ Result returned as tool_result to parent
 | Async runtime | asyncio (stdlib, Python 3.14) |
 | HTTP client | httpx |
 | Matrix protocol | matrix-nio |
+| Markdown → HTML | markdown-it-py |
+| Image dimensions | Pillow |
+| MIME detection | mimetypes (stdlib); python-magic optional |
+| Web search | duckduckgo-search |
 | MCP client | mcp |
 | CLI framework | cyclopts |
+| Terminal UI | rich |
 | YAML parsing | ruamel.yaml (YAML 1.2, round-trip safe) |
 | Cron parsing | cronsim |
+| Logging | loguru |
 | Build tool | uv |
 | Linter/formatter | ruff |
 | Type checker | mypy |
