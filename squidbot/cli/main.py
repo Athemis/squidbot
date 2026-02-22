@@ -196,7 +196,7 @@ def _print_banner(settings: Settings) -> None:
 
     ver = version("squidbot")
     model = settings.llm.model
-    workspace = Path(settings.agents.workspace).expanduser()
+    workspace = Path(settings.agents.workspace).expanduser().resolve()
     print(f"🦑 squidbot v{ver}", file=sys.stderr)
     print(f"   model:     {model}", file=sys.stderr)
     print(f"   workspace: {workspace}", file=sys.stderr)
