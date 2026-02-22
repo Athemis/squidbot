@@ -386,11 +386,15 @@ async def _make_agent_loop(
 
     # Spawn tool profile injection into system prompt
     if settings.tools.spawn.enabled and settings.tools.spawn.profiles:
+        import html  # noqa: PLC0415
+
         profile_lines = []
         for pname, prof in settings.tools.spawn.profiles.items():
             tools_str = ", ".join(prof.tools) if prof.tools else "all"
             profile_lines.append(
-                f'  <profile name="{pname}">{prof.system_prompt} Tools: {tools_str}.</profile>'
+                f'  <profile name="{html.escape(pname)}">'
+                f"{html.escape(prof.system_prompt)} Tools: {html.escape(tools_str)}."
+                f"</profile>"
             )
         profiles_xml = (
             "<available_spawn_profiles>\n"
@@ -402,6 +406,10 @@ async def _make_agent_loop(
     agent_loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt=system_prompt)
 
     if settings.tools.spawn.enabled:
+        # SubAgentFactory holds a live reference to `registry`. SpawnTool and
+        # SpawnAwaitTool are registered into it below, and SubAgentFactory.build()
+        # explicitly filters them out via _SPAWN_TOOL_NAMES — so the ordering is
+        # intentional: the factory sees the spawn tools and skips them.
         from squidbot.adapters.tools.spawn import (  # noqa: PLC0415
             JobStore,
             SpawnAwaitTool,
