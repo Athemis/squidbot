@@ -9,12 +9,25 @@ EmailChannel, which is implemented in this same module.
 
 from __future__ import annotations
 
+import asyncio
+import email as email_lib
 import hashlib
 import mimetypes
 import re
+import ssl
+from collections.abc import AsyncIterator
 from email.message import Message as EmailMessage
 from email.utils import parseaddr
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import aioimaplib
+from loguru import logger
+
+from squidbot.core.models import InboundMessage, OutboundMessage, Session
+
+if TYPE_CHECKING:
+    from squidbot.config.schema import EmailChannelConfig
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -231,3 +244,213 @@ def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
         dest.write_bytes(payload)
         lines.append(f"[Anhang: {filename} ({mime})] → {dest}")
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Constants for EmailChannel
+# ---------------------------------------------------------------------------
+
+_TMP_DIR = Path("/tmp")
+_IDLE_TIMEOUT_S: int = 29 * 60  # RFC2177: renew before server's 30min limit
+_BACKOFF_CAP_S: float = 60.0
+
+
+# ---------------------------------------------------------------------------
+# EmailChannel
+# ---------------------------------------------------------------------------
+
+
+class EmailChannel:
+    """
+    Email channel adapter.
+
+    Connects to an IMAP server, polls for new messages (IDLE preferred,
+    polling fallback), and sends replies via SMTP.
+
+    Args:
+        config: EmailChannelConfig from squidbot settings.
+        tmp_dir: Directory for saving incoming attachments (default: /tmp).
+    """
+
+    streaming: bool = False
+
+    def __init__(
+        self,
+        config: EmailChannelConfig,
+        tmp_dir: Path = _TMP_DIR,
+    ) -> None:
+        """Initialize EmailChannel with the given configuration."""
+        self._config = config
+        self._tmp_dir = tmp_dir
+        self._queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
+        self._seen_uids: set[str] = set()
+        self._idle_supported: bool = True
+        self._imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL | None = None
+        self._warn_tls()
+
+    def _warn_tls(self) -> None:
+        """Emit security warnings for weakened TLS settings."""
+        if not self._config.tls:
+            logger.warning("email: TLS disabled — connections are unencrypted (insecure)")
+        elif not self._config.tls_verify:
+            logger.warning("email: TLS certificate verification disabled — insecure")
+
+    # ── ChannelPort interface ────────────────────────────────────────────────
+
+    async def receive(self) -> AsyncIterator[InboundMessage]:
+        """Yield inbound messages as they arrive from IMAP."""
+        asyncio.create_task(self._imap_loop())
+        while True:
+            msg = await self._queue.get()
+            yield msg
+
+    async def send(self, message: OutboundMessage) -> None:
+        """Send a reply email via SMTP. Implemented in a later step."""
+
+    async def send_typing(self, session_id: str) -> None:
+        """No-op: email does not support typing indicators."""
+
+    # ── IMAP loop ────────────────────────────────────────────────────────────
+
+    async def _imap_loop(self) -> None:
+        """Drive the IMAP connection: fetch unseen, then IDLE or poll."""
+        backoff = 1.0
+        while True:
+            try:
+                await self._connect_imap()
+                backoff = 1.0  # reset on successful connect
+                while True:
+                    await self._fetch_unseen()
+                    if self._idle_supported:
+                        await self._idle_once()
+                    else:
+                        await asyncio.sleep(self._config.poll_interval_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("email: IMAP error: {} — reconnecting in {}s", exc, backoff)
+                self._imap = None
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, _BACKOFF_CAP_S)
+
+    async def _connect_imap(self) -> None:
+        """Establish IMAP connection, login, and select INBOX."""
+        if self._imap is not None:
+            return
+        cfg = self._config
+        ssl_ctx: ssl.SSLContext | None = None
+        if cfg.tls:
+            ssl_ctx = ssl.create_default_context()
+            if not cfg.tls_verify:
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        if not cfg.tls:
+            imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL = aioimaplib.IMAP4(
+                host=cfg.imap_host, port=cfg.imap_port
+            )
+        elif cfg.imap_starttls:
+            imap = aioimaplib.IMAP4(host=cfg.imap_host, port=cfg.imap_port)
+        else:
+            imap = aioimaplib.IMAP4_SSL(host=cfg.imap_host, port=cfg.imap_port, ssl_context=ssl_ctx)
+
+        await imap.wait_hello_from_server()
+
+        if cfg.tls and cfg.imap_starttls and ssl_ctx is not None:
+            await imap.starttls(ssl_ctx)
+
+        await imap.login(cfg.username, cfg.password)
+        await imap.select("INBOX")
+        self._imap = imap
+        logger.info("email: IMAP connected to {}", cfg.imap_host)
+
+    async def _fetch_unseen(self) -> None:
+        """Fetch all unseen messages and enqueue them as InboundMessages."""
+        assert self._imap is not None
+        status, data = await self._imap.uid("search", None, "UNSEEN")
+        if status != "OK" or not data or not data[0]:
+            return
+        uid_list = data[0].decode().split() if isinstance(data[0], bytes) else []
+        for uid in uid_list:
+            if uid in self._seen_uids:
+                continue
+            await self._fetch_and_enqueue(uid)
+
+    async def _fetch_and_enqueue(self, uid: str) -> None:
+        """Fetch a single message by UID, parse it, and enqueue."""
+        assert self._imap is not None
+        status, data = await self._imap.uid("fetch", uid, "(RFC822)")
+        if status != "OK" or len(data) < 2:
+            return
+        raw = data[1] if isinstance(data[1], bytes) else None
+        if raw is None:
+            return
+
+        msg = email_lib.message_from_bytes(raw)
+        from_raw: str = msg.get("From") or ""
+        sender = _normalize_address(from_raw)
+
+        # allow_from filter
+        if self._config.allow_from and sender not in self._config.allow_from:
+            await self._imap.uid("store", uid, "+FLAGS", r"(\Seen)")
+            self._seen_uids.add(uid)
+            return
+
+        text = _extract_text(msg)
+        attachment_lines = _extract_attachments(msg, self._tmp_dir)
+        if attachment_lines:
+            text = text + "\n" + "\n".join(attachment_lines)
+
+        subject: str = msg.get("Subject") or ""
+        message_id: str = msg.get("Message-ID") or ""
+        references: str = msg.get("References") or ""
+        in_reply_to: str = msg.get("In-Reply-To") or ""
+        sig_type = _detect_signature_type(msg)
+
+        metadata: dict[str, Any] = {
+            "email_message_id": message_id,
+            "email_subject": subject,
+            "email_from": sender,
+            "email_references": references,
+            "email_in_reply_to": in_reply_to,
+            "email_signature_type": sig_type,
+            "email_signature_valid": None,
+            "email_signature_signer": None,
+        }
+
+        session = Session(channel="email", sender_id=sender)
+        inbound = InboundMessage(session=session, text=text, metadata=metadata)
+        self._queue.put_nowait(inbound)
+        self._seen_uids.add(uid)
+
+        await self._imap.uid("store", uid, "+FLAGS", r"(\Seen)")
+
+    async def _idle_once(self) -> None:
+        """Run one IDLE cycle. Switches to polling if IDLE is unsupported."""
+        assert self._imap is not None
+        try:
+            idle = await self._imap.idle_start(timeout=_IDLE_TIMEOUT_S)
+            await self._imap.wait_server_push()
+            self._imap.idle_done()
+            await asyncio.wait_for(idle, 30)
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc).lower()
+            if "idle" in err and ("not support" in err or "unknown" in err):
+                logger.info("email: IMAP IDLE not supported, switching to polling")
+                self._idle_supported = False
+            else:
+                raise
+
+    def _verify_signature(self, msg: EmailMessage) -> None:
+        """
+        Stub for future S/MIME and GPG signature verification.
+
+        When implemented, this method should:
+        1. Detect signature type via _detect_signature_type()
+        2. Verify via `cryptography` lib (S/MIME) or gpg subprocess (PGP)
+        3. Check signer cert/key against a configured whitelist
+        4. Set email_signature_valid and email_signature_signer in metadata
+
+        Args:
+            msg: Parsed email message. Not used yet.
+        """
