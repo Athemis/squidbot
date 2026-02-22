@@ -98,6 +98,61 @@ def test_tracker_last_update_wins():
 
 
 from squidbot.config.schema import HeartbeatConfig
+from datetime import datetime, timezone as tz
+from pathlib import Path
+from squidbot.core.heartbeat import HeartbeatService
+
+
+def _make_service(cfg: HeartbeatConfig) -> HeartbeatService:
+    """Helper: build a HeartbeatService with stub agent_loop and tracker."""
+    return HeartbeatService(
+        agent_loop=None,  # type: ignore[arg-type]
+        tracker=LastChannelTracker(),
+        workspace=Path("/tmp"),
+        config=cfg,
+    )
+
+
+def test_active_hours_always_on():
+    """Default config (00:00-24:00) is always active."""
+    svc = _make_service(
+        HeartbeatConfig(active_hours_start="00:00", active_hours_end="24:00", timezone="UTC")
+    )
+    dt = datetime(2026, 2, 22, 3, 0, tzinfo=tz.utc)
+    assert svc._is_in_active_hours(now=dt) is True
+
+
+def test_active_hours_inside_window():
+    svc = _make_service(
+        HeartbeatConfig(active_hours_start="08:00", active_hours_end="22:00", timezone="UTC")
+    )
+    dt = datetime(2026, 2, 22, 12, 0, tzinfo=tz.utc)
+    assert svc._is_in_active_hours(now=dt) is True
+
+
+def test_active_hours_before_window():
+    svc = _make_service(
+        HeartbeatConfig(active_hours_start="08:00", active_hours_end="22:00", timezone="UTC")
+    )
+    dt = datetime(2026, 2, 22, 7, 59, tzinfo=tz.utc)
+    assert svc._is_in_active_hours(now=dt) is False
+
+
+def test_active_hours_after_window():
+    svc = _make_service(
+        HeartbeatConfig(active_hours_start="08:00", active_hours_end="22:00", timezone="UTC")
+    )
+    dt = datetime(2026, 2, 22, 22, 0, tzinfo=tz.utc)
+    assert svc._is_in_active_hours(now=dt) is False
+
+
+def test_active_hours_zero_width_always_skips():
+    """start == end is treated as zero-width window — always outside."""
+    svc = _make_service(
+        HeartbeatConfig(active_hours_start="08:00", active_hours_end="08:00", timezone="UTC")
+    )
+    dt = datetime(2026, 2, 22, 8, 0, tzinfo=tz.utc)
+    assert svc._is_in_active_hours(now=dt) is False
 
 
 def test_heartbeat_config_defaults():

@@ -8,8 +8,18 @@ alerts to the last active channel. HEARTBEAT_OK responses are silently dropped.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from squidbot.config.schema import HeartbeatConfig
 from squidbot.core.models import Session
 from squidbot.core.ports import ChannelPort
+
+logger = logging.getLogger(__name__)
 
 HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
 
@@ -78,3 +88,196 @@ class LastChannelTracker:
         """
         self.channel = channel
         self.session = session
+
+
+class _SinkChannel:
+    """Internal channel that captures agent responses without delivering them."""
+
+    streaming = False
+    collected: str
+
+    def __init__(self) -> None:
+        self.collected = ""
+
+    async def receive(self) -> AsyncIterator[object]:  # type: ignore[override]
+        return
+        yield  # noqa: unreachable
+
+    async def send(self, message: object) -> None:
+        from squidbot.core.models import OutboundMessage  # noqa: PLC0415
+
+        if isinstance(message, OutboundMessage):
+            self.collected = message.text
+
+    async def send_typing(self, session_id: str) -> None:
+        pass
+
+
+class HeartbeatService:
+    """
+    Periodic heartbeat service for the squidbot gateway.
+
+    Wakes the agent every interval_minutes, reads HEARTBEAT.md from the
+    workspace, and delivers any alerts to the last active channel.
+    HEARTBEAT_OK responses are silently dropped.
+    """
+
+    def __init__(
+        self,
+        agent_loop: object,
+        tracker: LastChannelTracker,
+        workspace: Path,
+        config: HeartbeatConfig,
+    ) -> None:
+        """
+        Args:
+            agent_loop: The shared agent loop to invoke on each tick.
+            tracker: Tracks the last active channel and session.
+            workspace: Path to the agent workspace (for HEARTBEAT.md).
+            config: Heartbeat configuration.
+        """
+        self._agent_loop = agent_loop
+        self._tracker = tracker
+        self._workspace = workspace
+        self._config = config
+
+    def _is_in_active_hours(self, now: datetime | None = None) -> bool:
+        """
+        Return True if the current time is within the configured active window.
+
+        Args:
+            now: The current time. Defaults to datetime.now() if not provided.
+
+        Returns:
+            True if inside the active window; False otherwise.
+        """
+        if now is None:
+            now = datetime.now()
+
+        tz_name = self._config.timezone
+        if tz_name == "local":
+            local_now = now.astimezone()
+        else:
+            try:
+                local_now = now.astimezone(ZoneInfo(tz_name))
+            except ZoneInfoNotFoundError, KeyError:
+                logger.warning("heartbeat: unknown timezone %r, falling back to local", tz_name)
+                local_now = now.astimezone()
+
+        start_h, start_m = (int(x) for x in self._config.active_hours_start.split(":"))
+        end_h, end_m = (int(x) for x in self._config.active_hours_end.split(":"))
+
+        # Zero-width window: always outside
+        if (start_h, start_m) == (end_h, end_m):
+            return False
+
+        current_minutes = local_now.hour * 60 + local_now.minute
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m if not (end_h == 24 and end_m == 0) else 24 * 60
+
+        return start_minutes <= current_minutes < end_minutes
+
+    def _read_heartbeat_file(self) -> str | None:
+        """
+        Read HEARTBEAT.md from the workspace.
+
+        Returns:
+            File contents as a string, or None if the file does not exist.
+        """
+        path = self._workspace / "HEARTBEAT.md"
+        try:
+            return path.read_text(encoding="utf-8") if path.exists() else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _is_heartbeat_ok(text: str) -> bool:
+        """
+        Return True if the response is a HEARTBEAT_OK acknowledgment.
+
+        HEARTBEAT_OK is recognized at the start or end of the reply (after strip).
+        If it appears in the middle, the response is treated as an alert.
+
+        Args:
+            text: The agent's response text.
+
+        Returns:
+            True if the response should be silently dropped; False if it is an alert.
+        """
+        stripped = text.strip()
+        return (
+            stripped == HEARTBEAT_OK_TOKEN
+            or stripped.startswith(HEARTBEAT_OK_TOKEN + "\n")
+            or stripped.endswith("\n" + HEARTBEAT_OK_TOKEN)
+        )
+
+    async def _tick(self, now: datetime | None = None) -> None:
+        """
+        Execute a single heartbeat tick.
+
+        Args:
+            now: Current time (injectable for testing). Defaults to datetime.now().
+        """
+        # 1. Need an active session
+        if self._tracker.channel is None or self._tracker.session is None:
+            logger.debug("heartbeat: skipped (no active session)")
+            return
+
+        # 2. Active hours check
+        if not self._is_in_active_hours(now=now):
+            logger.debug("heartbeat: skipped (outside active hours)")
+            return
+
+        # 3. HEARTBEAT.md check
+        content = self._read_heartbeat_file()
+        if _is_heartbeat_empty(content):
+            logger.debug("heartbeat: skipped (HEARTBEAT.md empty)")
+            return
+
+        # 4. Run agent into a sink channel
+        sink = _SinkChannel()
+        try:
+            await self._agent_loop.run(  # type: ignore[union-attr]
+                self._tracker.session, self._config.prompt, sink
+            )
+        except Exception as e:
+            logger.error("heartbeat: agent error: %s", e)
+            return
+
+        response = sink.collected
+
+        # 5. Deliver or drop
+        if self._is_heartbeat_ok(response):
+            logger.debug("heartbeat: ok")
+            return
+
+        # Alert — deliver to the last active channel
+        from squidbot.core.models import OutboundMessage  # noqa: PLC0415
+
+        try:
+            await self._tracker.channel.send(  # type: ignore[union-attr]
+                OutboundMessage(session=self._tracker.session, text=response)
+            )
+        except Exception as e:
+            logger.error("heartbeat: delivery error: %s", e)
+
+    async def run(self) -> None:
+        """
+        Start the heartbeat loop.
+
+        Sleeps for interval_minutes between ticks. Runs until cancelled.
+        All tick errors are caught internally — this method never raises.
+        """
+        if not self._config.enabled:
+            logger.info("heartbeat: disabled")
+            return
+
+        interval_s = self._config.interval_minutes * 60
+        logger.info("heartbeat: started (every %dm)", self._config.interval_minutes)
+
+        while True:
+            await asyncio.sleep(interval_s)
+            try:
+                await self._tick()
+            except Exception as e:
+                logger.error("heartbeat: unexpected error in tick: %s", e)
