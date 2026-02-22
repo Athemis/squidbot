@@ -239,8 +239,8 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 BOOTSTRAP_FILES_MAIN: list[str] = [
-    "IDENTITY.md",
     "SOUL.md",
+    "IDENTITY.md",
     "USER.md",
     "AGENTS.md",
     "ENVIRONMENT.md",
