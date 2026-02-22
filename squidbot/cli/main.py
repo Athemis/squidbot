@@ -310,17 +310,39 @@ async def _run_gateway(config_path: Path) -> None:
     """Start all enabled channels concurrently.
 
     The gateway does not start a CLI channel — use `squidbot agent` for
-    interactive terminal use. Log output goes to stdout; control the bot
+    interactive terminal use. Log output goes to stderr; control the bot
     via Matrix or Email.
     """
-    from squidbot.adapters.persistence.jsonl import JsonlMemory
-    from squidbot.core.heartbeat import HeartbeatService, LastChannelTracker
-    from squidbot.core.models import Session
-    from squidbot.core.scheduler import CronScheduler
+    from loguru import logger  # noqa: PLC0415
+
+    from squidbot.adapters.persistence.jsonl import JsonlMemory  # noqa: PLC0415
+    from squidbot.core.heartbeat import HeartbeatService, LastChannelTracker  # noqa: PLC0415
+    from squidbot.core.models import Session  # noqa: PLC0415
+    from squidbot.core.scheduler import CronScheduler  # noqa: PLC0415
 
     settings = Settings.load(config_path)
-    agent_loop = await _make_agent_loop(settings)
+
+    # Startup summary
+    logger.info("gateway starting")
+    matrix_state = "enabled" if settings.channels.matrix.enabled else "disabled"
+    email_state = "enabled" if settings.channels.email.enabled else "disabled"
+    logger.info(f"matrix: {matrix_state}")
+    logger.info(f"email: {email_state}")
+
+    hb = settings.agents.heartbeat
+    if hb.enabled:
+        logger.info(
+            f"heartbeat: every {hb.interval_minutes}m, "
+            f"active {hb.active_hours_start}-{hb.active_hours_end} {hb.timezone}"
+        )
+    else:
+        logger.info("heartbeat: disabled")
+
     storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+    cron_jobs = await storage.load_cron_jobs()
+    logger.info(f"cron: {len(cron_jobs)} jobs loaded")
+
+    agent_loop = await _make_agent_loop(settings)
     workspace = Path(settings.agents.workspace).expanduser()
 
     tracker = LastChannelTracker()
