@@ -50,3 +50,7 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["nio", "nio.*", "magic"]
+ignore_missing_imports = true
