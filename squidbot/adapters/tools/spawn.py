@@ -1,10 +1,10 @@
 """
-Sub-agent spawn tool for squidbot.
+Sub-agent spawn tools for squidbot.
 
-Provides SpawnTool and SpawnAwaitTool, enabling a parent agent to delegate
-tasks to isolated sub-agents running as concurrent asyncio Tasks.
-Sub-agents are configured via named profiles in squidbot.yaml, or inherit
-the parent's context when no profile is specified.
+Provides CollectingChannel (internal), SubAgentFactory, JobStore, SpawnTool,
+and SpawnAwaitTool. Enables a parent agent to delegate tasks to isolated
+sub-agents running as concurrent asyncio Tasks, optionally configured via
+named profiles in squidbot.yaml.
 """
 
 from __future__ import annotations
