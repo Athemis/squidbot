@@ -41,5 +41,9 @@ def test_checked_checkbox_is_empty():
     assert _is_heartbeat_empty("- [x] done") is True
 
 
+def test_checked_checkbox_uppercase_is_empty():
+    assert _is_heartbeat_empty("- [X] done") is True
+
+
 def test_real_task_is_not_empty():
     assert _is_heartbeat_empty("- [ ] Check urgent emails") is False

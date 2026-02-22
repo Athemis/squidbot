@@ -1,5 +1,5 @@
 """
-Heartbeat service for squidbot gateway.
+Heartbeat scheduling and content analysis utilities for squidbot.
 
 Provides periodic autonomous agent wake-ups. Every N minutes the agent reads
 HEARTBEAT.md from the workspace, checks for outstanding tasks, and delivers
@@ -16,16 +16,23 @@ DEFAULT_HEARTBEAT_PROMPT = (
     "If nothing needs attention, reply with just: HEARTBEAT_OK"
 )
 
-# Lines considered "empty" for HEARTBEAT.md skip logic
-_EMPTY_CHECKBOX_PATTERNS = {"- [ ]", "* [ ]", "- [x]", "* [x]"}
+# Bare unchecked checkboxes with no task text — treated as empty placeholders
+_EMPTY_CHECKBOX_PATTERNS = {"- [ ]", "* [ ]"}
 
 
 def _is_heartbeat_empty(content: str | None) -> bool:
     """
     Return True if HEARTBEAT.md has no actionable content.
 
-    Skips blank lines, Markdown headings, HTML comments, empty checkboxes,
-    and completed (checked) checkboxes regardless of trailing text.
+    Skips blank lines, Markdown headings, HTML comments (single-line only,
+    e.g. ``<!-- placeholder -->``), bare empty checkboxes, and completed
+    checkboxes (``[x]`` / ``[X]``) regardless of trailing text.
+
+    Args:
+        content: The file content, or None if the file was absent.
+
+    Returns:
+        True if there is nothing actionable; False if any actionable line exists.
     """
     if not content:
         return True
@@ -35,11 +42,11 @@ def _is_heartbeat_empty(content: str | None) -> bool:
             continue
         if line.startswith("#"):
             continue
-        if line.startswith("<!--"):
+        if line.startswith("<!--"):  # single-line HTML comments only
             continue
         if line in _EMPTY_CHECKBOX_PATTERNS:
             continue
-        # Checked checkboxes with text (e.g. "- [x] done") are also non-actionable
+        # Checked checkboxes (with or without trailing text) are non-actionable
         if line.startswith(("- [x]", "* [x]", "- [X]", "* [X]")):
             continue
         return False
