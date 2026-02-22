@@ -58,7 +58,7 @@ class ShellTool:
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=cwd,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             output = stdout.decode(errors="replace")
             if proc.returncode != 0:
                 return ToolResult(
