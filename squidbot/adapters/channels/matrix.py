@@ -45,6 +45,23 @@ def _render_markdown(text: str) -> str:
     return rendered.strip()
 
 
+def _detect_mime(path: Path) -> str:
+    """
+    Detect the MIME type of a file.
+
+    Uses python-magic if available (content-based detection), falls back to
+    mimetypes.guess_type() (extension-based) with application/octet-stream as
+    final fallback.
+    """
+    try:
+        import magic  # noqa: PLC0415
+
+        return str(magic.from_file(str(path), mime=True))
+    except ImportError:
+        mime, _ = mimetypes.guess_type(path.name)
+        return mime or "application/octet-stream"
+
+
 def _mime_to_msgtype(mime: str) -> str:
     """Map a MIME type to a Matrix message type."""
     if mime.startswith("image/"):
@@ -338,9 +355,7 @@ class MatrixChannel:
     async def _send_attachment(self, room_id: str, path: Path, thread_root: str | None) -> None:
         """Upload a file and send it as a typed media event."""
         assert self._client is not None
-        import magic  # noqa: PLC0415
-
-        mime: str = magic.from_file(str(path), mime=True)
+        mime: str = _detect_mime(path)
         msgtype = _mime_to_msgtype(mime)
         info = _media_metadata(path, mime)
 
