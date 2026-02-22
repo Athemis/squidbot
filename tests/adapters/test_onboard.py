@@ -93,6 +93,7 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
         return s
 
     with (
+        # api_base, api_key, model, overwrite-all=N, N×5 per-file (one per BOOTSTRAP_FILES_MAIN)
         patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N"]),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -134,9 +135,11 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
         patch(
             "squidbot.cli.main.input",
             side_effect=[
+                # api_base, api_key, model
                 "https://second.example.com/v1",
                 "sk-second",
                 "gpt-4o",
+                # overwrite-all=N, then N×5 per-file (one per BOOTSTRAP_FILES_MAIN)
                 "N",
                 "N",
                 "N",
@@ -194,6 +197,8 @@ async def test_onboard_does_not_overwrite_existing_files(tmp_path: Path) -> None
 
     settings = _make_settings(workspace)
     with (
+        # api_base, api_key, model
+        # overwrite-all=N, per-file AGENTS.md=N, per-file IDENTITY.md=N, bootstrap-rerun=N
         patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N"]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),

@@ -770,18 +770,21 @@ async def _run_onboard(config_path: Path) -> None:
     if existing_files:
         listed = ", ".join(existing_files)
         overwrite_all = input(f"\nExisting files: {listed}. Overwrite all? [y/N] ").strip().lower()
-        for filename in existing_files:
-            if overwrite_all == "y":
-                do_overwrite = True
+        if overwrite_all == "y":
+            to_overwrite = existing_files
+        else:
+            to_overwrite = [
+                f for f in existing_files if input(f"Overwrite {f}? [y/N] ").strip().lower() == "y"
+            ]
+        for filename in to_overwrite:
+            template_path = _BUNDLED_WORKSPACE / filename
+            if template_path.exists():
+                (workspace / filename).write_text(
+                    template_path.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                print(f"Updated {workspace / filename}")
             else:
-                do_overwrite = input(f"Overwrite {filename}? [y/N] ").strip().lower() == "y"
-            if do_overwrite:
-                template_path = _BUNDLED_WORKSPACE / filename
-                if template_path.exists():
-                    (workspace / filename).write_text(
-                        template_path.read_text(encoding="utf-8"), encoding="utf-8"
-                    )
-                    print(f"Updated {workspace / filename}")
+                print(f"Warning: bundled template for {filename} not found, skipping")
     if bootstrap_path.exists():
         pass  # bootstrap already in progress — don't overwrite
     elif already_set_up:
