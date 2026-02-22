@@ -39,3 +39,29 @@ def test_matrix_channel_disabled_by_default():
 def test_email_channel_disabled_by_default():
     settings = Settings()
     assert settings.channels.email.enabled is False
+
+
+def test_mcp_server_config_stdio_defaults():
+    from squidbot.config.schema import McpServerConfig
+
+    cfg = McpServerConfig(command="uvx", args=["mcp-server-github"])
+    assert cfg.transport == "stdio"
+    assert cfg.command == "uvx"
+    assert cfg.args == ["mcp-server-github"]
+    assert cfg.env is None
+    assert cfg.url == ""
+
+
+def test_mcp_server_config_http():
+    from squidbot.config.schema import McpServerConfig
+
+    cfg = McpServerConfig(transport="http", url="http://localhost:8080/mcp")
+    assert cfg.transport == "http"
+    assert cfg.url == "http://localhost:8080/mcp"
+
+
+def test_tools_config_mcp_servers_typed():
+    from squidbot.config.schema import McpServerConfig, ToolsConfig
+
+    cfg = ToolsConfig(mcp_servers={"github": {"command": "uvx", "args": ["mcp-server-github"]}})
+    assert isinstance(cfg.mcp_servers["github"], McpServerConfig)

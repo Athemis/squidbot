@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -62,11 +62,24 @@ class WebSearchConfig(BaseModel):
     api_key: str = ""
 
 
+class McpServerConfig(BaseModel):
+    """Configuration for a single MCP server connection."""
+
+    transport: Literal["stdio", "http"] = "stdio"
+    # stdio transport
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] | None = None
+    cwd: str | None = None
+    # http transport
+    url: str = ""
+
+
 class ToolsConfig(BaseModel):
     shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
     files: ShellToolConfig = Field(default_factory=ShellToolConfig)  # reuse enabled flag
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    mcp_servers: dict[str, Any] = Field(default_factory=dict)
+    mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
 
 
 class MatrixChannelConfig(BaseModel):
