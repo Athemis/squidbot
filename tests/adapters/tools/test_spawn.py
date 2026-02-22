@@ -327,6 +327,8 @@ async def test_spawn_await_error_embedded_not_is_error():
     result = await await_tool.execute(job_ids=job_id)
     # is_error must be False — failures embedded in content
     assert not result.is_error
+    # AgentLoop catches LLM exceptions and formats them as user-facing error text,
+    # so _run() still returns a string (OK), not an exception (ERROR).
     assert f"[{job_id}: OK]" in result.content or f"[{job_id}: ERROR]" in result.content
 
 

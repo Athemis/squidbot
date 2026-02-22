@@ -374,15 +374,12 @@ class SpawnAwaitTool:
         results = await self._job_store.await_jobs(ids)
 
         parts: list[str] = []
-        # Include NOT FOUND for any requested IDs that weren't in the store
         for jid in ids:
             if jid not in results:
                 parts.append(f"[{jid}: NOT FOUND]")
-
-        for jid, outcome in results.items():
-            if isinstance(outcome, BaseException):
-                parts.append(f"[{jid}: ERROR]\n{outcome}")
+            elif isinstance(results[jid], BaseException):
+                parts.append(f"[{jid}: ERROR]\n{results[jid]}")
             else:
-                parts.append(f"[{jid}: OK]\n{outcome}")
+                parts.append(f"[{jid}: OK]\n{results[jid]}")
 
         return ToolResult(tool_call_id="", content="\n\n".join(parts))
