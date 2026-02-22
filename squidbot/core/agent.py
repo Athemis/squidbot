@@ -70,7 +70,14 @@ class AgentLoop:
         self._registry = registry
         self._system_prompt = system_prompt
 
-    async def run(self, session: Session, user_message: str, channel: ChannelPort) -> None:
+    async def run(
+        self,
+        session: Session,
+        user_message: str,
+        channel: ChannelPort,
+        *,
+        llm: LLMPort | None = None,
+    ) -> None:
         """
         Process a single user message and deliver the reply to the channel.
 
@@ -78,7 +85,11 @@ class AgentLoop:
             session: The conversation session (carries channel + sender identity).
             user_message: The user's input text.
             channel: The channel to deliver the response to.
+            llm: Optional LLM override for this single run. If provided,
+                 replaces self._llm for the duration of this call only.
         """
+        _llm = llm if llm is not None else self._llm
+
         messages = await self._memory.build_messages(
             session_id=session.id,
             system_prompt=self._system_prompt,
@@ -94,7 +105,7 @@ class AgentLoop:
             text_chunks: list[str] = []
 
             try:
-                response_stream = await self._llm.chat(messages, tool_definitions)
+                response_stream = await _llm.chat(messages, tool_definitions)
                 async for chunk in response_stream:
                     if isinstance(chunk, str):
                         text_chunks.append(chunk)

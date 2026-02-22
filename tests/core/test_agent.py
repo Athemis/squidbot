@@ -155,3 +155,22 @@ async def test_history_persisted_after_run(storage, memory):
     assert len(history) == 2  # user + assistant
     assert history[0].role == "user"
     assert history[1].role == "assistant"
+
+
+async def test_run_with_llm_override(storage, memory):
+    """llm_override replaces self._llm for a single run."""
+    default_llm = ScriptedLLM(["from default"])
+    override_llm = ScriptedLLM(["from override"])
+
+    loop = AgentLoop(
+        llm=default_llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="test",
+    )
+    channel = CollectingChannel()
+    session = Session(channel="cli", sender_id="u1")
+    await loop.run(session, "hello", channel, llm=override_llm)
+    assert channel.sent == ["from override"]
+    # default_llm should NOT have been called (its iterator is still fresh)
+    assert list(default_llm._responses) == ["from default"]
