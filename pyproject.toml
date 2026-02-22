@@ -18,6 +18,8 @@ dependencies = [
     "loguru>=0.7",
     "Pillow>=10.0",
     "markdown-it-py>=3.0",
+    "aioimaplib>=1.0",
+    "aiosmtplib>=3.0",
 ]
 
 [project.scripts]
@@ -52,4 +54,8 @@ strict = true
 
 [[tool.mypy.overrides]]
 module = ["nio", "nio.*", "magic"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["aioimaplib", "aioimaplib.*", "aiosmtplib", "aiosmtplib.*"]
 ignore_missing_imports = true

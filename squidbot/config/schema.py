@@ -96,6 +96,8 @@ class MatrixChannelConfig(BaseModel):
 
 
 class EmailChannelConfig(BaseModel):
+    """Configuration for the Email channel adapter."""
+
     enabled: bool = False
     imap_host: str = ""
     imap_port: int = 993
@@ -105,8 +107,11 @@ class EmailChannelConfig(BaseModel):
     password: str = ""
     from_address: str = ""
     allow_from: list[str] = Field(default_factory=list)
-    tls_verify: bool = True
-    use_tls: bool = True  # STARTTLS for SMTP
+    poll_interval_seconds: int = 60
+    tls: bool = True  # False = plaintext (local test servers only)
+    tls_verify: bool = True  # False = skip certificate verification
+    imap_starttls: bool = False  # True = STARTTLS on port 143 instead of SSL on 993
+    smtp_starttls: bool = True  # True = STARTTLS on port 587 (default); False = SSL on 465
 
 
 class ChannelsConfig(BaseModel):
