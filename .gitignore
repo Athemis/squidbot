@@ -1,10 +1,45 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.venv/
-dist/
+*.pyd
+*.so
+*.egg
 *.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# Build / distribution
+dist/
+build/
+
+# Type checkers / linters / test tools
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git worktrees
 .worktrees/
+
+# squidbot runtime data (never commit user workspace or secrets)
+squidbot.yaml
+.squidbot/
