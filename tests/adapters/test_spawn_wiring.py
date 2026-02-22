@@ -8,11 +8,30 @@ from unittest.mock import patch
 import pytest
 
 
+def _minimal_llm_settings(s: object) -> None:
+    """Populate a Settings instance with the minimal valid LLM config."""
+    from squidbot.config.schema import (
+        LLMModelConfig,
+        LLMPoolEntry,
+        LLMProviderConfig,
+    )
+
+    s.llm.providers["default"] = LLMProviderConfig(  # type: ignore[attr-defined]
+        api_base="https://api.test", api_key="sk-test"
+    )
+    s.llm.models["default"] = LLMModelConfig(  # type: ignore[attr-defined]
+        provider="default", model="test-model"
+    )
+    s.llm.pools["default"] = [LLMPoolEntry(model="default")]  # type: ignore[attr-defined]
+    s.llm.default_pool = "default"  # type: ignore[attr-defined]
+
+
 @pytest.fixture
 def settings_with_spawn():
     from squidbot.config.schema import Settings, SpawnProfile
 
     s = Settings()
+    _minimal_llm_settings(s)
     s.tools.spawn.enabled = True
     s.tools.spawn.profiles = {
         "coder": SpawnProfile(system_prompt="You are a coder.", tools=["shell"]),
@@ -25,6 +44,7 @@ def settings_spawn_disabled():
     from squidbot.config.schema import Settings
 
     s = Settings()
+    _minimal_llm_settings(s)
     s.tools.spawn.enabled = False
     return s
 
@@ -77,6 +97,7 @@ async def test_no_profile_injection_when_no_profiles(tmp_path):
     from squidbot.config.schema import Settings
 
     s = Settings()
+    _minimal_llm_settings(s)
     s.tools.spawn.enabled = True
     # no profiles
     with (

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
     from squidbot.core.agent import AgentLoop
     from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
-    from squidbot.core.ports import ChannelPort
+    from squidbot.core.ports import ChannelPort, LLMPort
     from squidbot.core.skills import SkillMetadata
 
 
@@ -300,42 +300,48 @@ def _setup_logging(level: str) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-def _resolve_llm(settings: Settings) -> Any:
+def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
     """
     Construct an OpenAIAdapter from the new provider/model/pool schema.
 
-    Resolves the default pool to its first model entry, then looks up the
-    model and provider configuration to obtain API credentials and model ID.
-    Falls back to an unconfigured adapter when no pool/model/provider is defined
-    (e.g., in tests that mock AsyncOpenAI directly).
+    Resolves the named pool to its model entries, then looks up the model and
+    provider configuration to obtain API credentials and model ID. Raises
+    ValueError if any referenced pool, model, or provider is missing from
+    the configuration.
 
     Args:
         settings: Loaded application settings.
+        pool_name: Name of the LLM pool to resolve (e.g. "default").
 
     Returns:
-        An OpenAIAdapter instance.
+        An LLMPort-compatible adapter for the first entry in the pool.
+
+    Raises:
+        ValueError: If the pool, model, or provider is not found in settings.
     """
     from squidbot.adapters.llm.openai import OpenAIAdapter  # noqa: PLC0415
 
-    pool_name = settings.llm.default_pool
-    pool_entries = settings.llm.pools.get(pool_name, [])
+    pool_entries = settings.llm.pools.get(pool_name)
+    if not pool_entries:
+        raise ValueError(f"LLM pool '{pool_name}' not found in config")
 
-    if pool_entries:
-        model_name = pool_entries[0].model
-        model_cfg = settings.llm.models.get(model_name)
-        if model_cfg is not None:
-            provider_cfg = settings.llm.providers.get(model_cfg.provider)
-            if provider_cfg is not None:
-                return OpenAIAdapter(
-                    api_base=provider_cfg.api_base,
-                    api_key=provider_cfg.api_key,
-                    model=model_cfg.model,
-                )
+    adapters: list[OpenAIAdapter] = []
+    for entry in pool_entries:
+        model_cfg = settings.llm.models.get(entry.model)
+        if not model_cfg:
+            raise ValueError(f"LLM model '{entry.model}' not found in llm.models")
+        provider_cfg = settings.llm.providers.get(model_cfg.provider)
+        if not provider_cfg:
+            raise ValueError(f"LLM provider '{model_cfg.provider}' not found in llm.providers")
+        adapters.append(
+            OpenAIAdapter(
+                api_base=provider_cfg.api_base,
+                api_key=provider_cfg.api_key,
+                model=model_cfg.model,
+            )
+        )
 
-    # No pool/model/provider configured — construct with empty credentials.
-    # In production this will fail when the first LLM call is made; tests that
-    # mock AsyncOpenAI will proceed normally.
-    return OpenAIAdapter(api_base="", api_key="", model="")
+    return adapters[0]
 
 
 async def _make_agent_loop(
@@ -381,7 +387,7 @@ async def _make_agent_loop(
     memory = MemoryManager(storage=storage, max_history_messages=200, skills=skills)
 
     # LLM adapter — resolved from pool/model/provider schema
-    llm = _resolve_llm(settings)
+    llm = _resolve_llm(settings, settings.llm.default_pool)
 
     # Tool registry
     registry = ToolRegistry()
