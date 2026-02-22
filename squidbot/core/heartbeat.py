@@ -12,6 +12,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
@@ -20,6 +21,9 @@ from squidbot.config.schema import HeartbeatConfig
 from squidbot.core.agent import AgentLoop
 from squidbot.core.models import Session
 from squidbot.core.ports import ChannelPort
+
+if TYPE_CHECKING:
+    from squidbot.core.ports import LLMPort
 
 HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
 
@@ -128,6 +132,7 @@ class HeartbeatService:
         tracker: LastChannelTracker,
         workspace: Path,
         config: HeartbeatConfig,
+        llm_override: LLMPort | None = None,
     ) -> None:
         """
         Args:
@@ -135,11 +140,14 @@ class HeartbeatService:
             tracker: Tracks the last active channel and session.
             workspace: Path to the agent workspace (for HEARTBEAT.md).
             config: Heartbeat configuration.
+            llm_override: Optional LLM to use instead of the agent loop's default.
+                          When set, passed as the llm kwarg to agent_loop.run().
         """
         self._agent_loop = agent_loop
         self._tracker = tracker
         self._workspace = workspace
         self._config = config
+        self._llm_override = llm_override
 
     def _is_in_active_hours(self, now: datetime | None = None) -> bool:
         """
@@ -241,6 +249,7 @@ class HeartbeatService:
                 self._tracker.session,
                 self._config.prompt,
                 sink,  # type: ignore[arg-type]
+                llm=self._llm_override,
             )
         except Exception as e:
             logger.error("heartbeat: agent error: {}", e)

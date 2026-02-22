@@ -184,7 +184,9 @@ class _FakeAgentLoop:
         self._response = response
         self.calls: list[tuple[str, str]] = []  # (session_id, user_message)
 
-    async def run(self, session: Session, user_message: str, channel: object) -> None:
+    async def run(
+        self, session: Session, user_message: str, channel: object, *, llm: object = None
+    ) -> None:
         self.calls.append((session.id, user_message))
         from squidbot.core.models import OutboundMessage  # noqa: PLC0415
 
@@ -297,6 +299,56 @@ async def test_tick_heartbeat_ok_in_middle_is_delivered(tmp_path):
 # ---------------------------------------------------------------------------
 # Task 6: HeartbeatService.run()
 # ---------------------------------------------------------------------------
+
+
+async def test_heartbeat_uses_llm_override(tmp_path):
+    """When llm_override is set, heartbeat passes it to AgentLoop.run()."""
+    received_llm: list[object] = []
+
+    class CapturingLoop:
+        async def run(
+            self, session: Session, message: str, channel: object, *, llm: object = None
+        ) -> None:
+            received_llm.append(llm)
+            await channel.send(OutboundMessage(session=session, text="HEARTBEAT_OK"))  # type: ignore[union-attr]
+
+    override = object()  # sentinel
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    tracker.update(ch, Session(channel="matrix", sender_id="u1"))  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=CapturingLoop(),  # type: ignore[arg-type]
+        tracker=tracker,
+        workspace=tmp_path,
+        config=HeartbeatConfig(),
+        llm_override=override,
+    )
+    await svc._tick()
+    assert received_llm == [override]
+
+
+async def test_heartbeat_no_override_passes_none(tmp_path):
+    """When no llm_override is set, heartbeat passes llm=None to AgentLoop.run()."""
+    received_llm: list[object] = []
+
+    class CapturingLoop:
+        async def run(
+            self, session: Session, message: str, channel: object, *, llm: object = None
+        ) -> None:
+            received_llm.append(llm)
+            await channel.send(OutboundMessage(session=session, text="HEARTBEAT_OK"))  # type: ignore[union-attr]
+
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    tracker.update(ch, Session(channel="matrix", sender_id="u1"))  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=CapturingLoop(),  # type: ignore[arg-type]
+        tracker=tracker,
+        workspace=tmp_path,
+        config=HeartbeatConfig(),
+    )
+    await svc._tick()
+    assert received_llm == [None]
 
 
 async def test_run_loop_calls_tick_and_stops(tmp_path):

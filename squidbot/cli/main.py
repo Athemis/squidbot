@@ -627,11 +627,14 @@ async def _run_gateway(config_path: Path) -> None:
         await agent_loop.run(session, job.message, ch)  # type: ignore[arg-type]
 
     scheduler = CronScheduler(storage=storage)
+    hb_pool = settings.agents.heartbeat.pool or settings.llm.default_pool
+    hb_llm = _resolve_llm(settings, hb_pool) if hb_pool != settings.llm.default_pool else None
     heartbeat = HeartbeatService(
         agent_loop=agent_loop,
         tracker=tracker,
         workspace=workspace,
         config=settings.agents.heartbeat,
+        llm_override=hb_llm,
     )
 
     try:
