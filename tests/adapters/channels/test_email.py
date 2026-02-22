@@ -345,3 +345,109 @@ class TestEmailChannelReceive:
                 assert msg.metadata["email_signature_valid"] is None
                 assert msg.metadata["email_signature_signer"] is None
                 break
+
+
+class TestEmailChannelSend:
+    def _make_outbound(
+        self,
+        text: str = "Response text",
+        attachment: Path | None = None,
+        subject: str = "Test",
+        msg_id: str = "<abc@host>",
+        references: str = "",
+        to_addr: str = "user@example.com",
+    ) -> object:
+        from squidbot.core.models import OutboundMessage, Session
+
+        session = Session(channel="email", sender_id=to_addr)
+        return OutboundMessage(
+            session=session,
+            text=text,
+            attachment=attachment,
+            metadata={
+                "email_from": to_addr,
+                "email_subject": subject,
+                "email_message_id": msg_id,
+                "email_references": references,
+            },
+        )
+
+    @pytest.fixture
+    def fake_smtp(self) -> MagicMock:
+        smtp = MagicMock()
+        smtp.__aenter__ = AsyncMock(return_value=smtp)
+        smtp.__aexit__ = AsyncMock(return_value=False)
+        smtp.ehlo = AsyncMock()
+        smtp.starttls = AsyncMock()
+        smtp.login = AsyncMock()
+        smtp.send_message = AsyncMock()
+        return smtp
+
+    async def test_send_reply_headers(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+        outbound = self._make_outbound()
+
+        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+            await ch.send(outbound)  # type: ignore[arg-type]
+
+        fake_smtp.send_message.assert_called_once()
+        sent = fake_smtp.send_message.call_args[0][0]
+        assert sent["To"] == "user@example.com"
+        assert sent["In-Reply-To"] == "<abc@host>"
+        assert sent["Subject"] == "Re: Test"
+        assert sent["From"] == "bot@example.com"
+
+    async def test_send_multipart_alternative(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+        outbound = self._make_outbound(text="**bold**")
+
+        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+            await ch.send(outbound)  # type: ignore[arg-type]
+
+        sent = fake_smtp.send_message.call_args[0][0]
+        content_type = sent.get_content_type()
+        assert content_type == "multipart/alternative"
+        parts = sent.get_payload()
+        assert isinstance(parts, list)
+        types = [p.get_content_type() for p in parts]
+        assert "text/plain" in types
+        assert "text/html" in types
+
+    async def test_send_with_attachment(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        att = tmp_path / "report.pdf"
+        att.write_bytes(b"pdfdata")
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+        outbound = self._make_outbound(attachment=att)
+
+        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+            await ch.send(outbound)  # type: ignore[arg-type]
+
+        sent = fake_smtp.send_message.call_args[0][0]
+        assert sent.get_content_type() == "multipart/mixed"
+        parts = sent.get_payload()
+        assert isinstance(parts, list)
+        assert len(parts) == 2  # multipart/alternative + attachment
+
+    async def test_send_references_header(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+        outbound = self._make_outbound(references="<prev@host>", msg_id="<cur@host>")
+
+        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+            await ch.send(outbound)  # type: ignore[arg-type]
+
+        sent = fake_smtp.send_message.call_args[0][0]
+        refs = sent["References"]
+        assert "<prev@host>" in refs
+        assert "<cur@host>" in refs

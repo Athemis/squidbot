@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import aioimaplib
+import aiosmtplib
 from loguru import logger
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
@@ -308,7 +309,87 @@ class EmailChannel:
             yield msg
 
     async def send(self, message: OutboundMessage) -> None:
-        """Send a reply email via SMTP. Implemented in a later step."""
+        """
+        Send a reply email via SMTP.
+
+        Builds a multipart/alternative message (plain + HTML rendered from Markdown).
+        If message.attachment is set and exists, wraps in multipart/mixed.
+
+        Args:
+            message: Outbound message with text, optional attachment, and email metadata.
+        """
+        from email import encoders  # noqa: PLC0415
+        from email.mime.base import MIMEBase  # noqa: PLC0415
+        from email.mime.multipart import MIMEMultipart  # noqa: PLC0415
+        from email.mime.text import MIMEText  # noqa: PLC0415
+
+        from markdown_it import MarkdownIt  # noqa: PLC0415
+
+        meta = message.metadata
+        to_addr: str = str(meta.get("email_from", message.session.sender_id))
+        subject: str = _re_subject(str(meta.get("email_subject", "")))
+        in_reply_to: str = str(meta.get("email_message_id", ""))
+        old_refs: str = str(meta.get("email_references", ""))
+        references: str = (old_refs + " " + in_reply_to).strip()
+
+        # Build multipart/alternative (plain + HTML)
+        plain_part = MIMEText(message.text, "plain", "utf-8")
+        html_body = MarkdownIt().render(message.text)
+        html_part = MIMEText(html_body, "html", "utf-8")
+        alt = MIMEMultipart("alternative")
+        alt.attach(plain_part)
+        alt.attach(html_part)
+
+        if message.attachment and message.attachment.exists():
+            outer = MIMEMultipart("mixed")
+            outer.attach(alt)
+            att_data = message.attachment.read_bytes()
+            att_mime, _ = mimetypes.guess_type(message.attachment.name)
+            att_part = MIMEBase(*(att_mime or "application/octet-stream").split("/", 1))
+            att_part.set_payload(att_data)
+            encoders.encode_base64(att_part)
+            att_part.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=message.attachment.name,
+            )
+            outer.attach(att_part)
+            root: MIMEMultipart = outer
+        else:
+            root = alt
+
+        root["From"] = self._config.from_address
+        root["To"] = to_addr
+        root["Subject"] = subject
+        if in_reply_to:
+            root["In-Reply-To"] = in_reply_to
+        if references:
+            root["References"] = references
+
+        cfg = self._config
+        ssl_ctx: ssl.SSLContext | None = None
+        if cfg.tls:
+            ssl_ctx = ssl.create_default_context()
+            if not cfg.tls_verify:
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            smtp = aiosmtplib.SMTP(
+                hostname=cfg.smtp_host,
+                port=cfg.smtp_port,
+                tls_context=ssl_ctx if not cfg.smtp_starttls else None,
+                use_tls=cfg.tls and not cfg.smtp_starttls,
+            )
+            async with smtp:
+                if cfg.tls and cfg.smtp_starttls:
+                    await smtp.ehlo()
+                    await smtp.starttls(tls_context=ssl_ctx)
+                await smtp.login(cfg.username, cfg.password)
+                await smtp.send_message(root)
+                logger.info("email: reply sent to {}", to_addr)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("email: SMTP error sending to {}: {}", to_addr, exc)
 
     async def send_typing(self, session_id: str) -> None:
         """No-op: email does not support typing indicators."""
