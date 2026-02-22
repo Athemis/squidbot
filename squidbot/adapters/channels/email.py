@@ -1,24 +1,25 @@
 """
-Email channel adapter for squidbot.
+MIME parsing helpers for the squidbot email channel adapter.
 
-Implements ChannelPort using aioimaplib (IMAP IDLE with polling fallback) and
-aiosmtplib (SMTP). Receives messages from a configured mailbox, filters by
-allow_from, and sends replies as multipart/alternative (plain + HTML) emails.
-
-Signature handling: multipart/signed emails are correctly unwrapped (text extracted
-from Part 0). Signature type is stored in metadata. Cryptographic verification is
-not implemented — see _verify_signature() stub for future extension.
+Provides pure functions for normalising addresses, extracting plain-text bodies
+from MIME trees (including multipart/signed unwrapping), detecting cryptographic
+signature types, and formatting reply subjects. These helpers are used by
+EmailChannel, which is implemented in this same module.
 """
 
 from __future__ import annotations
 
 import re
 from email.message import Message as EmailMessage
-from html.parser import HTMLParser
+from email.utils import parseaddr
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+_NO_TEXT: str = "[Keine Textinhalte]"
+
+_SKIP_TAGS: frozenset[str] = frozenset({"script", "style", "head"})
 
 
 def _normalize_address(addr: str) -> str:
@@ -34,46 +35,39 @@ def _normalize_address(addr: str) -> str:
     Returns:
         Bare lowercase email address, or an empty string if *addr* is empty.
     """
-    if not addr:
-        return ""
-    addr = addr.strip()
-    # Extract angle-bracket form: "Display Name <user@host>"
-    match = re.search(r"<([^>]+)>", addr)
-    if match:
-        return match.group(1).strip().lower()
-    return addr.lower()
-
-
-class _Stripper(HTMLParser):
-    """Minimal HTMLParser subclass that accumulates visible text."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:  # noqa: D102
-        self._parts.append(data)
-
-    def get_text(self) -> str:
-        """Return concatenated text nodes."""
-        return "".join(self._parts)
+    _, address = parseaddr(addr)
+    return address.strip("<> ").lower()
 
 
 def _html_to_text(html_body: str) -> str:
-    """
-    Strip HTML tags and return plain text.
+    """Strip HTML tags and decode entities to produce plain text."""
+    import html as _html_mod  # noqa: PLC0415
+    import html.parser as _html_parser  # noqa: PLC0415
 
-    Uses stdlib ``html.parser.HTMLParser`` — no third-party dependencies.
+    class _Stripper(_html_parser.HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self._parts: list[str] = []
+            self._skip: int = 0
 
-    Args:
-        html_body: Raw HTML string.
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag.lower() in _SKIP_TAGS:
+                self._skip += 1
 
-    Returns:
-        Plain-text representation with tags removed.
-    """
+        def handle_endtag(self, tag: str) -> None:
+            if tag.lower() in _SKIP_TAGS and self._skip > 0:
+                self._skip -= 1
+
+        def handle_data(self, data: str) -> None:
+            if self._skip == 0:
+                self._parts.append(data)
+
+        def get_text(self) -> str:
+            return " ".join(self._parts).strip()
+
     stripper = _Stripper()
     stripper.feed(html_body)
-    return stripper.get_text()
+    return _html_mod.unescape(stripper.get_text())
 
 
 def _decode_part(part: EmailMessage) -> str:
@@ -126,7 +120,7 @@ def _extract_text(msg: EmailMessage) -> str:
 
     # Non-multipart, non-text leaf (e.g. application/octet-stream)
     if not msg.is_multipart():
-        return "[Keine Textinhalte]"
+        return _NO_TEXT
 
     subtype = msg.get_content_subtype()  # "alternative", "signed", "mixed", …
     parts: list[EmailMessage] = msg.get_payload()  # type: ignore[assignment]
@@ -145,21 +139,21 @@ def _extract_text(msg: EmailMessage) -> str:
             return plain_text
         if html_text is not None:
             return html_text
-        return "[Keine Textinhalte]"
+        return _NO_TEXT
 
     # multipart/signed — only examine Part 0 (the body; Part 1 is the sig)
     if subtype == "signed":
         if parts:
             return _extract_text(parts[0])
-        return "[Keine Textinhalte]"
+        return _NO_TEXT
 
     # multipart/mixed and other containers — recurse into each part
     for part in parts:
         result = _extract_text(part)
-        if result != "[Keine Textinhalte]":
+        if result != _NO_TEXT:
             return result
 
-    return "[Keine Textinhalte]"
+    return _NO_TEXT
 
 
 def _detect_signature_type(msg: EmailMessage) -> str | None:
@@ -202,6 +196,6 @@ def _re_subject(subject: str) -> str:
     Returns:
         Subject with exactly one ``"Re: "`` prefix.
     """
-    if re.match(r"re:\s", subject, re.IGNORECASE):
+    if re.match(r"^re:\s*", subject, re.IGNORECASE):
         return subject
     return f"Re: {subject}"

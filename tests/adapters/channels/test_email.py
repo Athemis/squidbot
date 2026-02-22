@@ -89,6 +89,16 @@ class TestExtractText:
         msg.set_payload(b"binary")
         assert _extract_text(msg) == "[Keine Textinhalte]"
 
+    def test_html_strips_style_tag_content(self) -> None:
+        from squidbot.adapters.channels.email import _extract_text
+
+        raw = _make_html("<style>body { color: red; }</style><p>Hello</p>")
+        msg = email_lib.message_from_bytes(raw)
+        result = _extract_text(msg)
+        assert "Hello" in result
+        assert "color" not in result
+        assert "red" not in result
+
 
 class TestNormalizeAddress:
     def test_plain_address(self) -> None:
