@@ -16,6 +16,8 @@ Commands:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,8 +28,56 @@ from squidbot.config.schema import DEFAULT_CONFIG_PATH, Settings
 if TYPE_CHECKING:
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
     from squidbot.core.agent import AgentLoop
-    from squidbot.core.models import CronJob
+    from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
     from squidbot.core.ports import ChannelPort
+    from squidbot.core.skills import SkillMetadata
+
+
+@dataclass
+class GatewayState:
+    """
+    Live runtime state of the gateway process.
+
+    Updated by _channel_loop_with_state() and channel setup code.
+    Consumed by GatewayStatusAdapter for dashboards and status reporting.
+    """
+
+    active_sessions: dict[str, SessionInfo]
+    channel_status: list[ChannelStatus]
+    cron_jobs_cache: list[CronJob]
+    started_at: datetime = field(default_factory=datetime.now)
+
+
+class GatewayStatusAdapter:
+    """
+    Implements StatusPort by reading from GatewayState.
+
+    Args:
+        state: The live gateway state object.
+        skills_loader: SkillsPort implementation for get_skills().
+    """
+
+    def __init__(self, state: GatewayState, skills_loader: Any) -> None:
+        """Initialize with the given state and skills loader."""
+        self._state = state
+        self._skills_loader = skills_loader
+
+    def get_active_sessions(self) -> list[SessionInfo]:
+        """Return all sessions seen since gateway start."""
+        return list(self._state.active_sessions.values())
+
+    def get_channel_status(self) -> list[ChannelStatus]:
+        """Return the status of all configured channels."""
+        return list(self._state.channel_status)
+
+    def get_cron_jobs(self) -> list[CronJob]:
+        """Return the current cron job list from the in-memory cache."""
+        return list(self._state.cron_jobs_cache)
+
+    def get_skills(self) -> list[SkillMetadata]:
+        """Return all discovered skills via the skills loader."""
+        return self._skills_loader.list_skills()  # type: ignore[no-any-return]
+
 
 app = cyclopts.App(name="squidbot", help="A lightweight personal AI assistant.")
 
