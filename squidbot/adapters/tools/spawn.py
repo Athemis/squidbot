@@ -73,7 +73,7 @@ class JobStore:
             job_id: Unique identifier for this job.
             coro: Coroutine to run.
         """
-        self._tasks[job_id] = asyncio.ensure_future(coro)
+        self._tasks[job_id] = asyncio.create_task(coro)
 
     async def await_jobs(self, job_ids: list[str]) -> dict[str, str | BaseException]:
         """

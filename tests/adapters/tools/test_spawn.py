@@ -87,7 +87,7 @@ async def test_job_store_exception_captured():
 async def test_job_store_unknown_job_id():
     store = JobStore()
     results = await store.await_jobs(["nonexistent"])
-    assert "nonexistent" not in results or results["nonexistent"] is None
+    assert results == {}
 
 
 async def test_job_store_all_job_ids():
