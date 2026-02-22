@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from squidbot.adapters.tools.spawn import CollectingChannel, JobStore, SubAgentFactory
+from collections.abc import AsyncIterator
+
+from squidbot.adapters.tools.spawn import CollectingChannel, JobStore, SpawnTool, SubAgentFactory
+from squidbot.config.schema import SpawnProfile
 from squidbot.core.agent import AgentLoop
 from squidbot.core.models import OutboundMessage, Session, ToolResult
 from squidbot.core.registry import ToolRegistry
@@ -164,3 +167,95 @@ def test_factory_build_with_system_prompt_override():
     )
     loop = factory.build(system_prompt_override="override prompt", tools_filter=None)
     assert loop._system_prompt == "override prompt"
+
+
+def _make_factory(response: str = "sub result") -> tuple[SubAgentFactory, ToolRegistry]:
+    """Return a factory whose sub-agents always respond with `response`."""
+    registry = _make_mock_registry(["shell"])
+
+    async def fake_chat(
+        messages: object, tools: object, *, stream: bool = True
+    ) -> AsyncIterator[str]:
+        yield response
+
+    llm = MagicMock()
+    llm.chat = MagicMock(side_effect=fake_chat)
+    memory = MagicMock()
+    memory.build_messages = AsyncMock(return_value=[])
+    memory.persist_exchange = AsyncMock()
+
+    factory = SubAgentFactory(
+        llm=llm, memory=memory, registry=registry, system_prompt="parent", profiles={}
+    )
+    return factory, registry
+
+
+async def test_spawn_tool_returns_job_id_immediately():
+    factory, _ = _make_factory()
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    result = await tool.execute(task="do something")
+    assert not result.is_error
+    assert len(result.content) > 0  # job_id returned
+
+
+async def test_spawn_tool_empty_task_is_error():
+    factory, _ = _make_factory()
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    result = await tool.execute(task="")
+    assert result.is_error
+
+
+async def test_spawn_tool_missing_task_is_error():
+    factory, _ = _make_factory()
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    result = await tool.execute()
+    assert result.is_error
+
+
+async def test_spawn_tool_unknown_profile_is_error():
+    factory, _ = _make_factory()
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    result = await tool.execute(task="do it", profile="nonexistent")
+    assert result.is_error
+    assert "nonexistent" in result.content
+
+
+async def test_spawn_tool_registers_job():
+    factory, _ = _make_factory()
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    result = await tool.execute(task="work")
+    job_id = result.content.strip()
+    assert job_id in job_store.all_job_ids()
+
+
+async def test_spawn_tool_profile_enum_in_definition():
+    registry = _make_mock_registry([])
+    profiles = {
+        "coder": SpawnProfile(system_prompt="coder", tools=[]),
+        "writer": SpawnProfile(system_prompt="writer", tools=[]),
+    }
+    factory = SubAgentFactory(
+        llm=MagicMock(), memory=MagicMock(), registry=registry, system_prompt="p", profiles=profiles
+    )
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    defn = tool.to_definition()
+    profile_param = defn.parameters["properties"]["profile"]
+    assert set(profile_param["enum"]) == {"coder", "writer"}
+
+
+async def test_spawn_tool_no_profile_enum_when_no_profiles():
+    registry = _make_mock_registry([])
+    factory = SubAgentFactory(
+        llm=MagicMock(), memory=MagicMock(), registry=registry, system_prompt="p", profiles={}
+    )
+    job_store = JobStore()
+    tool = SpawnTool(factory=factory, job_store=job_store)
+    defn = tool.to_definition()
+    profile_param = defn.parameters["properties"]["profile"]
+    assert "enum" not in profile_param
