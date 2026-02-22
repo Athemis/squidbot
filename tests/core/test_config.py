@@ -1,6 +1,6 @@
 import json
 
-from squidbot.config.schema import LLMConfig, Settings
+from squidbot.config.schema import LLMConfig, Settings, SpawnProfile, SpawnSettings, ToolsConfig
 
 
 def test_default_llm_config():
@@ -68,30 +68,22 @@ def test_tools_config_mcp_servers_typed():
 
 
 def test_spawn_settings_defaults():
-    from squidbot.config.schema import SpawnSettings
-
     s = SpawnSettings()
     assert s.enabled is False
     assert s.profiles == {}
 
 
 def test_spawn_profile_fields():
-    from squidbot.config.schema import SpawnProfile
-
     p = SpawnProfile(system_prompt="You are a coder.", tools=["shell"])
     assert p.system_prompt == "You are a coder."
     assert p.tools == ["shell"]
 
 
 def test_spawn_settings_in_tools_config():
-    from squidbot.config.schema import ToolsConfig
-
     cfg = ToolsConfig()
     assert cfg.spawn.enabled is False
 
 
 def test_spawn_profile_empty_tools_means_all():
-    from squidbot.config.schema import SpawnProfile
-
     p = SpawnProfile()
     assert p.tools == []  # empty = inherit all

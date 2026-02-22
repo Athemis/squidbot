@@ -79,10 +79,7 @@ class SpawnProfile(BaseModel):
     """Configuration for a named sub-agent profile."""
 
     system_prompt: str = ""
-    tools: list[str] = Field(
-        default_factory=list,
-        description="Tool names the sub-agent may use. Empty list means all tools.",
-    )
+    tools: list[str] = Field(default_factory=list)
 
 
 class SpawnSettings(BaseModel):
