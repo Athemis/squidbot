@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from squidbot.adapters.llm.pool import PooledLLMAdapter
+from squidbot.adapters.llm.pool import PooledLLMAdapter, _is_auth_error
 from squidbot.core.models import Message
 
 
@@ -116,8 +116,8 @@ def test_auth_error_detected_by_name():
     class AuthenticationError(Exception):
         pass
 
-    assert PooledLLMAdapter._is_auth_error(AuthenticationError("x")) is True
-    assert PooledLLMAdapter._is_auth_error(RuntimeError("x")) is False
+    assert _is_auth_error(AuthenticationError("x")) is True
+    assert _is_auth_error(RuntimeError("x")) is False
 
 
 def test_empty_adapters_raises():

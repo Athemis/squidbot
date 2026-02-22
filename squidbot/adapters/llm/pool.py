@@ -30,6 +30,9 @@ async def _pool_gen(
     """
     Async generator that tries each adapter in order, falling back on error.
 
+    Note: exceptions raised mid-stream (after the first chunk) are not caught;
+    only exceptions raised before any chunks are yielded trigger fallback.
+
     Args:
         adapters: Ordered list of LLMPort instances.
         messages: Full conversation history.
@@ -82,11 +85,6 @@ class PooledLLMAdapter:
         if not adapters:
             raise ValueError("PooledLLMAdapter requires at least one adapter")
         self._adapters = adapters
-
-    @staticmethod
-    def _is_auth_error(exc: Exception) -> bool:
-        """Return True if the exception looks like an authentication failure."""
-        return _is_auth_error(exc)
 
     async def chat(
         self,
