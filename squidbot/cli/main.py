@@ -16,6 +16,7 @@ Commands:
 from __future__ import annotations
 
 import asyncio
+import functools
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -461,11 +462,12 @@ async def _make_agent_loop(
         )
 
         spawn_factory = SubAgentFactory(
-            llm=llm,
             memory=memory,
             registry=registry,
             system_prompt=system_prompt,
             profiles=settings.tools.spawn.profiles,
+            default_pool=settings.llm.default_pool,
+            resolve_llm=functools.partial(_resolve_llm, settings),
         )
         job_store = JobStore()
         registry.register(SpawnTool(factory=spawn_factory, job_store=job_store))

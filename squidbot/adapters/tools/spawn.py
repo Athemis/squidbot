@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from squidbot.config.schema import SpawnProfile
@@ -118,34 +118,41 @@ class SubAgentFactory:
     Each sub-agent gets its own registry (filtered copy of the parent's)
     and optionally a different system prompt. spawn/spawn_await are always
     excluded from sub-agent registries to prevent runaway nesting.
+
+    Pool resolution is handled by the injected resolve_llm callable, allowing
+    each sub-agent profile to use a different LLM pool.
     """
 
     def __init__(
         self,
-        llm: LLMPort,
         memory: MemoryManager,
         registry: ToolRegistry,
         system_prompt: str,
         profiles: dict[str, SpawnProfile],
+        default_pool: str,
+        resolve_llm: Callable[[str], LLMPort],
     ) -> None:
         """
         Args:
-            llm: LLM adapter shared with parent.
             memory: Memory manager shared with parent.
             registry: Parent's tool registry (source for sub-agent tools).
             system_prompt: Parent's system prompt (default for sub-agents).
             profiles: Named sub-agent profiles from config.
+            default_pool: Name of the LLM pool to use when no profile pool is set.
+            resolve_llm: Callable that resolves a pool name to an LLMPort adapter.
         """
-        self._llm = llm
         self._memory = memory
         self._registry = registry
         self._system_prompt = system_prompt
         self._profiles = profiles
+        self._default_pool = default_pool
+        self._resolve_llm = resolve_llm
 
     def build(
         self,
         system_prompt_override: str | None,
         tools_filter: list[str] | None,
+        profile_name: str | None = None,
     ) -> AgentLoop:
         """
         Build a fresh AgentLoop for a sub-agent.
@@ -154,10 +161,15 @@ class SubAgentFactory:
             system_prompt_override: If set, replaces the parent system prompt.
             tools_filter: If set, only these tool names are available.
                           spawn/spawn_await are always excluded regardless.
+            profile_name: Named profile to use for pool and tool configuration.
 
         Returns:
             A new AgentLoop with an isolated tool registry.
         """
+        profile = self._profiles.get(profile_name) if profile_name else None
+        pool = (profile.pool if profile and profile.pool else None) or self._default_pool
+        llm = self._resolve_llm(pool)
+
         child_prompt = system_prompt_override or self._system_prompt
 
         child_registry = ToolRegistry()
@@ -169,7 +181,7 @@ class SubAgentFactory:
             child_registry.register(tool)
 
         return AgentLoop(
-            llm=self._llm,
+            llm=llm,
             memory=self._memory,
             registry=child_registry,
             system_prompt=child_prompt,
@@ -298,6 +310,7 @@ class SpawnTool:
         agent_loop = self._factory.build(
             system_prompt_override=resolved_system_prompt,
             tools_filter=tools_filter,
+            profile_name=profile_name,
         )
         channel = CollectingChannel()
         session = Session(channel="spawn", sender_id=job_id)
