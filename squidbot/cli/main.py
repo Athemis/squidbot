@@ -109,8 +109,8 @@ def gateway(config: Path = DEFAULT_CONFIG_PATH, log_level: str = "INFO") -> None
 def status(config: Path = DEFAULT_CONFIG_PATH) -> None:
     """Show the current configuration and channel status."""
     settings = Settings.load(config)
-    print(f"Model:     {settings.llm.model}")
-    print(f"API:       {settings.llm.api_base}")
+    pool_count = len(settings.llm.pools)
+    print(f"Pools:     {pool_count} configured (default: {settings.llm.default_pool})")
     print(f"Matrix:    {'enabled' if settings.channels.matrix.enabled else 'disabled'}")
     print(f"Email:     {'enabled' if settings.channels.email.enabled else 'disabled'}")
     print(f"Workspace: {settings.agents.workspace}")
@@ -252,10 +252,10 @@ def _print_banner(settings: Settings) -> None:
     from importlib.metadata import version
 
     ver = version("squidbot")
-    model = settings.llm.model
+    pool = settings.llm.default_pool
     workspace = Path(settings.agents.workspace).expanduser().resolve()
     print(f"🦑 squidbot v{ver}", file=sys.stderr)
-    print(f"   model:     {model}", file=sys.stderr)
+    print(f"   pool:      {pool}", file=sys.stderr)
     print(f"   workspace: {workspace}", file=sys.stderr)
     print(f"   {'─' * 40}", file=sys.stderr)
     print(file=sys.stderr)
@@ -300,6 +300,44 @@ def _setup_logging(level: str) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def _resolve_llm(settings: Settings) -> Any:
+    """
+    Construct an OpenAIAdapter from the new provider/model/pool schema.
+
+    Resolves the default pool to its first model entry, then looks up the
+    model and provider configuration to obtain API credentials and model ID.
+    Falls back to an unconfigured adapter when no pool/model/provider is defined
+    (e.g., in tests that mock AsyncOpenAI directly).
+
+    Args:
+        settings: Loaded application settings.
+
+    Returns:
+        An OpenAIAdapter instance.
+    """
+    from squidbot.adapters.llm.openai import OpenAIAdapter  # noqa: PLC0415
+
+    pool_name = settings.llm.default_pool
+    pool_entries = settings.llm.pools.get(pool_name, [])
+
+    if pool_entries:
+        model_name = pool_entries[0].model
+        model_cfg = settings.llm.models.get(model_name)
+        if model_cfg is not None:
+            provider_cfg = settings.llm.providers.get(model_cfg.provider)
+            if provider_cfg is not None:
+                return OpenAIAdapter(
+                    api_base=provider_cfg.api_base,
+                    api_key=provider_cfg.api_key,
+                    model=model_cfg.model,
+                )
+
+    # No pool/model/provider configured — construct with empty credentials.
+    # In production this will fail when the first LLM call is made; tests that
+    # mock AsyncOpenAI will proceed normally.
+    return OpenAIAdapter(api_base="", api_key="", model="")
+
+
 async def _make_agent_loop(
     settings: Settings,
     storage_dir: Path | None = None,
@@ -315,7 +353,6 @@ async def _make_agent_loop(
         Tuple of (agent_loop, mcp_connections). Callers must close mcp_connections
         on shutdown by calling conn.close() on each.
     """
-    from squidbot.adapters.llm.openai import OpenAIAdapter  # noqa: PLC0415
     from squidbot.adapters.persistence.jsonl import JsonlMemory  # noqa: PLC0415
     from squidbot.adapters.skills.fs import FsSkillsLoader  # noqa: PLC0415
     from squidbot.adapters.tools.files import (  # noqa: PLC0415
@@ -343,12 +380,8 @@ async def _make_agent_loop(
 
     memory = MemoryManager(storage=storage, max_history_messages=200, skills=skills)
 
-    # LLM adapter
-    llm = OpenAIAdapter(
-        api_base=settings.llm.api_base,
-        api_key=settings.llm.api_key,
-        model=settings.llm.model,
-    )
+    # LLM adapter — resolved from pool/model/provider schema
+    llm = _resolve_llm(settings)
 
     # Tool registry
     registry = ToolRegistry()
@@ -453,7 +486,9 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
 
     # Interactive REPL mode: Rich interface
     console = Console()
-    console.print(f"🦑 [bold]squidbot[/bold] 0.1.0  •  model: [cyan]{settings.llm.model}[/cyan]")
+    console.print(
+        f"🦑 [bold]squidbot[/bold] 0.1.0  •  pool: [cyan]{settings.llm.default_pool}[/cyan]"
+    )
     console.print(Rule(style="dim"))
     console.print("[dim]type 'exit' or Ctrl+D to quit[/dim]")
 
@@ -634,15 +669,25 @@ async def _run_onboard(config_path: Path) -> None:
     print("=" * 40)
     api_base = input("LLM API base URL [https://openrouter.ai/api/v1]: ").strip()
     api_key = input("API key: ").strip()
-    model = input("Model [anthropic/claude-opus-4-5]: ").strip()
+    model_id = input("Model identifier [anthropic/claude-opus-4-5]: ").strip()
+
+    from squidbot.config.schema import (  # noqa: PLC0415
+        LLMModelConfig,
+        LLMPoolEntry,
+        LLMProviderConfig,
+    )
 
     settings = Settings()
-    if api_base:
-        settings.llm.api_base = api_base
-    if api_key:
-        settings.llm.api_key = api_key
-    if model:
-        settings.llm.model = model
+    settings.llm.providers["default"] = LLMProviderConfig(
+        api_base=api_base or "https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+    settings.llm.models["default"] = LLMModelConfig(
+        provider="default",
+        model=model_id or "anthropic/claude-opus-4-5",
+    )
+    settings.llm.pools["default"] = [LLMPoolEntry(model="default")]
+    settings.llm.default_pool = "default"
 
     settings.save(config_path)
     print(f"\nConfiguration saved to {config_path}")
