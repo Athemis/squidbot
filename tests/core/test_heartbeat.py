@@ -169,3 +169,127 @@ def test_heartbeat_config_in_agent_config():
 
     cfg = AgentConfig()
     assert isinstance(cfg.heartbeat, HeartbeatConfig)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: HeartbeatService._tick()
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+
+class _FakeAgentLoop:
+    """Scripted agent loop for heartbeat tests."""
+
+    def __init__(self, response: str) -> None:
+        self._response = response
+        self.calls: list[tuple[str, str]] = []  # (session_id, user_message)
+
+    async def run(self, session: Session, user_message: str, channel: object) -> None:
+        self.calls.append((session.id, user_message))
+        from squidbot.core.models import OutboundMessage  # noqa: PLC0415
+
+        await channel.send(OutboundMessage(session=session, text=self._response))  # type: ignore[union-attr]
+
+
+async def test_tick_skips_when_tracker_empty(tmp_path):
+    agent = _FakeAgentLoop("HEARTBEAT_OK")
+    tracker = LastChannelTracker()
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert agent.calls == []
+
+
+async def test_tick_skips_outside_active_hours(tmp_path):
+    agent = _FakeAgentLoop("HEARTBEAT_OK")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    cfg = HeartbeatConfig(active_hours_start="08:00", active_hours_end="09:00", timezone="UTC")
+    svc = HeartbeatService(agent_loop=agent, tracker=tracker, workspace=tmp_path, config=cfg)  # type: ignore[arg-type]
+    dt = datetime(2026, 2, 22, 3, 0, tzinfo=tz.utc)
+    await svc._tick(now=dt)
+    assert agent.calls == []
+
+
+async def test_tick_skips_empty_heartbeat_file(tmp_path):
+    (tmp_path / "HEARTBEAT.md").write_text("# Checklist\n\n")
+    agent = _FakeAgentLoop("HEARTBEAT_OK")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert agent.calls == []
+
+
+async def test_tick_runs_agent_when_file_absent(tmp_path):
+    agent = _FakeAgentLoop("HEARTBEAT_OK")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert len(agent.calls) == 1
+
+
+async def test_tick_heartbeat_ok_not_delivered(tmp_path):
+    agent = _FakeAgentLoop("HEARTBEAT_OK")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert ch.sent == []
+
+
+async def test_tick_alert_delivered(tmp_path):
+    (tmp_path / "HEARTBEAT.md").write_text("- Check inbox\n")
+    agent = _FakeAgentLoop("You have 3 unread messages.")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert ch.sent == ["You have 3 unread messages."]
+
+
+async def test_tick_heartbeat_ok_at_start_not_delivered(tmp_path):
+    agent = _FakeAgentLoop("HEARTBEAT_OK\nSome trailing text")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert ch.sent == []
+
+
+async def test_tick_heartbeat_ok_in_middle_is_delivered(tmp_path):
+    agent = _FakeAgentLoop("Some text HEARTBEAT_OK more text")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="cli", sender_id="local")
+    tracker.update(ch, session)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+    )  # type: ignore[arg-type]
+    await svc._tick()
+    assert ch.sent == ["Some text HEARTBEAT_OK more text"]

@@ -228,9 +228,9 @@ class HeartbeatService:
             logger.debug("heartbeat: skipped (outside active hours)")
             return
 
-        # 3. HEARTBEAT.md check
+        # 3. HEARTBEAT.md check — skip only when the file exists and is empty
         content = self._read_heartbeat_file()
-        if _is_heartbeat_empty(content):
+        if content is not None and _is_heartbeat_empty(content):
             logger.debug("heartbeat: skipped (HEARTBEAT.md empty)")
             return
 
