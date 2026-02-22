@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from squidbot.adapters.tools.spawn import CollectingChannel, JobStore
+from squidbot.adapters.tools.spawn import CollectingChannel, JobStore, SubAgentFactory
+from squidbot.core.agent import AgentLoop
 from squidbot.core.models import OutboundMessage, Session, ToolResult
 from squidbot.core.registry import ToolRegistry
 
@@ -117,10 +118,6 @@ def _make_mock_registry(tool_names: list[str]) -> ToolRegistry:
 
 
 def test_factory_build_returns_agent_loop():
-    from squidbot.core.agent import AgentLoop
-
-    from squidbot.adapters.tools.spawn import SubAgentFactory
-
     llm = MagicMock()
     memory = MagicMock()
     registry = _make_mock_registry(["shell"])
@@ -132,8 +129,6 @@ def test_factory_build_returns_agent_loop():
 
 
 def test_factory_build_excludes_spawn_tools():
-    from squidbot.adapters.tools.spawn import SubAgentFactory
-
     registry = _make_mock_registry(["shell", "spawn", "spawn_await"])
     factory = SubAgentFactory(
         llm=MagicMock(), memory=MagicMock(), registry=registry, system_prompt="p", profiles={}
@@ -148,8 +143,6 @@ def test_factory_build_excludes_spawn_tools():
 
 
 def test_factory_build_with_tools_filter():
-    from squidbot.adapters.tools.spawn import SubAgentFactory
-
     registry = _make_mock_registry(["shell", "web_search", "read_file"])
     factory = SubAgentFactory(
         llm=MagicMock(), memory=MagicMock(), registry=registry, system_prompt="p", profiles={}
@@ -161,10 +154,6 @@ def test_factory_build_with_tools_filter():
 
 
 def test_factory_build_with_system_prompt_override():
-    from squidbot.core.agent import AgentLoop
-
-    from squidbot.adapters.tools.spawn import SubAgentFactory
-
     registry = _make_mock_registry([])
     factory = SubAgentFactory(
         llm=MagicMock(),
