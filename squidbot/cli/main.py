@@ -707,27 +707,38 @@ async def _run_gateway(config_path: Path) -> None:
 
 
 async def _run_onboard(config_path: Path) -> None:
-    """Interactive setup wizard."""
-    print("squidbot setup wizard")
-    print("=" * 40)
-    api_base = input("LLM API base URL [https://openrouter.ai/api/v1]: ").strip()
-    api_key = input("API key: ").strip()
-    model_id = input("Model identifier [anthropic/claude-opus-4-5]: ").strip()
-
+    """Interactive setup wizard. Idempotent — existing values shown as defaults."""
     from squidbot.config.schema import (  # noqa: PLC0415
         LLMModelConfig,
         LLMPoolEntry,
         LLMProviderConfig,
     )
 
-    settings = Settings()
+    # Load existing config if present, otherwise start fresh
+    settings = Settings.load(config_path) if config_path.exists() else Settings()
+    existing = settings.llm.providers.get("default")
+    existing_model = settings.llm.models.get("default")
+
+    default_api_base = (existing.api_base if existing else None) or "https://openrouter.ai/api/v1"
+    default_api_key = (existing.api_key if existing else None) or ""
+    default_model = (
+        existing_model.model if existing_model else None
+    ) or "anthropic/claude-opus-4-5"
+
+    print("squidbot setup wizard")
+    print("=" * 40)
+    api_base = input(f"LLM API base URL [{default_api_base}]: ").strip() or default_api_base
+    api_key_input = input(f"API key [{'*' * min(len(default_api_key), 8) or 'not set'}]: ").strip()
+    api_key = api_key_input or default_api_key
+    model_id = input(f"Model identifier [{default_model}]: ").strip() or default_model
+
     settings.llm.providers["default"] = LLMProviderConfig(
-        api_base=api_base or "https://openrouter.ai/api/v1",
+        api_base=api_base,
         api_key=api_key,
     )
     settings.llm.models["default"] = LLMModelConfig(
         provider="default",
-        model=model_id or "anthropic/claude-opus-4-5",
+        model=model_id,
     )
     settings.llm.pools["default"] = [LLMPoolEntry(model="default")]
     settings.llm.default_pool = "default"
