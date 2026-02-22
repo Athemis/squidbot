@@ -9,9 +9,12 @@ EmailChannel, which is implemented in this same module.
 
 from __future__ import annotations
 
+import hashlib
+import mimetypes
 import re
 from email.message import Message as EmailMessage
 from email.utils import parseaddr
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -199,3 +202,32 @@ def _re_subject(subject: str) -> str:
     if re.match(r"^re:\s*", subject, re.IGNORECASE):
         return subject
     return f"Re: {subject}"
+
+
+def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
+    """
+    Extract all attachment parts and save them to tmp_dir.
+
+    Returns a list of annotation lines to append to the message text, e.g.:
+    ["[Anhang: report.pdf (application/pdf)] → /tmp/squidbot-a1b2c3d4.pdf"]
+
+    Args:
+        msg: Parsed email.message.Message object.
+        tmp_dir: Directory to save attachments into.
+    """
+    lines: list[str] = []
+    for part in msg.walk():
+        disposition = part.get_content_disposition()
+        if disposition != "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if not isinstance(payload, bytes):
+            continue
+        filename: str = part.get_filename() or "attachment"
+        mime: str = part.get_content_type() or "application/octet-stream"
+        ext = mimetypes.guess_extension(mime) or Path(filename).suffix or ""
+        sha = hashlib.sha256(payload).hexdigest()[:8]
+        dest = tmp_dir / f"squidbot-{sha}{ext}"
+        dest.write_bytes(payload)
+        lines.append(f"[Anhang: {filename} ({mime})] → {dest}")
+    return lines

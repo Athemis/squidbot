@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import email as email_lib
+from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 
 def _make_plain(body: str, from_addr: str = "sender@example.com") -> bytes:
@@ -148,3 +150,38 @@ class TestReSubject:
         from squidbot.adapters.channels.email import _re_subject
 
         assert _re_subject("RE: Hello") == "RE: Hello"
+
+
+class TestExtractAttachments:
+    def test_no_attachments(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import _extract_attachments
+
+        raw = _make_plain("body")
+        msg = email_lib.message_from_bytes(raw)
+        lines = _extract_attachments(msg, tmp_path)
+        assert lines == []
+
+    def test_attachment_saved_to_tmp(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.email import _extract_attachments
+
+        outer = MIMEMultipart("mixed")
+        outer["From"] = "s@example.com"
+        outer["To"] = "b@example.com"
+        outer["Subject"] = "With attachment"
+        outer["Message-ID"] = "<att@example.com>"
+        outer.attach(MIMEText("body", "plain"))
+        part = MIMEBase("application", "pdf")
+        part.set_payload(b"pdfcontent")
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="report.pdf")
+        outer.attach(part)
+
+        msg = email_lib.message_from_bytes(outer.as_bytes())
+        lines = _extract_attachments(msg, tmp_path)
+        assert len(lines) == 1
+        assert "report.pdf" in lines[0]
+        assert "application/pdf" in lines[0]
+        # file actually exists
+        saved = [f for f in tmp_path.iterdir()]
+        assert len(saved) == 1
+        assert saved[0].read_bytes() == b"pdfcontent"
