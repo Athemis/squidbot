@@ -64,10 +64,10 @@ class TestMatrixChannelReceive:
         with patch("squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_nio):
             await ch._handle_text(MagicMock(), event)
 
-        msgs = []
-        async for msg in ch.receive():
-            msgs.append(msg)
-            break  # one message is enough
+            msgs = []
+            async for msg in ch.receive():
+                msgs.append(msg)
+                break  # one message is enough
 
         assert len(msgs) == 1
         assert msgs[0].text == "hello bot"
