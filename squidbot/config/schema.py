@@ -27,12 +27,28 @@ class LLMConfig(BaseModel):
     max_context_tokens: int = 100_000
 
 
+class HeartbeatConfig(BaseModel):
+    """Configuration for the periodic heartbeat service."""
+
+    enabled: bool = True
+    interval_minutes: int = 30
+    prompt: str = (
+        "Read HEARTBEAT.md if it exists in your workspace. "
+        "Follow any instructions strictly. Do not repeat tasks from prior turns. "
+        "If nothing needs attention, reply with just: HEARTBEAT_OK"
+    )
+    active_hours_start: str = "00:00"  # HH:MM inclusive
+    active_hours_end: str = "24:00"  # HH:MM exclusive; 24:00 = end of day
+    timezone: str = "local"  # IANA tz name or "local" (host timezone)
+
+
 class AgentConfig(BaseModel):
     """Configuration for agent behavior."""
 
     workspace: str = str(Path.home() / ".squidbot" / "workspace")
     system_prompt_file: str = "AGENTS.md"
     restrict_to_workspace: bool = True
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
 class ShellToolConfig(BaseModel):

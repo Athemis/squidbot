@@ -95,3 +95,22 @@ def test_tracker_last_update_wins():
     tracker.update(ch2, s2)
     assert tracker.channel is ch2
     assert tracker.session is s2
+
+
+from squidbot.config.schema import HeartbeatConfig
+
+
+def test_heartbeat_config_defaults():
+    cfg = HeartbeatConfig()
+    assert cfg.enabled is True
+    assert cfg.interval_minutes == 30
+    assert cfg.active_hours_start == "00:00"
+    assert cfg.active_hours_end == "24:00"
+    assert cfg.timezone == "local"
+
+
+def test_heartbeat_config_in_agent_config():
+    from squidbot.config.schema import AgentConfig
+
+    cfg = AgentConfig()
+    assert isinstance(cfg.heartbeat, HeartbeatConfig)
