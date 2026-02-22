@@ -48,8 +48,9 @@ class MemoryWriteTool:
         )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        content: str = str(kwargs.get("content", ""))
-        if not content:
+        content_raw = kwargs.get("content")
+        if not isinstance(content_raw, str):
             return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
+        content: str = content_raw
         await self._storage.save_memory_doc(self._session_id, content)
         return ToolResult(tool_call_id="", content="Memory updated successfully.")

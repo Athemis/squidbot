@@ -87,9 +87,10 @@ class WebSearchTool:
         Args:
             kwargs: Must contain "query" (str) and optionally "max_results" (int, default 5).
         """
-        query: str = str(kwargs.get("query", ""))
-        if not query:
+        query_raw = kwargs.get("query")
+        if not isinstance(query_raw, str) or not query_raw:
             return ToolResult(tool_call_id="", content="Error: query is required", is_error=True)
+        query: str = query_raw
         try:
             max_results: int = int(kwargs.get("max_results", 5))
         except TypeError, ValueError:

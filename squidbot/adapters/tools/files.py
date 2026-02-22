@@ -47,9 +47,10 @@ class ReadFileTool:
         )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        path: str = str(kwargs.get("path", ""))
-        if not path:
+        path_raw = kwargs.get("path")
+        if not isinstance(path_raw, str) or not path_raw:
             return ToolResult(tool_call_id="", content="Error: path is required", is_error=True)
+        path: str = path_raw
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(
@@ -89,12 +90,16 @@ class WriteFileTool:
         )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        path: str = str(kwargs.get("path", ""))
-        content: str = str(kwargs.get("content", ""))
-        if not path:
-            return ToolResult(tool_call_id="", content="Error: path is required", is_error=True)
-        if not content:
+        if "content" not in kwargs:
             return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
+        content_raw = kwargs.get("content")
+        if not isinstance(content_raw, str):
+            return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
+        content: str = content_raw
+        path_raw = kwargs.get("path")
+        if not isinstance(path_raw, str) or not path_raw:
+            return ToolResult(tool_call_id="", content="Error: path is required", is_error=True)
+        path: str = path_raw
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(
@@ -135,7 +140,8 @@ class ListFilesTool:
         )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        path: str = str(kwargs.get("path", "."))
+        path_raw = kwargs.get("path", ".")
+        path: str = path_raw if isinstance(path_raw, str) else "."
         resolved = _resolve_safe(self._workspace, path, self._restrict)
         if resolved is None:
             return ToolResult(

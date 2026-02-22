@@ -51,9 +51,10 @@ class ShellTool:
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Run the command and return combined stdout/stderr."""
-        command: str = str(kwargs.get("command", ""))
-        if not command:
+        command_raw = kwargs.get("command")
+        if not isinstance(command_raw, str) or not command_raw:
             return ToolResult(tool_call_id="", content="Error: command is required", is_error=True)
+        command: str = command_raw
         try:
             timeout: int = int(kwargs.get("timeout", 30))
         except TypeError, ValueError:
