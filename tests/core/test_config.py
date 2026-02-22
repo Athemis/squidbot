@@ -3,6 +3,7 @@ import json
 import pytest
 
 from squidbot.config.schema import (
+    AgentConfig,
     HeartbeatConfig,
     LLMConfig,
     LLMModelConfig,
@@ -218,3 +219,24 @@ def test_validation_empty_pools_is_valid():
     """Empty pools config (unconfigured) should not fail validation."""
     s = Settings.model_validate({})
     assert s.llm.pools == {}
+
+
+def test_spawn_profile_bootstrap_files_default():
+    profile = SpawnProfile()
+    assert profile.bootstrap_files == []
+    assert profile.system_prompt_file == ""
+
+
+def test_spawn_profile_bootstrap_files_set():
+    profile = SpawnProfile(bootstrap_files=["SOUL.md", "AGENTS.md"])
+    assert profile.bootstrap_files == ["SOUL.md", "AGENTS.md"]
+
+
+def test_spawn_profile_system_prompt_file():
+    profile = SpawnProfile(system_prompt_file="RESEARCHER.md")
+    assert profile.system_prompt_file == "RESEARCHER.md"
+
+
+def test_agent_config_no_longer_has_system_prompt_file():
+    cfg = AgentConfig()
+    assert not hasattr(cfg, "system_prompt_file")

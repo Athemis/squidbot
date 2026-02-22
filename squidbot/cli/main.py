@@ -421,8 +421,8 @@ async def _make_agent_loop(
                 registry.register(tool)
             mcp_connections.append(conn)
 
-    # Load system prompt
-    system_prompt_path = workspace / settings.agents.system_prompt_file
+    # Load system prompt (bootstrap_files loading added in later tasks)
+    system_prompt_path = workspace / "AGENTS.md"
     if system_prompt_path.exists():
         system_prompt = system_prompt_path.read_text(encoding="utf-8")
     else:

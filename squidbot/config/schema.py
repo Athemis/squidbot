@@ -68,7 +68,6 @@ class AgentConfig(BaseModel):
     """Configuration for agent behavior."""
 
     workspace: str = str(Path.home() / ".squidbot" / "workspace")
-    system_prompt_file: str = "AGENTS.md"
     restrict_to_workspace: bool = True
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
@@ -101,6 +100,8 @@ class SpawnProfile(BaseModel):
     """Configuration for a named sub-agent profile."""
 
     system_prompt: str = ""
+    system_prompt_file: str = ""  # filename relative to workspace
+    bootstrap_files: list[str] = Field(default_factory=list)  # [] = default allowlist
     tools: list[str] = Field(default_factory=list)
     pool: str = ""  # empty = use llm.default_pool
 
