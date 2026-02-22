@@ -222,12 +222,18 @@ class TestEmailChannelReceive:
         from_addr: str = "user@example.com",
         subject: str = "Test",
         msg_id: str = "<abc@host>",
+        references: str = "",
+        in_reply_to: str = "",
     ) -> bytes:
         msg = MIMEText(body, "plain", "utf-8")
         msg["From"] = from_addr
         msg["To"] = "bot@example.com"
         msg["Subject"] = subject
         msg["Message-ID"] = msg_id
+        if references:
+            msg["References"] = references
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
         return msg.as_bytes()
 
     @pytest.fixture
@@ -311,7 +317,12 @@ class TestEmailChannelReceive:
     ) -> None:
         from squidbot.adapters.channels.email import EmailChannel
 
-        raw = self._raw_mail(subject="Anfrage", msg_id="<xyz@host>")
+        raw = self._raw_mail(
+            subject="Anfrage",
+            msg_id="<xyz@host>",
+            references="<prev@host>",
+            in_reply_to="<prev@host>",
+        )
         fake_imap.uid = AsyncMock(
             side_effect=[
                 ("OK", [b"1"]),
@@ -328,6 +339,8 @@ class TestEmailChannelReceive:
                 assert msg.metadata["email_subject"] == "Anfrage"
                 assert msg.metadata["email_message_id"] == "<xyz@host>"
                 assert msg.metadata["email_from"] == "user@example.com"
+                assert msg.metadata["email_references"] == "<prev@host>"
+                assert msg.metadata["email_in_reply_to"] == "<prev@host>"
                 assert msg.metadata["email_signature_type"] is None
                 assert msg.metadata["email_signature_valid"] is None
                 assert msg.metadata["email_signature_signer"] is None

@@ -1,10 +1,13 @@
 """
-MIME parsing helpers for the squidbot email channel adapter.
+Email channel adapter for squidbot.
 
-Provides pure functions for normalising addresses, extracting plain-text bodies
-from MIME trees (including multipart/signed unwrapping), detecting cryptographic
-signature types, and formatting reply subjects. These helpers are used by
-EmailChannel, which is implemented in this same module.
+Implements ChannelPort using aioimaplib (IMAP IDLE with polling fallback) and
+aiosmtplib (SMTP). Receives messages from a configured mailbox, filters by
+allow_from, and sends replies as multipart/alternative (plain + HTML) emails.
+
+Signature handling: multipart/signed emails are correctly unwrapped (text extracted
+from Part 0). Signature type is stored in metadata. Cryptographic verification is
+not implemented — see _verify_signature() stub for future extension.
 """
 
 from __future__ import annotations
@@ -420,8 +423,8 @@ class EmailChannel:
 
         session = Session(channel="email", sender_id=sender)
         inbound = InboundMessage(session=session, text=text, metadata=metadata)
-        self._queue.put_nowait(inbound)
         self._seen_uids.add(uid)
+        self._queue.put_nowait(inbound)
 
         await self._imap.uid("store", uid, "+FLAGS", r"(\Seen)")
 
