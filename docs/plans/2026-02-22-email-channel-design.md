@@ -20,7 +20,10 @@ in `squidbot/adapters/channels/email.py`. The core has no knowledge of email pro
 - Log warnings when TLS is weakened or disabled
 
 Out of scope: POP3, OAuth2, HTML-to-Markdown conversion for incoming mails, read receipts,
-mail folder management beyond marking as `\Seen`.
+mail folder management beyond marking as `\Seen`, cryptographic signature verification.
+
+**Future extension point:** S/MIME and GPG signature verification is explicitly not
+implemented but the code is structured to support it later (see §Signature Handling).
 
 ## Architecture
 
@@ -97,15 +100,48 @@ Filtered mails are marked `\Seen` and silently dropped.
 [Anhang: filename.pdf (application/pdf)] → /tmp/squidbot-a1b2c3d4.pdf
 ```
 
+### Signature Handling
+
+Signed emails (`multipart/signed`) wrap the actual content in a two-part structure:
+- Part 0: the real message body (parsed normally for text/attachments)
+- Part 1: the detached signature (`application/pkcs7-signature` or `application/pgp-signature`)
+
+The parser must unwrap `multipart/signed` correctly so text extraction hits Part 0, not
+the signature blob. Without this, signed mails would yield empty or garbled text.
+
+**What is implemented now:**
+- Correct `multipart/signed` unwrapping (text extracted from Part 0)
+- Signature type detected and stored in metadata (`"smime"`, `"pgp"`, or `None`)
+- A `_verify_signature()` stub method on `EmailChannel` — empty, returns `None`
+
+**What is NOT implemented (future):**
+- Cryptographic verification via `cryptography` lib (S/MIME) or `gpg` subprocess
+- `email_signature_valid: bool` in metadata
+- Certificate/key whitelist in `EmailChannelConfig`
+
+**Planned future metadata keys** (not populated yet):
+```python
+"email_signature_valid":  None,   # True/False/None (None = not checked)
+"email_signature_signer": None,   # fingerprint or CN when verified
+```
+
+**Future workflow envisioned:**
+1. `allow_from` check (sender address)
+2. `_verify_signature()` → valid/invalid/unsigned
+3. Optional: signer cert/key against whitelist
+
 ### Metadata
 
 ```python
 {
-    "email_message_id":  "<abc@host>",     # Message-ID header
-    "email_subject":     "Anfrage",        # Subject header (without Re: prefix)
-    "email_from":        "user@example.com",
-    "email_references":  "<prev@host>",    # References header (may be empty)
-    "email_in_reply_to": "<prev@host>",    # In-Reply-To header (may be empty)
+    "email_message_id":    "<abc@host>",   # Message-ID header
+    "email_subject":       "Anfrage",      # Subject header (without Re: prefix)
+    "email_from":          "user@example.com",
+    "email_references":    "<prev@host>",  # References header (may be empty)
+    "email_in_reply_to":   "<prev@host>",  # In-Reply-To header (may be empty)
+    "email_signature_type": None,          # "smime" | "pgp" | None
+    "email_signature_valid": None,         # always None until verification implemented
+    "email_signature_signer": None,        # always None until verification implemented
 }
 ```
 
@@ -208,6 +244,7 @@ Key test cases:
 - `receive()` yields `InboundMessage` for unseen messages
 - `allow_from` filter silently drops unknown senders (marks `\Seen`)
 - Incoming attachment saved to `/tmp/`, path appended to text
+- `multipart/signed` mail: text extracted from Part 0, signature type in metadata
 - `send()` builds correct reply headers (In-Reply-To, References, Re: subject)
 - `send()` produces `multipart/alternative` with plain + HTML parts
 - `send()` wraps in `multipart/mixed` when `OutboundMessage.attachment` is set
