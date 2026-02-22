@@ -29,6 +29,7 @@ app = cyclopts.App(name="squidbot", help="A lightweight personal AI assistant.")
 def agent(
     message: str | None = None,
     config: Path = DEFAULT_CONFIG_PATH,
+    log_level: str = "INFO",
 ) -> None:
     """
     Chat with the assistant.
@@ -36,12 +37,14 @@ def agent(
     In interactive mode (no --message), starts a REPL loop.
     With --message, sends a single message and exits.
     """
+    _setup_logging(log_level)
     asyncio.run(_run_agent(message=message, config_path=config))
 
 
 @app.command
-def gateway(config: Path = DEFAULT_CONFIG_PATH) -> None:
+def gateway(config: Path = DEFAULT_CONFIG_PATH, log_level: str = "INFO") -> None:
     """Start the gateway (all enabled channels run concurrently)."""
+    _setup_logging(log_level)
     asyncio.run(_run_gateway(config_path=config))
 
 
@@ -176,6 +179,33 @@ def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
+
+
+def _setup_logging(level: str) -> None:
+    """
+    Configure loguru for gateway/agent output.
+
+    Removes the default loguru stderr handler and replaces it with one that
+    uses a consistent timestamp+level format. Third-party libraries that are
+    too chatty at DEBUG are clamped to WARNING via the stdlib logging bridge.
+
+    Args:
+        level: Log level string (case-insensitive), e.g. "INFO", "DEBUG".
+    """
+    import logging
+    import sys
+
+    from loguru import logger
+
+    logger.remove()  # remove loguru's built-in default handler
+    logger.add(
+        sys.stderr,
+        level=level.upper(),
+        format=("<green>{time:YYYY-MM-DD HH:mm:ss}</green> <level>{level:<8}</level> {message}"),
+        colorize=True,
+    )
+    for noisy in ("httpx", "nio", "aioimaplib", "aiosmtplib", "openai"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 async def _make_agent_loop(settings: Settings):
