@@ -14,10 +14,12 @@ from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from squidbot.core.models import (
+    ChannelStatus,
     CronJob,
     InboundMessage,
     Message,
     OutboundMessage,
+    SessionInfo,
     ToolDefinition,
     ToolResult,
 )
@@ -172,17 +174,21 @@ class StatusPort(Protocol):
     Interface for gateway status reporting.
 
     Provides read-only access to runtime state for dashboards or status commands.
-    Implementations may be a simple in-memory snapshot updated by the gateway.
+    Implementations hold a GatewayState snapshot updated by running components.
     """
 
-    def get_active_sessions(self) -> list[str]:
-        """Return session IDs of currently active conversations."""
+    def get_active_sessions(self) -> list[SessionInfo]:
+        """Return metadata for all sessions seen since gateway start."""
         ...
 
-    def get_channel_status(self) -> dict[str, str]:
-        """Return a mapping of channel name to status string."""
+    def get_channel_status(self) -> list[ChannelStatus]:
+        """Return runtime status of all configured channels."""
         ...
 
     def get_cron_jobs(self) -> list[CronJob]:
         """Return the current list of scheduled jobs."""
+        ...
+
+    def get_skills(self) -> list[SkillMetadata]:
+        """Return all discovered skills with availability info."""
         ...
