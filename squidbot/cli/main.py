@@ -749,6 +749,10 @@ async def _run_onboard(config_path: Path) -> None:
     workspace = Path(settings.agents.workspace).expanduser()
     workspace.mkdir(parents=True, exist_ok=True)
 
+    # Determine bootstrap state BEFORE copying any files
+    bootstrap_path = workspace / "BOOTSTRAP.md"
+    already_set_up = (workspace / "IDENTITY.md").exists() and not bootstrap_path.exists()
+
     # Copy bootstrap files from bundled workspace (skip if already present)
     for filename in BOOTSTRAP_FILES_MAIN:
         file_path = workspace / filename
@@ -757,10 +761,6 @@ async def _run_onboard(config_path: Path) -> None:
             if template_path.exists():
                 file_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
                 print(f"Created {file_path}")
-
-    # Copy BOOTSTRAP.md — first run only, or offer to re-run if already set up
-    bootstrap_path = workspace / "BOOTSTRAP.md"
-    already_set_up = (workspace / "IDENTITY.md").exists() and not bootstrap_path.exists()
     if bootstrap_path.exists():
         pass  # bootstrap already in progress — don't overwrite
     elif already_set_up:
