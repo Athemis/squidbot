@@ -35,7 +35,7 @@ class ToolResult:
 class Message:
     """A single message in a conversation."""
 
-    role: Literal["system", "user", "assistant", "tool"]
+    role: Literal["system", "user", "assistant", "tool", "tool_call", "tool_result"]
     content: str
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None  # set when role == "tool"
