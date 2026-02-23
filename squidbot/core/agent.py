@@ -170,6 +170,8 @@ class AgentLoop:
                     result = await self._registry.execute(
                         tc.name, tool_call_id=tc.id, **tc.arguments
                     )
+                # TODO: consider truncating result.content here too to protect
+                # the LLM context window from very large tool outputs.
                 messages.append(
                     Message(
                         role="tool",

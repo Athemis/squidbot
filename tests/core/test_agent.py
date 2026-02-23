@@ -297,3 +297,25 @@ async def test_tool_events_not_sent_to_channel(storage, memory):
 
     # Only the final text reply is sent to the channel
     assert channel.sent == ["Done."]
+
+
+async def test_tool_events_written_for_extra_tools_path(storage, memory):
+    """Tool events are persisted when the tool is supplied via extra_tools, not the registry."""
+    tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "via extra"})
+    llm = ScriptedLLM([[tool_call], "Done."])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),  # empty registry — echo is only in extra_tools
+        system_prompt="sys",
+    )
+
+    await loop.run(SESSION, "echo via extra", channel, extra_tools=[EchoTool()])
+
+    history = await storage.load_history(SESSION.id)
+    roles = [m.role for m in history]
+    assert "tool_call" in roles
+    assert "tool_result" in roles
+    tool_call_msg = next(m for m in history if m.role == "tool_call")
+    assert tool_call_msg.content == "echo(text='via extra')"
