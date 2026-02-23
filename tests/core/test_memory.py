@@ -1,7 +1,7 @@
 """
 Tests for the core memory manager.
 
-Uses in-memory storage to test pruning logic and memory.md injection
+Uses in-memory storage to test consolidation logic and memory.md injection
 without touching the filesystem.
 """
 
@@ -44,7 +44,7 @@ def storage():
 
 @pytest.fixture
 def manager(storage):
-    return MemoryManager(storage=storage, max_history_messages=5)
+    return MemoryManager(storage=storage)
 
 
 async def test_build_messages_empty_session(manager):
@@ -83,20 +83,6 @@ async def test_build_messages_includes_history(manager, storage):
     assert len(messages) == 4
 
 
-async def test_prune_oldest_messages_when_over_limit(manager, storage):
-    # Add 6 old messages (over the limit of 5)
-    for i in range(6):
-        await storage.append_message("cli:local", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages(
-        session_id="cli:local",
-        system_prompt="You are a bot.",
-        user_message="new",
-    )
-    # Only 5 history messages kept (not 6), plus system + new user
-    history_messages = [m for m in messages if m.role != "system"]
-    assert len(history_messages) <= 5 + 1  # 5 history + 1 new user msg
-
-
 async def test_persist_exchange(manager, storage):
     await manager.persist_exchange(
         session_id="cli:local",
@@ -126,9 +112,8 @@ async def test_consolidation_not_triggered_below_threshold(storage):
     llm = ScriptedLLM("Summary: talked about nothing.")
     manager = MemoryManager(
         storage=storage,
-        max_history_messages=200,
         consolidation_threshold=10,
-        keep_recent=3,
+        keep_recent_ratio=0.3,
         llm=llm,
     )
     for i in range(5):
@@ -143,9 +128,8 @@ async def test_consolidation_triggered_above_threshold(storage):
     llm = ScriptedLLM("Summary: talked about Python.")
     manager = MemoryManager(
         storage=storage,
-        max_history_messages=200,
         consolidation_threshold=5,
-        keep_recent=2,
+        keep_recent_ratio=0.4,
         llm=llm,
     )
     for i in range(6):
@@ -163,9 +147,8 @@ async def test_consolidation_appends_to_existing_memory_doc(storage):
     llm = ScriptedLLM("Summary: discussed dogs.")
     manager = MemoryManager(
         storage=storage,
-        max_history_messages=200,
         consolidation_threshold=3,
-        keep_recent=1,
+        keep_recent_ratio=0.34,
         llm=llm,
     )
     for i in range(4):
@@ -181,9 +164,8 @@ async def test_consolidation_summary_appears_in_system_prompt(storage):
     llm = ScriptedLLM("Summary: key facts here.")
     manager = MemoryManager(
         storage=storage,
-        max_history_messages=200,
         consolidation_threshold=3,
-        keep_recent=1,
+        keep_recent_ratio=0.34,
         llm=llm,
     )
     for i in range(4):
@@ -196,9 +178,8 @@ async def test_consolidation_summary_appears_in_system_prompt(storage):
 async def test_consolidation_skipped_when_no_llm(storage):
     manager = MemoryManager(
         storage=storage,
-        max_history_messages=200,
         consolidation_threshold=3,
-        keep_recent=1,
+        keep_recent_ratio=0.34,
         llm=None,
     )
     for i in range(6):
@@ -207,3 +188,33 @@ async def test_consolidation_skipped_when_no_llm(storage):
     assert len(messages) == 8
     doc = await storage.load_memory_doc("s1")
     assert doc == ""
+
+
+async def test_consolidation_warning_fires_one_turn_before_threshold(storage):
+    """Warning appears in system prompt when history is consolidation_threshold - 2 or more."""
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=10,
+        keep_recent_ratio=0.3,
+        llm=None,
+    )
+    # Add exactly threshold - 2 = 8 messages
+    for i in range(8):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    assert "will soon be summarized" in messages[0].content
+
+
+async def test_consolidation_warning_does_not_fire_below_threshold(storage):
+    """Warning does not appear when history is below consolidation_threshold - 2."""
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=10,
+        keep_recent_ratio=0.3,
+        llm=None,
+    )
+    # Add threshold - 3 = 7 messages (one below warning trigger)
+    for i in range(7):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    assert "will soon be summarized" not in messages[0].content

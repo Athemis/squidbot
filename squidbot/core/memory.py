@@ -16,11 +16,11 @@ from squidbot.core.ports import MemoryPort, SkillsPort
 if TYPE_CHECKING:
     from squidbot.core.ports import LLMPort
 
-# Injected into the system prompt when the context limit is approaching.
-_PRUNE_WARNING = (
-    "\n\n[System: Conversation history is long. Important information will be "
-    "dropped soon. Use the memory_write tool to preserve anything critical before "
-    "it leaves context.]\n"
+# Injected into the system prompt one turn before consolidation fires.
+# Prompts the agent to use memory_write to preserve anything critical.
+_CONSOLIDATION_WARNING = (
+    "\n\n[System: Conversation history will soon be summarized and condensed. "
+    "Use the memory_write tool now to preserve anything critical before it happens.]\n"
 )
 
 _CONSOLIDATION_PROMPT = (
@@ -40,39 +40,35 @@ class MemoryManager:
     - Build the full message list for each LLM call (system + history + user)
     - Inject memory.md content into the system prompt
     - Inject skills XML block and always-skill bodies into the system prompt
-    - Prune old messages when history exceeds the configured limit
+    - Warn the agent one turn before consolidation via _CONSOLIDATION_WARNING
+    - Consolidate old messages into memory.md when history exceeds the threshold
     - Persist new exchanges after each agent turn
     """
 
     def __init__(
         self,
         storage: MemoryPort,
-        max_history_messages: int = 200,
         skills: SkillsPort | None = None,
         llm: LLMPort | None = None,
         consolidation_threshold: int = 100,
-        keep_recent: int = 20,
+        keep_recent_ratio: float = 0.2,
     ) -> None:
         """
         Args:
             storage: The persistence adapter implementing MemoryPort.
-            max_history_messages: Maximum number of history messages to keep.
-                                  Older messages are dropped (not summarized).
             skills: Optional skills loader. If provided, injects skill metadata
                     and always-skill bodies into every system prompt.
             llm: Optional LLM adapter for history consolidation. If None,
                  consolidation is disabled.
             consolidation_threshold: Number of messages that triggers consolidation.
-            keep_recent: Number of recent messages to keep verbatim during
-                         consolidation.
+            keep_recent_ratio: Fraction of consolidation_threshold to keep verbatim
+                               after consolidation (e.g. 0.2 = 20%).
         """
         self._storage = storage
-        self._max_history = max_history_messages
         self._skills = skills
         self._llm = llm
         self._consolidation_threshold = consolidation_threshold
-        self._keep_recent = keep_recent
-        self._warn_threshold = int(max_history_messages * 0.8)
+        self._keep_recent = int(consolidation_threshold * keep_recent_ratio)
 
     async def build_messages(
         self,
@@ -83,7 +79,7 @@ class MemoryManager:
         """
         Construct the full message list for an LLM call.
 
-        Layout: [system_prompt + memory.md + skills] + [history (pruned)] + [user_message]
+        Layout: [system_prompt + memory.md + skills + optional warning] + [history] + [user_message]
 
         Args:
             session_id: Unique session identifier.
@@ -118,14 +114,9 @@ class MemoryManager:
                     body = self._skills.load_skill_body(skill.name)
                     full_system += f"\n\n{body}"
 
-        # Prune history if over the limit
-        near_limit = len(history) >= self._warn_threshold
-        if len(history) > self._max_history:
-            history = history[-self._max_history :]
-
-        # Inject warning when approaching the limit
-        if near_limit:
-            full_system += _PRUNE_WARNING
+        # Warn the agent one turn before consolidation fires
+        if len(history) >= self._consolidation_threshold - 2:
+            full_system += _CONSOLIDATION_WARNING
 
         messages: list[Message] = [
             Message(role="system", content=full_system),
