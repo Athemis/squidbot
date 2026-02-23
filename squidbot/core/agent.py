@@ -8,6 +8,8 @@ interactions happen through the injected port implementations.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
     Message,
@@ -84,7 +86,7 @@ class AgentLoop:
         channel: ChannelPort,
         *,
         llm: LLMPort | None = None,
-        extra_tools: list[ToolPort] | None = None,
+        extra_tools: Sequence[ToolPort] | None = None,
     ) -> None:
         """
         Process a single user message and deliver the reply to the channel.

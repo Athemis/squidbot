@@ -56,7 +56,7 @@ async def test_spawn_tools_registered_when_enabled(settings_with_spawn, tmp_path
     ):
         from squidbot.cli.main import _make_agent_loop
 
-        loop, conns = await _make_agent_loop(
+        loop, conns, _storage = await _make_agent_loop(
             settings_with_spawn,
             storage_dir=tmp_path,
         )
@@ -72,7 +72,7 @@ async def test_spawn_tools_not_registered_when_disabled(settings_spawn_disabled,
     ):
         from squidbot.cli.main import _make_agent_loop
 
-        loop, conns = await _make_agent_loop(
+        loop, conns, _storage = await _make_agent_loop(
             settings_spawn_disabled,
             storage_dir=tmp_path,
         )
@@ -88,7 +88,7 @@ async def test_profile_injected_in_system_prompt(settings_with_spawn, tmp_path):
     ):
         from squidbot.cli.main import _make_agent_loop
 
-        loop, _ = await _make_agent_loop(settings_with_spawn, storage_dir=tmp_path)
+        loop, _, _storage = await _make_agent_loop(settings_with_spawn, storage_dir=tmp_path)
     assert "coder" in loop._system_prompt
     assert "<available_spawn_profiles>" in loop._system_prompt
 
@@ -106,5 +106,5 @@ async def test_no_profile_injection_when_no_profiles(tmp_path):
     ):
         from squidbot.cli.main import _make_agent_loop
 
-        loop, _ = await _make_agent_loop(s, storage_dir=tmp_path)
+        loop, _, _storage = await _make_agent_loop(s, storage_dir=tmp_path)
     assert "<available_spawn_profiles>" not in loop._system_prompt

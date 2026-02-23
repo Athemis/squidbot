@@ -23,7 +23,9 @@ from squidbot.core.models import Session
 from squidbot.core.ports import ChannelPort
 
 if TYPE_CHECKING:
-    from squidbot.core.ports import LLMPort
+    from collections.abc import Callable, Sequence
+
+    from squidbot.core.ports import LLMPort, ToolPort
 
 HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
 
@@ -133,6 +135,7 @@ class HeartbeatService:
         workspace: Path,
         config: HeartbeatConfig,
         llm_override: LLMPort | None = None,
+        extra_tools_factory: Callable[[str], Sequence[ToolPort]] | None = None,
     ) -> None:
         """
         Args:
@@ -142,12 +145,15 @@ class HeartbeatService:
             config: Heartbeat configuration.
             llm_override: Optional LLM to use instead of the agent loop's default.
                           When set, passed as the llm kwarg to agent_loop.run().
+            extra_tools_factory: Optional callable that takes a session_id and returns
+                                 a sequence of extra tools to make available for the tick.
         """
         self._agent_loop = agent_loop
         self._tracker = tracker
         self._workspace = workspace
         self._config = config
         self._llm_override = llm_override
+        self._extra_tools_factory = extra_tools_factory
 
     def _is_in_active_hours(self, now: datetime | None = None) -> bool:
         """
@@ -243,6 +249,11 @@ class HeartbeatService:
             return
 
         # 4. Run agent into a sink channel
+        extra_tools = (
+            self._extra_tools_factory(self._tracker.session.id)
+            if self._extra_tools_factory is not None
+            else None
+        )
         sink = _SinkChannel()
         try:
             await self._agent_loop.run(
@@ -250,6 +261,7 @@ class HeartbeatService:
                 self._config.prompt,
                 sink,  # type: ignore[arg-type]
                 llm=self._llm_override,
+                extra_tools=extra_tools,
             )
         except Exception as e:
             logger.error("heartbeat: agent error: {}", e)

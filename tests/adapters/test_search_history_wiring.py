@@ -55,7 +55,7 @@ async def test_search_history_registered_when_enabled(
     ):
         from squidbot.cli.main import _make_agent_loop
 
-        loop, conns = await _make_agent_loop(
+        loop, conns, _storage = await _make_agent_loop(
             settings_search_history_enabled,
             storage_dir=tmp_path,
         )
@@ -72,7 +72,7 @@ async def test_search_history_not_registered_when_disabled(
     ):
         from squidbot.cli.main import _make_agent_loop
 
-        loop, conns = await _make_agent_loop(
+        loop, conns, _storage = await _make_agent_loop(
             settings_search_history_disabled,
             storage_dir=tmp_path,
         )

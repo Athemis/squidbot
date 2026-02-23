@@ -185,7 +185,13 @@ class _FakeAgentLoop:
         self.calls: list[tuple[str, str]] = []  # (session_id, user_message)
 
     async def run(
-        self, session: Session, user_message: str, channel: object, *, llm: object = None
+        self,
+        session: Session,
+        user_message: str,
+        channel: object,
+        *,
+        llm: object = None,
+        extra_tools: object = None,
     ) -> None:
         self.calls.append((session.id, user_message))
         from squidbot.core.models import OutboundMessage  # noqa: PLC0415
@@ -307,7 +313,13 @@ async def test_heartbeat_uses_llm_override(tmp_path):
 
     class CapturingLoop:
         async def run(
-            self, session: Session, message: str, channel: object, *, llm: object = None
+            self,
+            session: Session,
+            message: str,
+            channel: object,
+            *,
+            llm: object = None,
+            extra_tools: object = None,
         ) -> None:
             received_llm.append(llm)
             await channel.send(OutboundMessage(session=session, text="HEARTBEAT_OK"))  # type: ignore[union-attr]
@@ -333,7 +345,13 @@ async def test_heartbeat_no_override_passes_none(tmp_path):
 
     class CapturingLoop:
         async def run(
-            self, session: Session, message: str, channel: object, *, llm: object = None
+            self,
+            session: Session,
+            message: str,
+            channel: object,
+            *,
+            llm: object = None,
+            extra_tools: object = None,
         ) -> None:
             received_llm.append(llm)
             await channel.send(OutboundMessage(session=session, text="HEARTBEAT_OK"))  # type: ignore[union-attr]

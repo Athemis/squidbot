@@ -27,6 +27,7 @@ import cyclopts
 from squidbot.config.schema import DEFAULT_CONFIG_PATH, Settings
 
 if TYPE_CHECKING:
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
     from squidbot.core.agent import AgentLoop
     from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
@@ -393,7 +394,7 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
 async def _make_agent_loop(
     settings: Settings,
     storage_dir: Path | None = None,
-) -> tuple[AgentLoop, list[McpConnectionProtocol]]:
+) -> tuple[AgentLoop, list[McpConnectionProtocol], JsonlMemory]:
     """
     Construct the agent loop from configuration.
 
@@ -402,8 +403,8 @@ async def _make_agent_loop(
         storage_dir: Override the storage directory. Defaults to ~/.squidbot.
 
     Returns:
-        Tuple of (agent_loop, mcp_connections). Callers must close mcp_connections
-        on shutdown by calling conn.close() on each.
+        Tuple of (agent_loop, mcp_connections, storage). Callers must close
+        mcp_connections on shutdown by calling conn.close() on each.
     """
     from squidbot.adapters.persistence.jsonl import JsonlMemory  # noqa: PLC0415
     from squidbot.adapters.skills.fs import FsSkillsLoader  # noqa: PLC0415
@@ -521,7 +522,7 @@ async def _make_agent_loop(
         registry.register(SpawnTool(factory=spawn_factory, job_store=job_store))
         registry.register(SpawnAwaitTool(job_store=job_store))
 
-    return agent_loop, mcp_connections
+    return agent_loop, mcp_connections, storage
 
 
 async def _run_agent(message: str | None, config_path: Path) -> None:
@@ -532,13 +533,16 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     from squidbot.adapters.channels.cli import CliChannel, RichCliChannel  # noqa: PLC0415
 
     settings = Settings.load(config_path)
-    agent_loop, mcp_connections = await _make_agent_loop(settings)
+    agent_loop, mcp_connections, storage = await _make_agent_loop(settings)
 
     channel: ChannelPort
     if message:
         # Single-shot mode: use plain CliChannel (streaming, no banner)
         channel = CliChannel()
-        await agent_loop.run(CliChannel.SESSION, message, channel)
+        from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
+        extra = [MemoryWriteTool(storage=storage, session_id=CliChannel.SESSION.id)]
+        await agent_loop.run(CliChannel.SESSION, message, channel, extra_tools=extra)
         print()  # newline after streamed output
         for conn in mcp_connections:
             await conn.close()
@@ -559,13 +563,21 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         if (workspace / "BOOTSTRAP.md").exists():
             console.print("[dim]first run — starting bootstrap interview…[/dim]")
             console.print(Rule(style="dim"))
+            session = CliChannel.SESSION
+            from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
+            extra = [MemoryWriteTool(storage=storage, session_id=session.id)]
             await agent_loop.run(
-                CliChannel.SESSION,
+                session,
                 "BOOTSTRAP.md exists. Follow it now.",
                 channel,
+                extra_tools=extra,
             )
         async for inbound in channel.receive():
-            await agent_loop.run(inbound.session, inbound.text, channel)
+            from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
+            extra = [MemoryWriteTool(storage=storage, session_id=inbound.session.id)]
+            await agent_loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
     finally:
         for conn in mcp_connections:
             await conn.close()
@@ -625,7 +637,6 @@ async def _run_gateway(config_path: Path) -> None:
     """
     from loguru import logger  # noqa: PLC0415
 
-    from squidbot.adapters.persistence.jsonl import JsonlMemory  # noqa: PLC0415
     from squidbot.core.heartbeat import HeartbeatService, LastChannelTracker  # noqa: PLC0415
     from squidbot.core.models import Session  # noqa: PLC0415
     from squidbot.core.scheduler import CronScheduler  # noqa: PLC0415
@@ -654,11 +665,9 @@ async def _run_gateway(config_path: Path) -> None:
 
     from squidbot.core.models import ChannelStatus  # noqa: PLC0415
 
-    storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+    agent_loop, mcp_connections, storage = await _make_agent_loop(settings)
     cron_jobs = await storage.load_cron_jobs()
     logger.info("cron: {} jobs loaded", len(cron_jobs))
-
-    agent_loop, mcp_connections = await _make_agent_loop(settings)
     workspace = Path(settings.agents.workspace).expanduser()
 
     tracker = LastChannelTracker()
@@ -684,17 +693,26 @@ async def _run_gateway(config_path: Path) -> None:
             channel=channel_prefix,
             sender_id=job.channel.split(":", 1)[1],
         )
-        await agent_loop.run(session, job.message, ch)  # type: ignore[arg-type]
+        from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
+        extra = [MemoryWriteTool(storage=storage, session_id=session.id)]
+        await agent_loop.run(session, job.message, ch, extra_tools=extra)  # type: ignore[arg-type]
 
     scheduler = CronScheduler(storage=storage)
     hb_pool = settings.agents.heartbeat.pool or settings.llm.default_pool
     hb_llm = _resolve_llm(settings, hb_pool) if hb_pool != settings.llm.default_pool else None
+    from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
+    def _hb_extra_tools(session_id: str) -> list[Any]:
+        return [MemoryWriteTool(storage=storage, session_id=session_id)]
+
     heartbeat = HeartbeatService(
         agent_loop=agent_loop,
         tracker=tracker,
         workspace=workspace,
         config=settings.agents.heartbeat,
         llm_override=hb_llm,
+        extra_tools_factory=_hb_extra_tools,
     )
 
     try:
