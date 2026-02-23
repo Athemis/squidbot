@@ -262,3 +262,8 @@ def test_keep_recent_ratio_must_be_between_0_and_1_exclusive():
 def test_keep_recent_ratio_valid():
     cfg = AgentConfig(consolidation_threshold=100, keep_recent_ratio=0.3)
     assert cfg.keep_recent_ratio == 0.3
+
+
+def test_keep_recent_ratio_must_produce_at_least_one_message():
+    with pytest.raises(ValidationError):
+        AgentConfig(consolidation_threshold=3, keep_recent_ratio=0.2)  # int(0.6) = 0

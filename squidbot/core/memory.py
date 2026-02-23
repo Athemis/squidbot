@@ -114,7 +114,7 @@ class MemoryManager:
                     body = self._skills.load_skill_body(skill.name)
                     full_system += f"\n\n{body}"
 
-        # Warn the agent one turn before consolidation fires
+        # Warn the agent one or two turns before consolidation fires
         if len(history) >= self._consolidation_threshold - 2:
             full_system += _CONSOLIDATION_WARNING
 

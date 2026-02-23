@@ -148,7 +148,7 @@ async def test_consolidation_appends_to_existing_memory_doc(storage):
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=3,
-        keep_recent_ratio=0.34,
+        keep_recent_ratio=0.34,  # int(3 * 0.34) = 1 — keeps exactly 1 message verbatim
         llm=llm,
     )
     for i in range(4):
@@ -165,7 +165,7 @@ async def test_consolidation_summary_appears_in_system_prompt(storage):
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=3,
-        keep_recent_ratio=0.34,
+        keep_recent_ratio=0.34,  # int(3 * 0.34) = 1 — keeps exactly 1 message verbatim
         llm=llm,
     )
     for i in range(4):
@@ -179,7 +179,7 @@ async def test_consolidation_skipped_when_no_llm(storage):
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=3,
-        keep_recent_ratio=0.34,
+        keep_recent_ratio=0.34,  # int(3 * 0.34) = 1 — keeps exactly 1 message verbatim
         llm=None,
     )
     for i in range(6):
@@ -191,7 +191,7 @@ async def test_consolidation_skipped_when_no_llm(storage):
 
 
 async def test_consolidation_warning_fires_one_turn_before_threshold(storage):
-    """Warning appears in system prompt when history is consolidation_threshold - 2 or more."""
+    """Warning appears in system prompt when history reaches consolidation_threshold - 2."""
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=10,
