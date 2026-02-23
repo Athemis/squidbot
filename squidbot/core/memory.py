@@ -8,14 +8,27 @@ and contains no I/O or external service calls.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from squidbot.core.models import Message
 from squidbot.core.ports import MemoryPort, SkillsPort
+
+if TYPE_CHECKING:
+    from squidbot.core.ports import LLMPort
 
 # Injected into the system prompt when the context limit is approaching.
 _PRUNE_WARNING = (
     "\n\n[System: Conversation history is long. Important information will be "
     "dropped soon. Use the memory_write tool to preserve anything critical before "
     "it leaves context.]\n"
+)
+
+_CONSOLIDATION_PROMPT = (
+    "Summarize the following conversation history into a concise memory entry. "
+    "Focus on key facts, decisions, and context useful for future conversations. "
+    "Do not include small talk or filler.\n\n"
+    "Conversation history:\n{history}\n\n"
+    "Provide a brief summary (2-5 sentences) suitable for appending to a memory document."
 )
 
 
@@ -36,6 +49,9 @@ class MemoryManager:
         storage: MemoryPort,
         max_history_messages: int = 200,
         skills: SkillsPort | None = None,
+        llm: LLMPort | None = None,
+        consolidation_threshold: int = 100,
+        keep_recent: int = 20,
     ) -> None:
         """
         Args:
@@ -44,11 +60,18 @@ class MemoryManager:
                                   Older messages are dropped (not summarized).
             skills: Optional skills loader. If provided, injects skill metadata
                     and always-skill bodies into every system prompt.
+            llm: Optional LLM adapter for history consolidation. If None,
+                 consolidation is disabled.
+            consolidation_threshold: Number of messages that triggers consolidation.
+            keep_recent: Number of recent messages to keep verbatim during
+                         consolidation.
         """
         self._storage = storage
         self._max_history = max_history_messages
         self._skills = skills
-        # Warn when we're 80% to the limit
+        self._llm = llm
+        self._consolidation_threshold = consolidation_threshold
+        self._keep_recent = keep_recent
         self._warn_threshold = int(max_history_messages * 0.8)
 
     async def build_messages(
@@ -89,6 +112,10 @@ class MemoryManager:
                     body = self._skills.load_skill_body(skill.name)
                     full_system += f"\n\n{body}"
 
+        # Consolidate history if over threshold and LLM available
+        if len(history) > self._consolidation_threshold and self._llm is not None:
+            history = await self._consolidate(session_id, history)
+
         # Prune history if over the limit
         near_limit = len(history) >= self._warn_threshold
         if len(history) > self._max_history:
@@ -126,3 +153,49 @@ class MemoryManager:
         await self._storage.append_message(
             session_id, Message(role="assistant", content=assistant_reply)
         )
+
+    async def _consolidate(self, session_id: str, history: list[Message]) -> list[Message]:
+        """
+        Summarize old messages and append to memory.md, returning recent messages.
+
+        Takes messages[:-keep_recent] to summarize, keeps [-keep_recent:] verbatim.
+
+        Args:
+            session_id: Unique session identifier.
+            history: Full message history.
+
+        Returns:
+            Only the recent messages to keep in context.
+        """
+        assert self._llm is not None  # Already checked in build_messages
+
+        to_summarize = history[: -self._keep_recent]
+        recent = history[-self._keep_recent :]
+
+        # Build text from user/assistant messages only
+        history_text = ""
+        for msg in to_summarize:
+            if msg.role in ("user", "assistant"):
+                history_text += f"{msg.role}: {msg.content}\n"
+
+        if not history_text.strip():
+            return recent
+
+        # Call LLM for summary
+        prompt = _CONSOLIDATION_PROMPT.format(history=history_text)
+        summary_gen = await self._llm.chat(
+            messages=[Message(role="user", content=prompt)],
+            tools=[],
+        )
+        summary_parts: list[str] = []
+        async for chunk in summary_gen:
+            if isinstance(chunk, str):
+                summary_parts.append(chunk)
+        summary = "".join(summary_parts)
+
+        # Append to existing memory.md
+        existing = await self._storage.load_memory_doc(session_id)
+        updated = f"{existing}\n\n{summary}" if existing.strip() else summary
+        await self._storage.save_memory_doc(session_id, updated)
+
+        return recent

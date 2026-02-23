@@ -107,3 +107,86 @@ async def test_persist_exchange(manager, storage):
     assert len(history) == 2
     assert history[0].role == "user"
     assert history[1].role == "assistant"
+
+
+class ScriptedLLM:
+    """Minimal LLMPort double that returns a fixed summary string."""
+
+    def __init__(self, summary: str) -> None:
+        self._summary = summary
+
+    async def chat(self, messages, tools, *, stream=True):
+        async def _gen():
+            yield self._summary
+
+        return _gen()
+
+
+async def test_consolidation_not_triggered_below_threshold(storage):
+    llm = ScriptedLLM("Summary: talked about nothing.")
+    manager = MemoryManager(
+        storage=storage,
+        max_history_messages=200,
+        consolidation_threshold=10,
+        keep_recent=3,
+        llm=llm,
+    )
+    for i in range(5):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    assert len(messages) == 7
+    doc = await storage.load_memory_doc("s1")
+    assert doc == ""
+
+
+async def test_consolidation_triggered_above_threshold(storage):
+    llm = ScriptedLLM("Summary: talked about Python.")
+    manager = MemoryManager(
+        storage=storage,
+        max_history_messages=200,
+        consolidation_threshold=5,
+        keep_recent=2,
+        llm=llm,
+    )
+    for i in range(6):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    # Only keep_recent=2 history messages + system + new user = 4 total
+    assert len(messages) == 4
+    # Summary was appended to memory.md
+    doc = await storage.load_memory_doc("s1")
+    assert "Summary: talked about Python." in doc
+
+
+async def test_consolidation_appends_to_existing_memory_doc(storage):
+    await storage.save_memory_doc("s1", "# Existing\nUser likes cats.")
+    llm = ScriptedLLM("Summary: discussed dogs.")
+    manager = MemoryManager(
+        storage=storage,
+        max_history_messages=200,
+        consolidation_threshold=3,
+        keep_recent=1,
+        llm=llm,
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("s1", "sys", "new")
+    doc = await storage.load_memory_doc("s1")
+    assert "User likes cats." in doc
+    assert "Summary: discussed dogs." in doc
+
+
+async def test_consolidation_skipped_when_no_llm(storage):
+    manager = MemoryManager(
+        storage=storage,
+        max_history_messages=200,
+        consolidation_threshold=3,
+        keep_recent=1,
+        llm=None,
+    )
+    for i in range(6):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    assert len(messages) == 8
+    doc = await storage.load_memory_doc("s1")
+    assert doc == ""
