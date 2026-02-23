@@ -635,3 +635,30 @@ async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exc
     assert saved == "Meta summary."
     # Both LLM calls were made
     assert response_index == 2
+
+
+async def test_append_tool_event_writes_two_messages(storage):
+    manager = MemoryManager(storage=storage)
+    await manager.append_tool_event(
+        session_id="cli:local",
+        call_text="shell(cmd='ls -la')",
+        result_text="total 8\ndrwxr-xr-x 2 user user",
+    )
+    history = await storage.load_history("cli:local")
+    assert len(history) == 2
+    assert history[0].role == "tool_call"
+    assert history[0].content == "shell(cmd='ls -la')"
+    assert history[1].role == "tool_result"
+    assert history[1].content == "total 8\ndrwxr-xr-x 2 user user"
+
+
+async def test_append_tool_event_messages_have_timestamps(storage):
+    manager = MemoryManager(storage=storage)
+    await manager.append_tool_event(
+        session_id="cli:local",
+        call_text="read_file(path='/tmp/x')",
+        result_text="file contents",
+    )
+    history = await storage.load_history("cli:local")
+    assert history[0].timestamp is not None
+    assert history[1].timestamp is not None

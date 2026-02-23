@@ -182,6 +182,29 @@ class MemoryManager:
             session_id, Message(role="assistant", content=assistant_reply)
         )
 
+    async def append_tool_event(
+        self,
+        session_id: str,
+        call_text: str,
+        result_text: str,
+    ) -> None:
+        """
+        Persist a tool call and its result as two searchable JSONL messages.
+
+        These messages use the custom roles "tool_call" and "tool_result" which
+        are never sent to the LLM API — they are filtered out in build_messages.
+        They are searchable via search_history.
+
+        Args:
+            session_id: Unique session identifier.
+            call_text: Human-readable call string, e.g. "shell(cmd='ls -la')".
+            result_text: Tool output (pre-truncated by the caller).
+        """
+        await self._storage.append_message(session_id, Message(role="tool_call", content=call_text))
+        await self._storage.append_message(
+            session_id, Message(role="tool_result", content=result_text)
+        )
+
     async def _call_llm(self, messages: list[Message], *, context: str = "llm") -> str | None:
         """
         Call the LLM with the given messages and return the full response text.
