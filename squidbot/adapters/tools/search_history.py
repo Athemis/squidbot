@@ -2,8 +2,8 @@
 Search history tool — allows the agent to search past conversations.
 
 Reads JSONL session files directly from the sessions directory.
-Only user and assistant messages are searchable; tool calls and system
-messages are excluded from both search and output.
+User, assistant, tool_call, and tool_result messages are searchable.
+The low-level role="tool" (OpenAI API format) and system messages are excluded.
 """
 
 from __future__ import annotations
@@ -15,6 +15,14 @@ from typing import Any
 
 from squidbot.adapters.persistence.jsonl import deserialize_message
 from squidbot.core.models import Message, ToolDefinition, ToolResult
+
+_SEARCHABLE_ROLES = frozenset({"user", "assistant", "tool_call", "tool_result"})
+_ROLE_LABELS: dict[str, str] = {
+    "user": "USER",
+    "assistant": "ASSISTANT",
+    "tool_call": "TOOL CALL",
+    "tool_result": "TOOL RESULT",
+}
 
 
 class SearchHistoryTool:
@@ -125,10 +133,10 @@ class SearchHistoryTool:
         if cutoff is not None:
             all_messages = [(sid, m) for sid, m in all_messages if m.timestamp >= cutoff]
 
-        # Find matches in user/assistant messages only
+        # Find matches in searchable messages
         matches: list[tuple[str, Message, int]] = []
         for idx, (session_id, msg) in enumerate(all_messages):
-            if msg.role in ("user", "assistant") and msg.content and query in msg.content.lower():
+            if msg.role in _SEARCHABLE_ROLES and msg.content and query in msg.content.lower():
                 matches.append((session_id, msg, idx))
             if len(matches) >= max_results:
                 break
@@ -150,10 +158,10 @@ class SearchHistoryTool:
                 j = idx + offset
                 if 0 <= j < len(all_messages):
                     _, ctx = all_messages[j]
-                    if ctx.role not in ("user", "assistant") or not ctx.content:
+                    if ctx.role not in _SEARCHABLE_ROLES or not ctx.content:
                         continue
                     text = ctx.content[:300] + ("..." if len(ctx.content) > 300 else "")
-                    role_label = ctx.role.upper()
+                    role_label = _ROLE_LABELS.get(ctx.role, ctx.role.upper())
                     if offset == 0:
                         lines.append(f"**{role_label}: {text}**")
                     else:
