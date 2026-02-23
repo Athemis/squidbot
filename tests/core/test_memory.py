@@ -564,3 +564,40 @@ async def test_session_summary_not_trimmed_when_under_word_limit():
     saved = await storage.load_session_summary("s1")
     assert "Short existing note." in saved
     assert "Short new note." in saved
+
+
+# ---------------------------------------------------------------------------
+# _call_llm helper
+# ---------------------------------------------------------------------------
+
+
+async def test_call_llm_returns_text_on_success():
+    """_call_llm joins streamed chunks and returns stripped text."""
+    storage = InMemoryStorage()
+    llm = ScriptedLLM("  hello world  ")
+    manager = MemoryManager(storage=storage, llm=llm)
+    messages = [Message(role="user", content="ping")]
+    result = await manager._call_llm(messages)
+    assert result == "hello world"
+
+
+async def test_call_llm_returns_none_on_exception():
+    """_call_llm returns None and logs a warning when the LLM raises."""
+
+    class FailingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            raise RuntimeError("network error")
+
+    storage = InMemoryStorage()
+    manager = MemoryManager(storage=storage, llm=FailingLLM())
+    result = await manager._call_llm([Message(role="user", content="ping")])
+    assert result is None
+
+
+async def test_call_llm_returns_none_on_empty_response():
+    """_call_llm returns None when the LLM yields only whitespace."""
+    storage = InMemoryStorage()
+    llm = ScriptedLLM("   ")
+    manager = MemoryManager(storage=storage, llm=llm)
+    result = await manager._call_llm([Message(role="user", content="ping")])
+    assert result is None

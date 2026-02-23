@@ -188,6 +188,38 @@ class MemoryManager:
             session_id, Message(role="assistant", content=assistant_reply)
         )
 
+    async def _call_llm(self, messages: list[Message]) -> str | None:
+        """
+        Call the LLM with the given messages and return the full response text.
+
+        Streams the response, joins all text chunks, and returns the stripped result.
+        Returns None if the LLM raises an exception or yields an empty response.
+        Logs a warning on exception.
+
+        Precondition: self._llm is not None (caller must verify).
+
+        Args:
+            messages: The messages to send to the LLM.
+
+        Returns:
+            Stripped response text, or None on failure or empty response.
+        """
+        llm = self._llm
+        assert llm is not None  # noqa: S101 — narrowing for type checker
+        try:
+            chunks: list[str] = []
+            response_stream = await llm.chat(messages, [])
+            async for chunk in response_stream:
+                if isinstance(chunk, str):
+                    chunks.append(chunk)
+            result = "".join(chunks).strip()
+            return result or None
+        except Exception as e:
+            from loguru import logger  # noqa: PLC0415
+
+            logger.warning("LLM call failed: {}", e)
+            return None
+
     async def _consolidate(self, session_id: str, history: list[Message]) -> list[Message]:
         """
         Summarize unconsolidated messages and append to memory.md, returning recent messages.
@@ -218,27 +250,13 @@ class MemoryManager:
             return recent
 
         # Call LLM for summary (self._llm is non-None; caller guarantees this)
-        llm = self._llm
-        assert llm is not None  # noqa: S101 — narrowing for type checker
         sentence_budget = max(5, len(to_summarize) // 10)
         prompt = _CONSOLIDATION_PROMPT.format(history=history_text, sentences=sentence_budget)
         summary_messages = [
             Message(role="system", content=_CONSOLIDATION_SYSTEM),
             Message(role="user", content=prompt),
         ]
-        try:
-            summary_chunks: list[str] = []
-            response_stream = await llm.chat(summary_messages, [])
-            async for chunk in response_stream:
-                if isinstance(chunk, str):
-                    summary_chunks.append(chunk)
-            summary = "".join(summary_chunks).strip()
-        except Exception as e:
-            from loguru import logger  # noqa: PLC0415
-
-            logger.warning("Consolidation LLM call failed, skipping: {}", e)
-            return recent
-
+        summary = await self._call_llm(summary_messages)
         if not summary:
             return recent
 
