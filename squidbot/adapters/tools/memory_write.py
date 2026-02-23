@@ -12,18 +12,23 @@ from squidbot.core.ports import MemoryPort
 
 class MemoryWriteTool:
     """
-    Allows the agent to persist important information to its memory document.
+    Allows the agent to persist important information to its global memory document.
 
-    The memory document (memory.md) is injected into every system prompt,
-    providing cross-session continuity for facts about the user's preferences,
-    ongoing projects, and important context.
+    The global memory document (MEMORY.md) is injected into every system prompt under
+    '## Your Memory', providing cross-session continuity for facts about the user's
+    preferences, ongoing projects, and important context.
+
+    This tool REPLACES the entire document. Callers should merge existing content
+    with new information before writing.
     """
 
     name = "memory_write"
     description = (
-        "Update your long-term memory document. Use this to persist important "
-        "information that should be available in future conversations: user preferences, "
-        "ongoing projects, key facts. The content REPLACES the current memory document."
+        "Update your global long-term memory document (MEMORY.md). "
+        "This document is visible in every future session under '## Your Memory'. "
+        "Use this to persist: user preferences, ongoing projects, key facts. "
+        "The content REPLACES the current document — always merge with existing content first. "
+        "Keep the document under ~300 words."
     )
     parameters = {
         "type": "object",
