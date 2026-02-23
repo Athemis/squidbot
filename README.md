@@ -7,10 +7,11 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Multi-channel** — interactive CLI, Matrix/Element, IMAP/SMTP email
 - **Multi-model LLM pools** — named pools with ordered fallback; define providers, models, and pools independently
 - **Skills system** — on-demand skill loading, agent-created skills, hot-reload without restart
-- **Tools** — shell commands, file read/write/edit, web search, MCP servers, sub-agents (spawn)
+- **Tools** — shell commands, file read/write/edit, web search, memory write, MCP servers, sub-agents (spawn)
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
-- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 273 tests
+- **Long-term memory** — two-level: global `MEMORY.md` (cross-session, agent-curated) + per-session summaries (auto-generated); meta-consolidation compresses summaries via LLM when they grow large
+- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 360 tests
 
 ## Installation
 
@@ -70,8 +71,8 @@ llm:
 agents:
   workspace: "~/.squidbot/workspace"   # bootstrap files live here
   restrict_to_workspace: true
-  consolidation_threshold: 100         # summarize history into memory.md above this many messages
-  keep_recent_ratio: 0.2               # fraction of consolidation_threshold kept verbatim (e.g. 0.2 = 20 messages when threshold is 100)
+  consolidation_threshold: 100         # summarize history when this many new messages accumulate since last consolidation
+  keep_recent_ratio: 0.2               # fraction of threshold kept verbatim after consolidation (e.g. 0.2 = 20 messages when threshold is 100)
 
   heartbeat:
     enabled: true
@@ -204,16 +205,36 @@ system prompt, full body loaded on demand by the agent, bundled resources read a
 Skills with `always: true` are fully injected into every system prompt. Hot-reloaded via
 mtime polling — no restart needed after creating or editing a skill.
 
+**Memory system:**
+
+Two-level persistence across sessions:
+
+- **Global memory** (`~/.squidbot/workspace/MEMORY.md`) — agent-curated notes visible in every
+  session under `## Your Memory`. Written by the agent via the `memory_write` tool. Persists
+  facts, preferences, and ongoing projects across all sessions.
+- **Session summaries** (`~/.squidbot/memory/<session-id>/summary.md`) — auto-generated when
+  conversation history exceeds `consolidation_threshold`. The agent cannot write these directly;
+  the system appends a new summary chunk after each consolidation cycle. When summaries grow
+  beyond ~600 words, meta-consolidation recompresses the full summary via LLM rather than
+  discarding old entries.
+- **Consolidation cursor** (`.meta.json` per session) — tracks the last consolidated message
+  index so restarts don't re-summarise already-processed history.
+
 **Persistence layout:**
 
 ```
 ~/.squidbot/
 ├── squidbot.yaml
-├── sessions/           # Conversation histories (JSONL, one message per line)
-├── memory/             # Agent-maintained memory.md per session
-└── cron/jobs.json      # Scheduled task definitions
+├── sessions/
+│   ├── <session-id>.jsonl       # Conversation history (one message per line)
+│   └── <session-id>.meta.json   # Consolidation cursor
+├── memory/
+│   └── <session-id>/
+│       └── summary.md           # Auto-generated session summary
+└── cron/jobs.json               # Scheduled task definitions
 
 ~/.squidbot/workspace/
+├── MEMORY.md           # Global cross-session memory (agent-curated via memory_write)
 ├── BOOTSTRAP.md        # First-run ritual: identity interview (self-deletes when done)
 ├── SOUL.md             # Bot values, character, operating principles — loaded first each session
 ├── IDENTITY.md         # Bot name, creature, vibe, emoji
