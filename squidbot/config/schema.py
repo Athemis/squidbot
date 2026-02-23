@@ -70,6 +70,9 @@ class AgentConfig(BaseModel):
     workspace: str = str(Path.home() / ".squidbot" / "workspace")
     restrict_to_workspace: bool = True
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    consolidation_threshold: int = 100
+    keep_recent: int = 20
+    consolidation_pool: str = ""
 
 
 class ShellToolConfig(BaseModel):
@@ -215,6 +218,11 @@ class Settings(BaseModel):
         hb_pool = self.agents.heartbeat.pool
         if hb_pool and hb_pool not in llm.pools:
             raise ValueError(f"agents.heartbeat.pool '{hb_pool}' not found in llm.pools")
+
+        # consolidation_pool must exist (if set)
+        cons_pool = self.agents.consolidation_pool
+        if cons_pool and cons_pool not in llm.pools:
+            raise ValueError(f"agents.consolidation_pool '{cons_pool}' not found in llm.pools")
 
         # spawn profile pools must exist (if set)
         for prof_name, prof in self.tools.spawn.profiles.items():

@@ -240,3 +240,10 @@ def test_spawn_profile_system_prompt_file():
 def test_agent_config_no_longer_has_system_prompt_file():
     cfg = AgentConfig()
     assert not hasattr(cfg, "system_prompt_file")
+
+
+def test_consolidation_defaults():
+    settings = Settings()
+    assert settings.agents.consolidation_threshold == 100
+    assert settings.agents.keep_recent == 20
+    assert settings.agents.consolidation_pool == ""
