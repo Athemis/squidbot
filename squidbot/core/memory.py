@@ -38,6 +38,28 @@ _CONSOLIDATION_SYSTEM = (
     "Output only the summary text — no preamble, no commentary, no formatting."
 )
 
+_SUMMARY_WORD_LIMIT = 600
+_SUMMARY_KEEP_PARAGRAPHS = 8
+
+
+def _trim_summary(text: str) -> str:
+    """
+    Trim a session summary if it exceeds the word limit.
+
+    Keeps the last _SUMMARY_KEEP_PARAGRAPHS non-empty paragraphs so the most
+    recent consolidation cycles are preserved. No-ops when within limits.
+
+    Args:
+        text: The full session summary text.
+
+    Returns:
+        The (possibly trimmed) summary text.
+    """
+    if len(text.split()) <= _SUMMARY_WORD_LIMIT:
+        return text
+    paragraphs = [p for p in text.split("\n\n") if p.strip()]
+    return "\n\n".join(paragraphs[-_SUMMARY_KEEP_PARAGRAPHS:])
+
 
 class MemoryManager:
     """
@@ -217,6 +239,7 @@ class MemoryManager:
         # Append to existing session summary
         existing = await self._storage.load_session_summary(session_id)
         updated = f"{existing}\n\n{summary}" if existing.strip() else summary
+        updated = _trim_summary(updated)
         try:
             await self._storage.save_session_summary(session_id, updated)
             new_cursor = len(history) - self._keep_recent

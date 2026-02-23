@@ -498,3 +498,53 @@ async def test_consolidation_cursor_not_advanced_if_save_fails():
     await manager.build_messages("s1", "sys", "new")
     cursor = await storage.load_consolidated_cursor("s1")
     assert cursor == 0  # not advanced
+
+
+# ---------------------------------------------------------------------------
+# Summary cap: session summary trimmed when it grows too large
+# ---------------------------------------------------------------------------
+
+
+async def test_session_summary_capped_when_exceeding_word_limit():
+    """Session summary is trimmed to the last 8 paragraphs when > 600 words."""
+    # Build an existing summary that is already over the 600-word limit:
+    # 10 paragraphs × ~82 words each ≈ 820 words
+    fat_paragraph = "word " * 80
+    existing_summary = "\n\n".join(f"Old paragraph {i}.\n{fat_paragraph}" for i in range(10))
+
+    storage = InMemoryStorage()
+    await storage.save_session_summary("s1", existing_summary)
+    llm = ScriptedLLM("New summary paragraph. " * 5)
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.34,
+        llm=llm,
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("s1", "sys", "new")
+
+    saved = await storage.load_session_summary("s1")
+    assert len(saved.split()) <= 600
+    assert "New summary paragraph." in saved
+
+
+async def test_session_summary_not_trimmed_when_under_word_limit():
+    """Short summaries are stored verbatim — trimming is not applied."""
+    storage = InMemoryStorage()
+    await storage.save_session_summary("s1", "Short existing note.")
+    llm = ScriptedLLM("Short new note.")
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.34,
+        llm=llm,
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("s1", "sys", "new")
+
+    saved = await storage.load_session_summary("s1")
+    assert "Short existing note." in saved
+    assert "Short new note." in saved
