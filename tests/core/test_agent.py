@@ -41,7 +41,8 @@ class ScriptedLLM:
 class InMemoryStorage:
     def __init__(self):
         self._histories: dict[str, list[Message]] = {}
-        self._docs: dict[str, str] = {}
+        self._global_memory: str = ""
+        self._summaries: dict[str, str] = {}
         self._cursors: dict[str, int] = {}
 
     async def load_history(self, session_id):
@@ -50,11 +51,21 @@ class InMemoryStorage:
     async def append_message(self, session_id, message):
         self._histories.setdefault(session_id, []).append(message)
 
-    async def load_memory_doc(self, session_id):
-        return self._docs.get(session_id, "")
+    async def load_global_memory(self) -> str:
+        """Load the global cross-session memory document."""
+        return self._global_memory
 
-    async def save_memory_doc(self, session_id, content):
-        self._docs[session_id] = content
+    async def save_global_memory(self, content: str) -> None:
+        """Overwrite the global memory document."""
+        self._global_memory = content
+
+    async def load_session_summary(self, session_id: str) -> str:
+        """Load the auto-generated consolidation summary for this session."""
+        return self._summaries.get(session_id, "")
+
+    async def save_session_summary(self, session_id: str, content: str) -> None:
+        """Overwrite the session consolidation summary."""
+        self._summaries[session_id] = content
 
     async def load_consolidated_cursor(self, session_id: str) -> int:
         return self._cursors.get(session_id, 0)

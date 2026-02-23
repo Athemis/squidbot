@@ -70,14 +70,6 @@ def _session_file(base_dir: Path, session_id: str) -> Path:
     return path
 
 
-def _memory_file(base_dir: Path, session_id: str) -> Path:
-    """Return the memory.md path for a session."""
-    safe_id = session_id.replace(":", "__")
-    path = base_dir / "memory" / safe_id / "memory.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def _meta_file(base_dir: Path, session_id: str, *, write: bool = False) -> Path:
     """Return the .meta.json path for a session.
 
@@ -129,17 +121,21 @@ class JsonlMemory:
         with path.open("a", encoding="utf-8") as f:
             f.write(_serialize_message(message) + "\n")
 
-    async def load_memory_doc(self, session_id: str) -> str:
-        """Load the agent's memory document."""
-        path = _memory_file(self._base, session_id)
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
+    async def load_global_memory(self) -> str:
+        """Not yet implemented — added in Task B2."""
+        raise NotImplementedError
 
-    async def save_memory_doc(self, session_id: str, content: str) -> None:
-        """Overwrite the agent's memory document."""
-        path = _memory_file(self._base, session_id)
-        path.write_text(content, encoding="utf-8")
+    async def save_global_memory(self, content: str) -> None:
+        """Not yet implemented — added in Task B2."""
+        raise NotImplementedError
+
+    async def load_session_summary(self, session_id: str) -> str:
+        """Not yet implemented — added in Task B2."""
+        raise NotImplementedError
+
+    async def save_session_summary(self, session_id: str, content: str) -> None:
+        """Not yet implemented — added in Task B2."""
+        raise NotImplementedError
 
     async def load_cron_jobs(self) -> list[CronJob]:
         """Load all scheduled jobs from the JSON file."""

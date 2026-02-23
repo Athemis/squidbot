@@ -119,7 +119,8 @@ class MemoryPort(Protocol):
 
     Manages two kinds of data:
     - Conversation history: JSONL log of all messages in a session
-    - Memory document: agent-maintained markdown notes (memory.md)
+    - Global memory document: cross-session notes (MEMORY.md), written by the agent
+    - Session summary: per-session auto-generated consolidation summary
     - Cron jobs: scheduled task definitions
     """
 
@@ -131,12 +132,20 @@ class MemoryPort(Protocol):
         """Append a single message to the session history."""
         ...
 
-    async def load_memory_doc(self, session_id: str) -> str:
-        """Load the agent's memory document for this session."""
+    async def load_global_memory(self) -> str:
+        """Load the global cross-session memory document."""
         ...
 
-    async def save_memory_doc(self, session_id: str, content: str) -> None:
-        """Save the agent's memory document."""
+    async def save_global_memory(self, content: str) -> None:
+        """Overwrite the global memory document."""
+        ...
+
+    async def load_session_summary(self, session_id: str) -> str:
+        """Load the auto-generated consolidation summary for this session."""
+        ...
+
+    async def save_session_summary(self, session_id: str, content: str) -> None:
+        """Overwrite the session consolidation summary."""
         ...
 
     async def load_consolidated_cursor(self, session_id: str) -> int:

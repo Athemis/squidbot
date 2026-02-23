@@ -16,7 +16,8 @@ class InMemoryStorage:
 
     def __init__(self):
         self._histories: dict[str, list[Message]] = {}
-        self._docs: dict[str, str] = {}
+        self._global_memory: str = ""
+        self._summaries: dict[str, str] = {}
         self._cursors: dict[str, int] = {}
 
     async def load_history(self, session_id: str) -> list[Message]:
@@ -25,11 +26,21 @@ class InMemoryStorage:
     async def append_message(self, session_id: str, message: Message) -> None:
         self._histories.setdefault(session_id, []).append(message)
 
-    async def load_memory_doc(self, session_id: str) -> str:
-        return self._docs.get(session_id, "")
+    async def load_global_memory(self) -> str:
+        """Load the global cross-session memory document."""
+        return self._global_memory
 
-    async def save_memory_doc(self, session_id: str, content: str) -> None:
-        self._docs[session_id] = content
+    async def save_global_memory(self, content: str) -> None:
+        """Overwrite the global memory document."""
+        self._global_memory = content
+
+    async def load_session_summary(self, session_id: str) -> str:
+        """Load the auto-generated consolidation summary for this session."""
+        return self._summaries.get(session_id, "")
+
+    async def save_session_summary(self, session_id: str, content: str) -> None:
+        """Overwrite the session consolidation summary."""
+        self._summaries[session_id] = content
 
     async def load_consolidated_cursor(self, session_id: str) -> int:
         return self._cursors.get(session_id, 0)
@@ -67,15 +78,25 @@ async def test_build_messages_empty_session(manager):
     assert messages[-1].content == "Hello"
 
 
-async def test_build_messages_includes_memory_doc(manager, storage):
-    await storage.save_memory_doc("cli:local", "User is a developer.")
+async def test_build_messages_includes_global_memory(manager, storage):
+    await storage.save_global_memory("User is a developer.")
     messages = await manager.build_messages(
         session_id="cli:local",
         system_prompt="You are a bot.",
         user_message="Hello",
     )
-    # system prompt should include memory doc content
+    # system prompt should include global memory content
     assert "User is a developer." in messages[0].content
+
+
+async def test_build_messages_includes_session_summary(manager, storage):
+    await storage.save_session_summary("cli:local", "Previous session recap.")
+    messages = await manager.build_messages(
+        session_id="cli:local",
+        system_prompt="You are a bot.",
+        user_message="Hello",
+    )
+    assert "Previous session recap." in messages[0].content
 
 
 async def test_build_messages_includes_history(manager, storage):
@@ -127,7 +148,7 @@ async def test_consolidation_not_triggered_below_threshold(storage):
         await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
     messages = await manager.build_messages("s1", "sys", "new")
     assert len(messages) == 7
-    doc = await storage.load_memory_doc("s1")
+    doc = await storage.load_session_summary("s1")
     assert doc == ""
 
 
@@ -144,13 +165,13 @@ async def test_consolidation_triggered_above_threshold(storage):
     messages = await manager.build_messages("s1", "sys", "new")
     # Only keep_recent=2 history messages + system + new user = 4 total
     assert len(messages) == 4
-    # Summary was appended to memory.md
-    doc = await storage.load_memory_doc("s1")
+    # Summary was saved to session summary
+    doc = await storage.load_session_summary("s1")
     assert "Summary: talked about Python." in doc
 
 
 async def test_consolidation_appends_to_existing_memory_doc(storage):
-    await storage.save_memory_doc("s1", "# Existing\nUser likes cats.")
+    await storage.save_session_summary("s1", "# Existing\nUser likes cats.")
     llm = ScriptedLLM("Summary: discussed dogs.")
     manager = MemoryManager(
         storage=storage,
@@ -161,7 +182,7 @@ async def test_consolidation_appends_to_existing_memory_doc(storage):
     for i in range(4):
         await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
     await manager.build_messages("s1", "sys", "new")
-    doc = await storage.load_memory_doc("s1")
+    doc = await storage.load_session_summary("s1")
     assert "User likes cats." in doc
     assert "Summary: discussed dogs." in doc
 
@@ -193,7 +214,7 @@ async def test_consolidation_skipped_when_no_llm(storage):
         await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
     messages = await manager.build_messages("s1", "sys", "new")
     assert len(messages) == 8
-    doc = await storage.load_memory_doc("s1")
+    doc = await storage.load_session_summary("s1")
     assert doc == ""
 
 
@@ -269,7 +290,7 @@ async def test_consolidation_uses_cursor_not_full_history(storage):
     messages = await manager.build_messages("s1", "sys", "new")
     # All 6 history + system + user = 8 (no consolidation)
     assert len(messages) == 8
-    doc = await storage.load_memory_doc("s1")
+    doc = await storage.load_session_summary("s1")
     assert doc == ""
 
 
@@ -317,3 +338,30 @@ async def test_no_consolidation_above_threshold_if_cursor_covers_it(storage):
     await storage.save_consolidated_cursor("s1", 9)
     await manager.build_messages("s1", "sys", "new")
     assert call_count == 0
+
+
+async def test_global_memory_default_empty(storage):
+    doc = await storage.load_global_memory()
+    assert doc == ""
+
+
+async def test_global_memory_roundtrip(storage):
+    await storage.save_global_memory("User likes Python.")
+    assert await storage.load_global_memory() == "User likes Python."
+
+
+async def test_session_summary_default_empty(storage):
+    doc = await storage.load_session_summary("s1")
+    assert doc == ""
+
+
+async def test_session_summary_roundtrip(storage):
+    await storage.save_session_summary("s1", "Summary: discussed Rust.")
+    assert await storage.load_session_summary("s1") == "Summary: discussed Rust."
+
+
+async def test_session_summary_isolated_per_session(storage):
+    await storage.save_session_summary("s1", "s1 summary")
+    await storage.save_session_summary("s2", "s2 summary")
+    assert await storage.load_session_summary("s1") == "s1 summary"
+    assert await storage.load_session_summary("s2") == "s2 summary"

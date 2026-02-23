@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 from squidbot.adapters.tools.memory_write import MemoryWriteTool
 
 
-def _make_tool(session_id: str = "test-session") -> tuple[MemoryWriteTool, AsyncMock]:
+def _make_tool() -> tuple[MemoryWriteTool, AsyncMock]:
     """Return a MemoryWriteTool wired to a mock MemoryPort."""
     storage = AsyncMock()
-    storage.save_memory_doc = AsyncMock()
-    tool = MemoryWriteTool(storage=storage, session_id=session_id)  # type: ignore[arg-type]
+    storage.save_global_memory = AsyncMock()
+    tool = MemoryWriteTool(storage=storage)  # type: ignore[arg-type]
     return tool, storage
 
 
@@ -21,14 +21,14 @@ class TestMemoryWriteToolMissingArgs:
         result = await tool.execute()
         assert result.is_error
         assert "content is required" in result.content
-        storage.save_memory_doc.assert_not_called()
+        storage.save_global_memory.assert_not_called()
 
     async def test_content_none_returns_error(self) -> None:
         tool, storage = _make_tool()
         result = await tool.execute(content=None)
         assert result.is_error
         assert "content is required" in result.content
-        storage.save_memory_doc.assert_not_called()
+        storage.save_global_memory.assert_not_called()
 
 
 class TestMemoryWriteToolEmptyContent:
@@ -37,7 +37,7 @@ class TestMemoryWriteToolEmptyContent:
         tool, storage = _make_tool()
         result = await tool.execute(content="")
         assert not result.is_error
-        storage.save_memory_doc.assert_called_once_with("test-session", "")
+        storage.save_global_memory.assert_called_once_with("")
 
 
 class TestMemoryWriteToolWrites:
@@ -46,6 +46,4 @@ class TestMemoryWriteToolWrites:
         result = await tool.execute(content="# Notes\n\nUser likes Python.")
         assert not result.is_error
         assert "Memory updated" in result.content
-        storage.save_memory_doc.assert_called_once_with(
-            "test-session", "# Notes\n\nUser likes Python."
-        )
+        storage.save_global_memory.assert_called_once_with("# Notes\n\nUser likes Python.")

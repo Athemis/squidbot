@@ -36,9 +36,8 @@ class MemoryWriteTool:
         "required": ["content"],
     }
 
-    def __init__(self, storage: MemoryPort, session_id: str) -> None:
+    def __init__(self, storage: MemoryPort) -> None:
         self._storage = storage
-        self._session_id = session_id
 
     def to_definition(self) -> ToolDefinition:
         return ToolDefinition(
@@ -52,5 +51,5 @@ class MemoryWriteTool:
         if not isinstance(content_raw, str):
             return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
         content: str = content_raw
-        await self._storage.save_memory_doc(self._session_id, content)
+        await self._storage.save_global_memory(content)
         return ToolResult(tool_call_id="", content="Memory updated successfully.")

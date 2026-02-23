@@ -1,9 +1,9 @@
 """
 Core memory manager for squidbot.
 
-Coordinates short-term (in-session history) and long-term (memory.md) memory.
-The manager is pure domain logic — it takes a MemoryPort as dependency
-and contains no I/O or external service calls.
+Coordinates short-term (in-session history), global long-term (MEMORY.md),
+and per-session consolidation summaries. The manager is pure domain logic —
+it takes a MemoryPort as dependency and contains no I/O or external service calls.
 """
 
 from __future__ import annotations
@@ -89,7 +89,8 @@ class MemoryManager:
         Returns:
             Ordered list of messages ready to send to the LLM.
         """
-        memory_doc = await self._storage.load_memory_doc(session_id)
+        global_memory = await self._storage.load_global_memory()
+        session_summary = await self._storage.load_session_summary(session_id)
         history = await self._storage.load_history(session_id)
 
         # Load cursor once; used for both trigger and warning checks below
@@ -98,13 +99,15 @@ class MemoryManager:
         # Consolidate history if unconsolidated messages exceed threshold and LLM available
         if len(history) - cursor > self._consolidation_threshold and self._llm is not None:
             history = await self._consolidate(session_id, history)
-            # Reload memory_doc so the freshly written summary appears in the system prompt
-            memory_doc = await self._storage.load_memory_doc(session_id)
+            # Reload session_summary so the freshly written summary appears in the system prompt
+            session_summary = await self._storage.load_session_summary(session_id)
 
-        # Build system prompt with memory document appended
+        # Build system prompt with global memory and session summary appended
         full_system = system_prompt
-        if memory_doc.strip():
-            full_system += f"\n\n## Your Memory\n\n{memory_doc}"
+        if global_memory.strip():
+            full_system += f"\n\n## Your Memory\n\n{global_memory}"
+        if session_summary.strip():
+            full_system += f"\n\n## Session Summary\n\n{session_summary}"
 
         # Inject skills: XML index + full bodies of always-skills
         if self._skills is not None:
@@ -200,10 +203,10 @@ class MemoryManager:
         if not summary:
             return recent
 
-        # Append to existing memory.md
-        existing = await self._storage.load_memory_doc(session_id)
+        # Append to existing session summary
+        existing = await self._storage.load_session_summary(session_id)
         updated = f"{existing}\n\n{summary}" if existing.strip() else summary
-        await self._storage.save_memory_doc(session_id, updated)
+        await self._storage.save_session_summary(session_id, updated)
 
         new_cursor = len(history) - self._keep_recent
         await self._storage.save_consolidated_cursor(session_id, new_cursor)

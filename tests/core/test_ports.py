@@ -71,10 +71,28 @@ class MockMemory:
     async def append_message(self, session_id: str, message: Message) -> None:
         pass
 
-    async def load_memory_doc(self, session_id: str) -> str:
+    async def load_global_memory(self) -> str:
         return ""
 
-    async def save_memory_doc(self, session_id: str, content: str) -> None:
+    async def save_global_memory(self, content: str) -> None:
+        pass
+
+    async def load_session_summary(self, session_id: str) -> str:
+        return ""
+
+    async def save_session_summary(self, session_id: str, content: str) -> None:
+        pass
+
+    async def load_consolidated_cursor(self, session_id: str) -> int:
+        return 0
+
+    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
+        pass
+
+    async def load_cron_jobs(self):
+        return []
+
+    async def save_cron_jobs(self, jobs) -> None:
         pass
 
 

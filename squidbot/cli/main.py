@@ -541,7 +541,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         channel = CliChannel()
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-        extra = [MemoryWriteTool(storage=storage, session_id=CliChannel.SESSION.id)]
+        extra = [MemoryWriteTool(storage=storage)]
         await agent_loop.run(CliChannel.SESSION, message, channel, extra_tools=extra)
         print()  # newline after streamed output
         for conn in mcp_connections:
@@ -566,7 +566,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
             session = CliChannel.SESSION
             from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-            extra = [MemoryWriteTool(storage=storage, session_id=session.id)]
+            extra = [MemoryWriteTool(storage=storage)]
             await agent_loop.run(
                 session,
                 "BOOTSTRAP.md exists. Follow it now.",
@@ -576,7 +576,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         async for inbound in channel.receive():
             from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-            extra = [MemoryWriteTool(storage=storage, session_id=inbound.session.id)]
+            extra = [MemoryWriteTool(storage=storage)]
             await agent_loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
     finally:
         for conn in mcp_connections:
@@ -695,7 +695,7 @@ async def _run_gateway(config_path: Path) -> None:
         )
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-        extra = [MemoryWriteTool(storage=storage, session_id=session.id)]
+        extra = [MemoryWriteTool(storage=storage)]
         await agent_loop.run(session, job.message, ch, extra_tools=extra)  # type: ignore[arg-type]
 
     scheduler = CronScheduler(storage=storage)
@@ -704,7 +704,7 @@ async def _run_gateway(config_path: Path) -> None:
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
     def _hb_extra_tools(session_id: str) -> list[Any]:
-        return [MemoryWriteTool(storage=storage, session_id=session_id)]
+        return [MemoryWriteTool(storage=storage)]
 
     heartbeat = HeartbeatService(
         agent_loop=agent_loop,
