@@ -8,7 +8,8 @@ JSON file.
 Directory layout:
     <base_dir>/
     ├── sessions/
-    │   └── <session-id>.jsonl    # conversation history
+    │   ├── <session-id>.jsonl      # conversation history
+    │   └── <session-id>.meta.json  # consolidation cursor
     ├── memory/
     │   └── <session-id>/
     │       └── memory.md         # agent-maintained notes
@@ -74,6 +75,21 @@ def _memory_file(base_dir: Path, session_id: str) -> Path:
     safe_id = session_id.replace(":", "__")
     path = base_dir / "memory" / safe_id / "memory.md"
     path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _meta_file(base_dir: Path, session_id: str, *, write: bool = False) -> Path:
+    """Return the .meta.json path for a session.
+
+    Args:
+        base_dir: Root storage directory.
+        session_id: Session identifier (colons replaced with '__' for filesystem safety).
+        write: If True, creates parent directories. Set to True only on write paths.
+    """
+    safe_id = session_id.replace(":", "__")
+    path = base_dir / "sessions" / f"{safe_id}.meta.json"
+    if write:
+        path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -167,9 +183,14 @@ class JsonlMemory:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     async def load_consolidated_cursor(self, session_id: str) -> int:
-        """Not yet implemented — filesystem persistence added in Task 2."""
-        raise NotImplementedError
+        """Return the last_consolidated cursor, or 0 if no meta file exists."""
+        path = _meta_file(self._base, session_id)
+        if not path.exists():
+            return 0
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return int(data.get("last_consolidated", 0))
 
     async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
-        """Not yet implemented — filesystem persistence added in Task 2."""
-        raise NotImplementedError
+        """Write the last_consolidated cursor to .meta.json."""
+        path = _meta_file(self._base, session_id, write=True)
+        path.write_text(json.dumps({"last_consolidated": cursor}), encoding="utf-8")
