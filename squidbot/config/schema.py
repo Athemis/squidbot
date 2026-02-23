@@ -70,21 +70,17 @@ class AgentConfig(BaseModel):
     workspace: str = str(Path.home() / ".squidbot" / "workspace")
     restrict_to_workspace: bool = True
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    # TODO: replace with token-based threshold derived from the model's context window size
     consolidation_threshold: int = 100
-    keep_recent: int = 20
+    keep_recent_ratio: float = 0.2
 
     @model_validator(mode="after")
     def _validate_consolidation(self) -> AgentConfig:
-        """Validate consolidation config values are consistent and positive."""
-        if self.keep_recent <= 0:
-            raise ValueError("agents.keep_recent must be > 0")
+        """Validate consolidation config values are consistent and in range."""
         if self.consolidation_threshold <= 0:
             raise ValueError("agents.consolidation_threshold must be > 0")
-        if self.keep_recent >= self.consolidation_threshold:
-            raise ValueError(
-                f"agents.keep_recent ({self.keep_recent}) must be < "
-                f"agents.consolidation_threshold ({self.consolidation_threshold})"
-            )
+        if not (0 < self.keep_recent_ratio < 1):
+            raise ValueError("agents.keep_recent_ratio must be between 0 and 1 (exclusive)")
         return self
 
 

@@ -245,15 +245,20 @@ def test_agent_config_no_longer_has_system_prompt_file():
 def test_consolidation_defaults():
     settings = Settings()
     assert settings.agents.consolidation_threshold == 100
-    assert settings.agents.keep_recent == 20
+    assert settings.agents.keep_recent_ratio == 0.2
+    assert not hasattr(settings.agents, "keep_recent")
     assert not hasattr(settings.agents, "consolidation_pool")
 
 
-def test_keep_recent_must_be_less_than_consolidation_threshold():
+def test_keep_recent_ratio_must_be_between_0_and_1_exclusive():
     with pytest.raises(ValidationError):
-        Settings.model_validate({"agents": {"keep_recent": 100, "consolidation_threshold": 50}})
+        AgentConfig(consolidation_threshold=100, keep_recent_ratio=0.0)
+    with pytest.raises(ValidationError):
+        AgentConfig(consolidation_threshold=100, keep_recent_ratio=1.0)
+    with pytest.raises(ValidationError):
+        AgentConfig(consolidation_threshold=100, keep_recent_ratio=1.5)
 
 
-def test_keep_recent_must_be_positive():
-    with pytest.raises(ValidationError):
-        Settings.model_validate({"agents": {"keep_recent": 0}})
+def test_keep_recent_ratio_valid():
+    cfg = AgentConfig(consolidation_threshold=100, keep_recent_ratio=0.3)
+    assert cfg.keep_recent_ratio == 0.3
