@@ -106,7 +106,7 @@ def storage():
 
 @pytest.fixture
 def memory(storage):
-    return MemoryManager(storage=storage, max_history_messages=100)
+    return MemoryManager(storage=storage)
 
 
 async def test_simple_text_response(storage, memory):

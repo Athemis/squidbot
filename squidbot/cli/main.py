@@ -435,11 +435,10 @@ async def _make_agent_loop(
 
     memory = MemoryManager(
         storage=storage,
-        max_history_messages=200,
         skills=skills,
         llm=llm,
         consolidation_threshold=settings.agents.consolidation_threshold,
-        keep_recent=settings.agents.keep_recent,
+        keep_recent_ratio=settings.agents.keep_recent_ratio,
     )
 
     # Tool registry
