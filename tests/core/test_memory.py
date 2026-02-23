@@ -662,3 +662,42 @@ async def test_append_tool_event_messages_have_timestamps(storage):
     history = await storage.load_history("cli:local")
     assert history[0].timestamp is not None
     assert history[1].timestamp is not None
+
+
+async def test_build_messages_filters_tool_events_from_llm_context(storage):
+    """tool_call and tool_result messages must not appear in the LLM message list."""
+    manager = MemoryManager(storage=storage)
+    await storage.append_message("cli:local", Message(role="user", content="do something"))
+    await storage.append_message("cli:local", Message(role="tool_call", content="shell(cmd='ls')"))
+    await storage.append_message("cli:local", Message(role="tool_result", content="file.txt"))
+    await storage.append_message("cli:local", Message(role="assistant", content="Done."))
+
+    messages = await manager.build_messages("cli:local", "sys", "next")
+    roles = [m.role for m in messages]
+    assert "tool_call" not in roles
+    assert "tool_result" not in roles
+    # user + assistant history + system + new user = 4
+    assert len(messages) == 4
+
+
+async def test_tool_events_do_not_inflate_consolidation_threshold(storage):
+    """Tool events in JSONL must not count toward the consolidation threshold."""
+    llm = ScriptedLLM("Summary.")
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=4,
+        keep_recent_ratio=0.25,  # keep_recent = 1
+        llm=llm,
+    )
+    # 3 user/assistant messages + many tool events = raw count 9, filtered count 3
+    for i in range(3):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+        await storage.append_message("s1", Message(role="tool_call", content=f"call {i}"))
+        await storage.append_message("s1", Message(role="tool_result", content=f"result {i}"))
+
+    messages = await manager.build_messages("s1", "sys", "new")
+    # 3 user messages in history (under threshold of 4) → no consolidation
+    # system + 3 history + new user = 5 total
+    assert len(messages) == 5
+    doc = await storage.load_session_summary("s1")
+    assert doc == ""  # no consolidation fired

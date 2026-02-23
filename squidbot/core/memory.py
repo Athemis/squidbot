@@ -117,6 +117,10 @@ class MemoryManager:
         session_summary = await self._storage.load_session_summary(session_id)
         history = await self._storage.load_history(session_id)
 
+        # Filter tool events before cursor arithmetic — these roles are never sent to the LLM
+        # and must not inflate consolidation thresholds or appear in the LLM context.
+        history = [m for m in history if m.role not in ("tool_call", "tool_result")]
+
         # Load cursor once; used for trigger check, warning check, and consolidation
         cursor = await self._storage.load_consolidated_cursor(session_id)
 
