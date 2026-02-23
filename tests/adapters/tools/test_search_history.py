@@ -191,5 +191,7 @@ async def test_tool_events_appear_as_context_for_surrounding_match(
     )
     result = await tool.execute(query="git status")
     assert result.is_error is False
-    # At least the user message and tool call should appear
+    # The user message matched, and tool_call/tool_result appear as context
     assert "git status" in result.content.lower()
+    assert "TOOL CALL" in result.content
+    assert "TOOL RESULT" in result.content

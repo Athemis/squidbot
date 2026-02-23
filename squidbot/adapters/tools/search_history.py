@@ -29,8 +29,8 @@ class SearchHistoryTool:
     """
     Search across all session JSONL files for a text pattern.
 
-    Returns matching user/assistant messages with ±1 surrounding messages
-    for context. Supports filtering by time period (last N days) and
+    Returns matching user, assistant, tool_call, and tool_result messages
+    with ±1 surrounding messages for context. Supports filtering by time period (last N days) and
     limiting the number of results.
     """
 
