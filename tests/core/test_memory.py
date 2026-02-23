@@ -586,3 +586,52 @@ async def test_meta_consolidation_failure_keeps_original_summary():
     fat_summary = " ".join(["word"] * 650)
     result = await manager._maybe_meta_consolidate(fat_summary)
     assert result == fat_summary
+
+
+async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exceeds_limit():
+    """End-to-end: _consolidate calls _maybe_meta_consolidate when existing + new > 600 words.
+
+    Existing summary is ~580 words. The new consolidation chunk pushes it over 600.
+    The scripted LLM returns "Meta summary." for the meta-consolidation call.
+    We verify that the *compressed* output is what gets saved — not the raw concatenation.
+    """
+    # 598 words of existing summary — adding "New chunk." (2 words) gives 600,
+    # but "\n\n" splits as empty string and split() skips it, so combined is 600 words.
+    # Use 599 words to ensure existing + "\n\n" + "New chunk." = 601 words > 600 trigger.
+    existing_summary = " ".join(["existing"] * 599)
+
+    # Two scripted LLM responses:
+    # 1st call: normal consolidation → "New chunk."
+    # 2nd call: meta-consolidation (combined > 600 words) → "Meta summary."
+    responses = ["New chunk.", "Meta summary."]
+    response_index = 0
+
+    class TwoShotLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            nonlocal response_index
+            text = responses[response_index]
+            response_index += 1
+
+            async def _gen():
+                yield text
+
+            return _gen()
+
+    storage = InMemoryStorage()
+    await storage.save_session_summary("s1", existing_summary)
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.34,
+        llm=TwoShotLLM(),
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+
+    await manager.build_messages("s1", "sys", "new")
+
+    saved = await storage.load_session_summary("s1")
+    # The saved summary must be the meta-consolidated output, not the raw concatenation
+    assert saved == "Meta summary."
+    # Both LLM calls were made
+    assert response_index == 2
