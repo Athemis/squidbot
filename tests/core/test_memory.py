@@ -701,3 +701,80 @@ async def test_tool_events_do_not_inflate_consolidation_threshold(storage):
     assert len(messages) == 5
     doc = await storage.load_session_summary("s1")
     assert doc == ""  # no consolidation fired
+
+
+async def test_cursor_remains_valid_filtered_index_across_calls_with_tool_events(storage):
+    """Regression: cursor is always a filtered-history index and stays valid across calls.
+
+    Scenario (threshold=5, keep_recent=1):
+      - Interleave 6 user messages with 6 tool events (raw=12, filtered=6).
+      - Call 1: filtered=6, cursor=0, 6-0=6 > 5 → consolidation fires; cursor saved at 5.
+      - Add 4 more tool events (raw=16, filtered still=6; cursor=5 still valid).
+      - Call 2: filtered=6, cursor=5, 6-5=1 ≤ 5 → no spurious consolidation.
+      - Add 1 user + 1 assistant (raw=18, filtered=8).
+      - Call 3: filtered=8, cursor=5, 8-5=3 ≤ 5 → still no consolidation.
+      - Cursor must remain 5 after all three calls.
+
+    This guards against any future change where tool events are counted in cursor
+    arithmetic, which would cause the cursor to exceed the filtered-history length
+    and suppress consolidation indefinitely.
+    """
+    consolidation_call_count = 0
+
+    class CountingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            nonlocal consolidation_call_count
+            consolidation_call_count += 1
+
+            async def _gen():
+                yield "Summary after call 1."
+
+            return _gen()
+
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=5,
+        keep_recent_ratio=0.2,  # keep_recent = max(1, int(5*0.2)) = 1
+        llm=CountingLLM(),
+    )
+    sid = "s_cursor_regression"
+
+    # --- Setup: 6 user messages interleaved with 6 tool events (raw=12, filtered=6) ---
+    for i in range(6):
+        await storage.append_message(sid, Message(role="user", content=f"msg {i}"))
+        await storage.append_message(sid, Message(role="tool_call", content=f"call {i}"))
+        await storage.append_message(sid, Message(role="tool_result", content=f"result {i}"))
+
+    # --- Call 1: filtered=6, cursor=0, 6-0=6 > 5 → consolidation fires ---
+    await manager.build_messages(sid, "sys", "turn1")
+    assert consolidation_call_count == 1, "consolidation must fire exactly once on call 1"
+    cursor_after_call1 = await storage.load_consolidated_cursor(sid)
+    # cursor = len(filtered) - keep_recent = 6 - 1 = 5
+    assert cursor_after_call1 == 5, (
+        f"cursor should be 5 after first consolidation, got {cursor_after_call1}"
+    )
+
+    # --- Add 4 more tool events (raw=16, filtered still=6) ---
+    for i in range(4):
+        await storage.append_message(sid, Message(role="tool_call", content=f"extra_call {i}"))
+        # Only tool_call, no tool_result — still 0 additional user/assistant messages
+
+    # --- Call 2: filtered=6, cursor=5, 6-5=1 ≤ 5 → no consolidation ---
+    await manager.build_messages(sid, "sys", "turn2")
+    assert consolidation_call_count == 1, (
+        "no spurious consolidation on call 2 (only tool events added)"
+    )
+    cursor_after_call2 = await storage.load_consolidated_cursor(sid)
+    assert cursor_after_call2 == 5, "cursor must not change when no consolidation fires"
+
+    # --- Add 1 user + 1 assistant (raw=18, filtered=8) ---
+    await storage.append_message(sid, Message(role="user", content="new user msg"))
+    await storage.append_message(sid, Message(role="assistant", content="new assistant reply"))
+
+    # --- Call 3: filtered=8, cursor=5, 8-5=3 ≤ 5 → still no consolidation ---
+    await manager.build_messages(sid, "sys", "turn3")
+    assert consolidation_call_count == 1, (
+        "no consolidation on call 3 (only 3 unconsolidated filtered messages)"
+    )
+    cursor_after_call3 = await storage.load_consolidated_cursor(sid)
+    assert cursor_after_call3 == 5, "cursor must remain 5 throughout calls 2 and 3"
