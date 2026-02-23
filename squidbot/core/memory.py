@@ -38,16 +38,22 @@ _CONSOLIDATION_SYSTEM = (
     "Output only the summary text — no preamble, no commentary, no formatting."
 )
 
+# Soft-cap trigger: if session summary exceeds this word count, trim to
+# the most recent _SUMMARY_KEEP_PARAGRAPHS paragraphs. Not a hard upper bound —
+# kept paragraphs may individually exceed the limit.
 _SUMMARY_WORD_LIMIT = 600
 _SUMMARY_KEEP_PARAGRAPHS = 8
 
 
 def _trim_summary(text: str) -> str:
     """
-    Trim a session summary if it exceeds the word limit.
+    Trim a session summary when it grows too large.
 
-    Keeps the last _SUMMARY_KEEP_PARAGRAPHS non-empty paragraphs so the most
-    recent consolidation cycles are preserved. No-ops when within limits.
+    Uses word count as a trigger: if the text exceeds _SUMMARY_WORD_LIMIT words,
+    keep only the last _SUMMARY_KEEP_PARAGRAPHS non-empty paragraphs. This is a
+    soft cap — the returned text may still exceed the word limit if the kept
+    paragraphs are individually long. The guarantee is that at most
+    _SUMMARY_KEEP_PARAGRAPHS consolidation cycles are retained verbatim.
 
     Args:
         text: The full session summary text.

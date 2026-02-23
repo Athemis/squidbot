@@ -506,15 +506,20 @@ async def test_consolidation_cursor_not_advanced_if_save_fails():
 
 
 async def test_session_summary_capped_when_exceeding_word_limit():
-    """Session summary is trimmed to the last 8 paragraphs when > 600 words."""
-    # Build an existing summary that is already over the 600-word limit:
-    # 10 paragraphs × ~82 words each ≈ 820 words
-    fat_paragraph = "word " * 80
-    existing_summary = "\n\n".join(f"Old paragraph {i}.\n{fat_paragraph}" for i in range(10))
+    """Session summary is trimmed to the last 8 paragraphs when > 600 words.
+
+    Uses 10 labeled paragraphs of 70 words each (~700 words total) to reliably
+    trigger trimming. Verifies that the oldest paragraphs are dropped and the
+    newest (including the new consolidation output) are kept.
+    """
+    # 10 paragraphs × 70 words each = 700 words — reliably > 600-word trigger
+    filler = "filler " * 69  # 69 copies + the paragraph label = 70 words
+    existing_summary = "\n\n".join(f"Paragraph {i} content. {filler}" for i in range(10))
+    # Paragraph 0 is oldest, Paragraph 9 is newest
 
     storage = InMemoryStorage()
     await storage.save_session_summary("s1", existing_summary)
-    llm = ScriptedLLM("New summary paragraph. " * 5)
+    llm = ScriptedLLM("Brand new consolidation output.")
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=3,
@@ -526,8 +531,17 @@ async def test_session_summary_capped_when_exceeding_word_limit():
     await manager.build_messages("s1", "sys", "new")
 
     saved = await storage.load_session_summary("s1")
-    assert len(saved.split()) <= 600
-    assert "New summary paragraph." in saved
+    paragraphs = [p for p in saved.split("\n\n") if p.strip()]
+
+    # At most 8 paragraphs kept (the keep-8 guarantee)
+    assert len(paragraphs) <= 8
+
+    # Newest paragraph (the new consolidation output) must be present
+    assert "Brand new consolidation output." in saved
+
+    # Oldest paragraphs (0, 1) must be gone — they were trimmed
+    assert "Paragraph 0 content." not in saved
+    assert "Paragraph 1 content." not in saved
 
 
 async def test_session_summary_not_trimmed_when_under_word_limit():
