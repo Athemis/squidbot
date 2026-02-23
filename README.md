@@ -98,6 +98,9 @@ tools:
     url: ""                            # required for searxng
     api_key: ""                        # required for brave
 
+  search_history:
+    enabled: true                      # search past conversations across all sessions
+
   mcp_servers:
     github:
       transport: "stdio"
