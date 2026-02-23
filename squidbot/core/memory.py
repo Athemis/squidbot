@@ -28,7 +28,14 @@ _CONSOLIDATION_PROMPT = (
     "Focus on key facts, decisions, and context useful for future conversations. "
     "Do not include small talk or filler.\n\n"
     "Conversation history:\n{history}\n\n"
-    "Provide a brief summary (2-5 sentences) suitable for appending to a memory document."
+    "Provide a summary of approximately {sentences} sentences suitable for "
+    "appending to a memory document."
+)
+
+_CONSOLIDATION_SYSTEM = (
+    "You are a memory consolidation assistant. "
+    "Your sole task is to produce concise, factual summaries of conversation history. "
+    "Output only the summary text — no preamble, no commentary, no formatting."
 )
 
 
@@ -185,8 +192,12 @@ class MemoryManager:
         # Call LLM for summary (self._llm is non-None; caller guarantees this)
         llm = self._llm
         assert llm is not None  # noqa: S101 — narrowing for type checker
-        prompt = _CONSOLIDATION_PROMPT.format(history=history_text)
-        summary_messages = [Message(role="user", content=prompt)]
+        sentence_budget = max(5, len(to_summarize) // 10)
+        prompt = _CONSOLIDATION_PROMPT.format(history=history_text, sentences=sentence_budget)
+        summary_messages = [
+            Message(role="system", content=_CONSOLIDATION_SYSTEM),
+            Message(role="user", content=prompt),
+        ]
         try:
             summary_chunks: list[str] = []
             response_stream = await llm.chat(summary_messages, [])
@@ -206,9 +217,14 @@ class MemoryManager:
         # Append to existing session summary
         existing = await self._storage.load_session_summary(session_id)
         updated = f"{existing}\n\n{summary}" if existing.strip() else summary
-        await self._storage.save_session_summary(session_id, updated)
+        try:
+            await self._storage.save_session_summary(session_id, updated)
+            new_cursor = len(history) - self._keep_recent
+            await self._storage.save_consolidated_cursor(session_id, new_cursor)
+        except Exception as e:
+            from loguru import logger  # noqa: PLC0415
 
-        new_cursor = len(history) - self._keep_recent
-        await self._storage.save_consolidated_cursor(session_id, new_cursor)
+            logger.warning("Failed to save consolidation summary, skipping: {}", e)
+            return recent
 
         return recent

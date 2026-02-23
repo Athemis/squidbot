@@ -365,3 +365,136 @@ async def test_session_summary_isolated_per_session(storage):
     await storage.save_session_summary("s2", "s2 summary")
     assert await storage.load_session_summary("s1") == "s1 summary"
     assert await storage.load_session_summary("s2") == "s2 summary"
+
+
+# ---------------------------------------------------------------------------
+# C1: Dynamic summary budget
+# ---------------------------------------------------------------------------
+
+
+async def test_consolidation_prompt_scales_with_history_size():
+    """Larger histories get a larger sentence budget in the consolidation prompt."""
+    captured_prompts: list[str] = []
+
+    class CapturingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            # messages[-1] is the user message with the prompt
+            captured_prompts.append(messages[-1].content)
+
+            async def _gen():
+                yield "summary"
+
+            return _gen()
+
+    storage_small = InMemoryStorage()
+    manager_small = MemoryManager(
+        storage=storage_small,
+        consolidation_threshold=20,
+        keep_recent_ratio=0.1,  # keep_recent = max(1, int(20*0.1)) = 2
+        llm=CapturingLLM(),
+    )
+    storage_large = InMemoryStorage()
+    manager_large = MemoryManager(
+        storage=storage_large,
+        consolidation_threshold=20,
+        keep_recent_ratio=0.1,
+        llm=CapturingLLM(),
+    )
+
+    for i in range(25):
+        await storage_small.append_message("s1", Message(role="user", content=f"msg {i}"))
+    for i in range(100):
+        await storage_large.append_message("s2", Message(role="user", content=f"msg {i}"))
+
+    await manager_small.build_messages("s1", "sys", "new")
+    await manager_large.build_messages("s2", "sys", "new")
+
+    assert len(captured_prompts) == 2
+    # Small: 25 - 2 = 23 messages to_summarize → budget = max(5, 23//10) = 5 → "5 sentences"
+    assert "5 sentences" in captured_prompts[0]
+    # Large: 100 - 2 = 98 messages → budget = max(5, 98//10) = 9 → "9 sentences"
+    assert "9 sentences" in captured_prompts[1]
+
+
+# ---------------------------------------------------------------------------
+# C2: System prompt in consolidation LLM call
+# ---------------------------------------------------------------------------
+
+
+async def test_consolidation_uses_system_prompt():
+    """The consolidation LLM call includes a system message as first message."""
+    received_messages: list[Message] = []
+
+    class InspectingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            received_messages.extend(messages)
+
+            async def _gen():
+                yield "summary"
+
+            return _gen()
+
+    storage = InMemoryStorage()
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.34,
+        llm=InspectingLLM(),
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("s1", "sys", "new")
+
+    assert len(received_messages) >= 2
+    assert received_messages[0].role == "system"
+    assert "consolidation" in received_messages[0].content.lower()
+
+
+# ---------------------------------------------------------------------------
+# C3: Catch save_session_summary failure
+# ---------------------------------------------------------------------------
+
+
+async def test_consolidation_save_failure_is_caught():
+    """If save_session_summary raises, the turn continues without crashing."""
+
+    class FailingSaveStorage(InMemoryStorage):
+        async def save_session_summary(self, session_id: str, content: str) -> None:
+            raise OSError("disk full")
+
+    storage = FailingSaveStorage()
+    llm = ScriptedLLM("Summary: some content.")
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.34,
+        llm=llm,
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+
+    # Should not raise
+    messages = await manager.build_messages("s1", "sys", "new")
+    assert len(messages) >= 2
+
+
+async def test_consolidation_cursor_not_advanced_if_save_fails():
+    """Cursor stays at 0 if save_session_summary fails."""
+
+    class FailingSaveStorage(InMemoryStorage):
+        async def save_session_summary(self, session_id: str, content: str) -> None:
+            raise OSError("disk full")
+
+    storage = FailingSaveStorage()
+    llm = ScriptedLLM("Summary.")
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.34,
+        llm=llm,
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("s1", "sys", "new")
+    cursor = await storage.load_consolidated_cursor("s1")
+    assert cursor == 0  # not advanced
