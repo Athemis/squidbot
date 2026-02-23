@@ -164,8 +164,9 @@ class MemoryManager:
         """
         Save a completed user–assistant exchange to history.
 
-        Tool calls/results within the exchange are handled by the agent loop
-        and appended separately via append_message.
+        Only the user message and the final assistant text reply are persisted.
+        Intermediate tool-call and tool-result messages are intentionally not
+        stored — they are ephemeral mechanics, not semantic content.
 
         Args:
             session_id: Unique session identifier.
