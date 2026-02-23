@@ -40,7 +40,9 @@ Consolidation runs inside `build_messages()` — on demand, not on a timer. This
 
 ### Optional LLM injection
 
-`MemoryManager` accepts `llm: LLMPort | None`. If `None`, consolidation is disabled and the existing hard-prune fallback applies. This keeps existing tests working without an LLM double.
+`MemoryManager` accepts `llm: LLMPort | None`. If `None`, consolidation is disabled. There
+is no hard-prune fallback — without an LLM no agent runs and no history accumulates anyway.
+(Pruning was removed in the follow-up "remove pruning / pre-consolidation warning" design.)
 
 ### Append, never overwrite
 
@@ -71,8 +73,11 @@ build_messages()
 | Field | Default | Meaning |
 |---|---|---|
 | `consolidation_threshold` | 100 | Messages above this count trigger consolidation |
-| `keep_recent` | 20 | Messages always kept verbatim after consolidation |
+| `keep_recent_ratio` | 0.2 | Fraction of threshold kept verbatim after consolidation (`keep_recent = int(threshold * ratio)`) |
 | `consolidation_pool` | `""` | LLM pool for summarization (defaults to `llm.default_pool`) |
+
+> **Change (2026-02-23):** `keep_recent: int = 20` was replaced by `keep_recent_ratio: float = 0.2`
+> so that the verbatim window scales automatically when `consolidation_threshold` is tuned.
 
 ## Trade-offs Considered
 

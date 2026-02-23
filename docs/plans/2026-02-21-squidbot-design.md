@@ -251,6 +251,14 @@ error-prone (nanobot-redux had consolidation bugs), and opaque. The `memory.md` 
 transparent and debuggable. The memory system sits behind `MemoryPort` and can be replaced
 later with a summarizing implementation without touching the core.
 
+> **Superseded (2026-02-23):** Automatic summarization (consolidation) was added after all.
+> See `docs/plans/2026-02-23-memory-consolidation-design.md`. The `MemoryPort` abstraction
+> made this a local change to `MemoryManager` with no core impact, validating the original
+> architecture. Hard pruning was removed simultaneously — consolidation is the single
+> history-limiting mechanism. A pre-consolidation warning (`_CONSOLIDATION_WARNING`) fires
+> one turn before consolidation triggers, prompting the agent to call `memory_write` for
+> anything critical.
+
 ## Skills System
 
 Skills are directories containing a `SKILL.md` file — markdown instructions for the agent,
