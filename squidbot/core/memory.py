@@ -165,8 +165,12 @@ class MemoryManager:
         Save a completed user–assistant exchange to history.
 
         Only the user message and the final assistant text reply are persisted.
-        Intermediate tool-call and tool-result messages are intentionally not
-        stored — they are ephemeral mechanics, not semantic content.
+        Intermediate tool-call and tool-result messages are not stored.
+
+        # TODO: persist tool-call/tool-result pairs so the agent regains full
+        # tool context after a restart. Requires storing complete assistant+tool
+        # message sequences (OpenAI format requires paired turns) and handling
+        # partial sequences from mid-round crashes gracefully.
 
         Args:
             session_id: Unique session identifier.
