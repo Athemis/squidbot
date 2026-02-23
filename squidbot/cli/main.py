@@ -587,6 +587,7 @@ async def _channel_loop_with_state(
     channel: ChannelPort,
     loop: Any,
     state: GatewayState,
+    storage: JsonlMemory,
 ) -> None:
     """
     Drive a single channel and update GatewayState on each message.
@@ -598,7 +599,9 @@ async def _channel_loop_with_state(
         channel: The channel adapter to drive.
         loop: The agent loop to handle each message.
         state: Live gateway state — updated in-place.
+        storage: Persistence adapter used to construct MemoryWriteTool per message.
     """
+    from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
     async for inbound in channel.receive():
@@ -613,19 +616,24 @@ async def _channel_loop_with_state(
                 started_at=datetime.now(),
                 message_count=1,
             )
-        await loop.run(inbound.session, inbound.text, channel)
+        extra = [MemoryWriteTool(storage=storage)]
+        await loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
 
 
-async def _channel_loop(channel: ChannelPort, loop: Any) -> None:
+async def _channel_loop(channel: ChannelPort, loop: Any, storage: JsonlMemory) -> None:
     """
     Drive a single channel without state tracking (used by agent command).
 
     Args:
         channel: The channel adapter to drive.
         loop: The agent loop to handle each message.
+        storage: Persistence adapter used to construct MemoryWriteTool per message.
     """
+    from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
     async for inbound in channel.receive():
-        await loop.run(inbound.session, inbound.text, channel)
+        extra = [MemoryWriteTool(storage=storage)]
+        await loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
 
 
 async def _run_gateway(config_path: Path) -> None:

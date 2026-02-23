@@ -122,8 +122,9 @@ class TestChannelLoopWithState:
 
         fake_channel = MagicMock()
         fake_channel.receive = fake_receive
+        fake_storage = MagicMock()
 
-        await _channel_loop_with_state(fake_channel, fake_loop, state)  # type: ignore[arg-type]
+        await _channel_loop_with_state(fake_channel, fake_loop, state, fake_storage)  # type: ignore[arg-type]
 
         assert "email:user@example.com" in state.active_sessions
         info = state.active_sessions["email:user@example.com"]
@@ -155,7 +156,8 @@ class TestChannelLoopWithState:
 
         fake_channel = MagicMock()
         fake_channel.receive = fake_receive
+        fake_storage = MagicMock()
 
-        await _channel_loop_with_state(fake_channel, fake_loop, state)  # type: ignore[arg-type]
+        await _channel_loop_with_state(fake_channel, fake_loop, state, fake_storage)  # type: ignore[arg-type]
 
         assert state.active_sessions["email:user@example.com"].message_count == 2
