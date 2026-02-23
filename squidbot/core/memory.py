@@ -169,8 +169,6 @@ class MemoryManager:
         Returns:
             Only the recent messages to keep in context.
         """
-        assert self._llm is not None  # Already checked in build_messages
-
         to_summarize = history[: -self._keep_recent]
         recent = history[-self._keep_recent :]
 
@@ -183,17 +181,26 @@ class MemoryManager:
         if not history_text.strip():
             return recent
 
-        # Call LLM for summary
+        # Call LLM for summary (self._llm is non-None; caller guarantees this)
+        llm = self._llm
+        assert llm is not None  # noqa: S101 — narrowing for type checker
         prompt = _CONSOLIDATION_PROMPT.format(history=history_text)
-        summary_gen = await self._llm.chat(
-            messages=[Message(role="user", content=prompt)],
-            tools=[],
-        )
-        summary_parts: list[str] = []
-        async for chunk in summary_gen:
-            if isinstance(chunk, str):
-                summary_parts.append(chunk)
-        summary = "".join(summary_parts)
+        summary_messages = [Message(role="user", content=prompt)]
+        try:
+            summary_chunks: list[str] = []
+            response_stream = await llm.chat(summary_messages, [])
+            async for chunk in response_stream:
+                if isinstance(chunk, str):
+                    summary_chunks.append(chunk)
+            summary = "".join(summary_chunks).strip()
+        except Exception as e:
+            from loguru import logger  # noqa: PLC0415
+
+            logger.warning("Consolidation LLM call failed, skipping: {}", e)
+            return recent
+
+        if not summary:
+            return recent
 
         # Append to existing memory.md
         existing = await self._storage.load_memory_doc(session_id)

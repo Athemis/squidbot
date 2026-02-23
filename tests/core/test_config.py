@@ -246,4 +246,14 @@ def test_consolidation_defaults():
     settings = Settings()
     assert settings.agents.consolidation_threshold == 100
     assert settings.agents.keep_recent == 20
-    assert settings.agents.consolidation_pool == ""
+    assert not hasattr(settings.agents, "consolidation_pool")
+
+
+def test_keep_recent_must_be_less_than_consolidation_threshold():
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"agents": {"keep_recent": 100, "consolidation_threshold": 50}})
+
+
+def test_keep_recent_must_be_positive():
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"agents": {"keep_recent": 0}})
