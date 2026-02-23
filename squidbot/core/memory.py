@@ -38,33 +38,22 @@ _CONSOLIDATION_SYSTEM = (
     "Output only the summary text — no preamble, no commentary, no formatting."
 )
 
-# Soft-cap trigger: if session summary exceeds this word count, trim to
-# the most recent _SUMMARY_KEEP_PARAGRAPHS paragraphs. Not a hard upper bound —
-# kept paragraphs may individually exceed the limit.
-_SUMMARY_WORD_LIMIT = 600
-_SUMMARY_KEEP_PARAGRAPHS = 8
+_META_CONSOLIDATION_SYSTEM = (
+    "You are a memory consolidation assistant. "
+    "You are given an existing session summary that has grown too long. "
+    "Compress it into a shorter summary that retains all facts, decisions, and context. "
+    "Output only the summary text — no preamble, no commentary, no formatting."
+)
 
+_META_CONSOLIDATION_PROMPT = (
+    "The following is a session summary that has grown too long and needs to be compressed.\n\n"
+    "{summary}\n\n"
+    "Rewrite this as a compact summary of approximately {sentences} sentences. "
+    "Retain all facts, decisions, and context. Do not discard any information."
+)
 
-def _trim_summary(text: str) -> str:
-    """
-    Trim a session summary when it grows too large.
-
-    Uses word count as a trigger: if the text exceeds _SUMMARY_WORD_LIMIT words,
-    keep only the last _SUMMARY_KEEP_PARAGRAPHS non-empty paragraphs. This is a
-    soft cap — the returned text may still exceed the word limit if the kept
-    paragraphs are individually long. The guarantee is that at most
-    _SUMMARY_KEEP_PARAGRAPHS consolidation cycles are retained verbatim.
-
-    Args:
-        text: The full session summary text.
-
-    Returns:
-        The (possibly trimmed) summary text.
-    """
-    if len(text.split()) <= _SUMMARY_WORD_LIMIT:
-        return text
-    paragraphs = [p for p in text.split("\n\n") if p.strip()]
-    return "\n\n".join(paragraphs[-_SUMMARY_KEEP_PARAGRAPHS:])
+_META_SUMMARY_WORD_LIMIT = 600
+_META_SUMMARY_SENTENCES = 8
 
 
 class MemoryManager:
@@ -222,6 +211,39 @@ class MemoryManager:
             logger.warning("{} LLM call failed: {}", context, e)
             return None
 
+    async def _maybe_meta_consolidate(self, summary: str) -> str:
+        """
+        Compress the session summary via LLM if it exceeds the word limit.
+
+        If the summary is within _META_SUMMARY_WORD_LIMIT words, returns it unchanged
+        (fast path, no LLM call). Otherwise calls the LLM with a meta-consolidation
+        prompt to produce a compressed version of approximately _META_SUMMARY_SENTENCES
+        sentences. On LLM failure, returns the original summary unchanged (graceful
+        degradation — data loss avoided at the cost of a large summary).
+
+        Precondition: self._llm is not None (caller must verify).
+
+        Args:
+            summary: The current session summary text.
+
+        Returns:
+            Compressed summary text, or original summary if within limit or on failure.
+        """
+        if len(summary.split()) <= _META_SUMMARY_WORD_LIMIT:
+            return summary
+        messages = [
+            Message(role="system", content=_META_CONSOLIDATION_SYSTEM),
+            Message(
+                role="user",
+                content=_META_CONSOLIDATION_PROMPT.format(
+                    summary=summary,
+                    sentences=_META_SUMMARY_SENTENCES,
+                ),
+            ),
+        ]
+        result = await self._call_llm(messages, context="meta-consolidation")
+        return result if result else summary
+
     async def _consolidate(self, session_id: str, history: list[Message]) -> list[Message]:
         """
         Summarize unconsolidated messages and append to memory.md, returning recent messages.
@@ -265,7 +287,7 @@ class MemoryManager:
         # Append to existing session summary
         existing = await self._storage.load_session_summary(session_id)
         updated = f"{existing}\n\n{summary}" if existing.strip() else summary
-        updated = _trim_summary(updated)
+        updated = await self._maybe_meta_consolidate(updated)
         try:
             await self._storage.save_session_summary(session_id, updated)
             new_cursor = len(history) - self._keep_recent

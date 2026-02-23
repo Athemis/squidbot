@@ -501,72 +501,6 @@ async def test_consolidation_cursor_not_advanced_if_save_fails():
 
 
 # ---------------------------------------------------------------------------
-# Summary cap: session summary trimmed when it grows too large
-# ---------------------------------------------------------------------------
-
-
-async def test_session_summary_capped_when_exceeding_word_limit():
-    """Session summary is trimmed to the last 8 paragraphs when > 600 words.
-
-    Uses 10 existing paragraphs of 72 words each (720 words total) to reliably
-    trigger trimming. After consolidation adds 1 new paragraph, there are 11
-    total; 11 - 8 = 3 oldest (Paragraphs 0, 1, 2) are dropped.
-    """
-    # 10 paragraphs × 72 words each = 720 words — reliably > 600-word trigger
-    # Each paragraph: 3 label words ("Paragraph N content.") + 69 × "filler" = 72 words
-    filler = "filler " * 69
-    existing_summary = "\n\n".join(f"Paragraph {i} content. {filler}" for i in range(10))
-    # Paragraph 0 is oldest, Paragraph 9 is newest
-
-    storage = InMemoryStorage()
-    await storage.save_session_summary("s1", existing_summary)
-    llm = ScriptedLLM("Brand new consolidation output.")
-    manager = MemoryManager(
-        storage=storage,
-        consolidation_threshold=3,
-        keep_recent_ratio=0.34,
-        llm=llm,
-    )
-    for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    await manager.build_messages("s1", "sys", "new")
-
-    saved = await storage.load_session_summary("s1")
-    paragraphs = [p for p in saved.split("\n\n") if p.strip()]
-
-    # At most 8 paragraphs kept (the keep-8 guarantee)
-    assert len(paragraphs) <= 8
-
-    # Newest paragraph (the new consolidation output) must be present
-    assert "Brand new consolidation output." in saved
-
-    # Oldest 3 paragraphs (0, 1, 2) must be gone — 11 in, 8 kept = 3 dropped
-    assert "Paragraph 0 content." not in saved
-    assert "Paragraph 1 content." not in saved
-    assert "Paragraph 2 content." not in saved
-
-
-async def test_session_summary_not_trimmed_when_under_word_limit():
-    """Short summaries are stored verbatim — trimming is not applied."""
-    storage = InMemoryStorage()
-    await storage.save_session_summary("s1", "Short existing note.")
-    llm = ScriptedLLM("Short new note.")
-    manager = MemoryManager(
-        storage=storage,
-        consolidation_threshold=3,
-        keep_recent_ratio=0.34,
-        llm=llm,
-    )
-    for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    await manager.build_messages("s1", "sys", "new")
-
-    saved = await storage.load_session_summary("s1")
-    assert "Short existing note." in saved
-    assert "Short new note." in saved
-
-
-# ---------------------------------------------------------------------------
 # _call_llm helper
 # ---------------------------------------------------------------------------
 
@@ -601,3 +535,54 @@ async def test_call_llm_returns_none_on_empty_response():
     manager = MemoryManager(storage=storage, llm=llm)
     result = await manager._call_llm([Message(role="user", content="ping")])
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _maybe_meta_consolidate: meta-consolidation of session summary
+# ---------------------------------------------------------------------------
+
+
+async def test_meta_consolidation_not_triggered_below_word_limit():
+    """No extra LLM call when summary is within the word limit."""
+    call_count = 0
+
+    class CountingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            nonlocal call_count
+            call_count += 1
+
+            async def _gen():
+                yield "summary"
+
+            return _gen()
+
+    storage = InMemoryStorage()
+    manager = MemoryManager(storage=storage, llm=CountingLLM())
+    short_summary = "This is a short session summary."
+    result = await manager._maybe_meta_consolidate(short_summary)
+    assert result == short_summary
+    assert call_count == 0
+
+
+async def test_meta_consolidation_triggered_above_word_limit():
+    """LLM is called to compress summary when > 600 words."""
+    storage = InMemoryStorage()
+    llm = ScriptedLLM("Compressed meta summary.")
+    manager = MemoryManager(storage=storage, llm=llm)
+    fat_summary = " ".join(["word"] * 650)
+    result = await manager._maybe_meta_consolidate(fat_summary)
+    assert result == "Compressed meta summary."
+
+
+async def test_meta_consolidation_failure_keeps_original_summary():
+    """When LLM fails, the original oversized summary is returned unchanged."""
+
+    class FailingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            raise RuntimeError("timeout")
+
+    storage = InMemoryStorage()
+    manager = MemoryManager(storage=storage, llm=FailingLLM())
+    fat_summary = " ".join(["word"] * 650)
+    result = await manager._maybe_meta_consolidate(fat_summary)
+    assert result == fat_summary
