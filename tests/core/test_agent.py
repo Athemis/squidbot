@@ -181,3 +181,34 @@ async def test_run_with_llm_override(storage, memory):
     assert channel.sent == ["from override"]
     # default_llm should NOT have been called (its iterator is still fresh)
     assert list(default_llm._responses) == ["from default"]
+
+
+async def test_extra_tool_callable_via_run(storage, memory):
+    """A tool passed via extra_tools is callable in this run."""
+    tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "via extra"})
+    llm = ScriptedLLM([[tool_call], "done"])
+    channel = CollectingChannel()
+
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),  # empty registry — echo not registered
+        system_prompt="test",
+    )
+    await loop.run(SESSION, "go", channel, extra_tools=[EchoTool()])
+    assert any("done" in s for s in channel.sent)
+
+
+async def test_extra_tool_does_not_pollute_registry(storage, memory):
+    """extra_tools from one run are not available in the next run."""
+    loop = AgentLoop(
+        llm=ScriptedLLM(["ok", "ok"]),
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="test",
+    )
+    channel = CollectingChannel()
+    await loop.run(SESSION, "first", channel, extra_tools=[EchoTool()])
+    # Second run without extra_tools: registry still empty
+    definitions = loop._registry.get_definitions()
+    assert not any(d.name == "echo" for d in definitions)

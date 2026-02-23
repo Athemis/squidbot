@@ -9,8 +9,15 @@ interactions happen through the injected port implementations.
 from __future__ import annotations
 
 from squidbot.core.memory import MemoryManager
-from squidbot.core.models import Message, OutboundMessage, Session, ToolCall
-from squidbot.core.ports import ChannelPort, LLMPort
+from squidbot.core.models import (
+    Message,
+    OutboundMessage,
+    Session,
+    ToolCall,
+    ToolDefinition,
+    ToolResult,
+)
+from squidbot.core.ports import ChannelPort, LLMPort, ToolPort
 from squidbot.core.registry import ToolRegistry
 
 # Maximum number of tool-call rounds per user message.
@@ -77,6 +84,7 @@ class AgentLoop:
         channel: ChannelPort,
         *,
         llm: LLMPort | None = None,
+        extra_tools: list[ToolPort] | None = None,
     ) -> None:
         """
         Process a single user message and deliver the reply to the channel.
@@ -87,15 +95,22 @@ class AgentLoop:
             channel: The channel to deliver the response to.
             llm: Optional LLM override for this single run. If provided,
                  replaces self._llm for the duration of this call only.
+            extra_tools: Optional list of additional tools available for this run only.
+                         These are merged with the registry for this call and do not
+                         mutate self._registry.
         """
         _llm = llm if llm is not None else self._llm
+        _extra: dict[str, ToolPort] = {t.name: t for t in (extra_tools or [])}
 
         messages = await self._memory.build_messages(
             session_id=session.id,
             system_prompt=self._system_prompt,
             user_message=user_message,
         )
-        tool_definitions = self._registry.get_definitions()
+        tool_definitions = self._registry.get_definitions() + [
+            ToolDefinition(name=t.name, description=t.description, parameters=t.parameters)
+            for t in _extra.values()
+        ]
 
         final_text = ""
         tool_round = 0
@@ -137,7 +152,18 @@ class AgentLoop:
             )
 
             for tc in tool_calls:
-                result = await self._registry.execute(tc.name, tool_call_id=tc.id, **tc.arguments)
+                extra_tool = _extra.get(tc.name)
+                if extra_tool is not None:
+                    result = await extra_tool.execute(**tc.arguments)
+                    result = ToolResult(
+                        tool_call_id=tc.id,
+                        content=result.content,
+                        is_error=result.is_error,
+                    )
+                else:
+                    result = await self._registry.execute(
+                        tc.name, tool_call_id=tc.id, **tc.arguments
+                    )
                 messages.append(
                     Message(
                         role="tool",
