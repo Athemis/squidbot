@@ -96,6 +96,12 @@ class MemoryManager:
         memory_doc = await self._storage.load_memory_doc(session_id)
         history = await self._storage.load_history(session_id)
 
+        # Consolidate history if over threshold and LLM available
+        if len(history) > self._consolidation_threshold and self._llm is not None:
+            history = await self._consolidate(session_id, history)
+            # Reload memory_doc so the freshly written summary appears in the system prompt
+            memory_doc = await self._storage.load_memory_doc(session_id)
+
         # Build system prompt with memory document appended
         full_system = system_prompt
         if memory_doc.strip():
@@ -111,10 +117,6 @@ class MemoryManager:
                 if skill.always and skill.available:
                     body = self._skills.load_skill_body(skill.name)
                     full_system += f"\n\n{body}"
-
-        # Consolidate history if over threshold and LLM available
-        if len(history) > self._consolidation_threshold and self._llm is not None:
-            history = await self._consolidate(session_id, history)
 
         # Prune history if over the limit
         near_limit = len(history) >= self._warn_threshold

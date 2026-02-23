@@ -176,6 +176,23 @@ async def test_consolidation_appends_to_existing_memory_doc(storage):
     assert "Summary: discussed dogs." in doc
 
 
+async def test_consolidation_summary_appears_in_system_prompt(storage):
+    """The consolidated summary must be visible in the system prompt, not just in storage."""
+    llm = ScriptedLLM("Summary: key facts here.")
+    manager = MemoryManager(
+        storage=storage,
+        max_history_messages=200,
+        consolidation_threshold=3,
+        keep_recent=1,
+        llm=llm,
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    system_content = messages[0].content
+    assert "Summary: key facts here." in system_content
+
+
 async def test_consolidation_skipped_when_no_llm(storage):
     manager = MemoryManager(
         storage=storage,
