@@ -223,3 +223,77 @@ async def test_extra_tool_does_not_pollute_registry(storage, memory):
     # Second run without extra_tools: registry still empty
     definitions = loop._registry.get_definitions()
     assert not any(d.name == "echo" for d in definitions)
+
+
+async def test_tool_events_written_to_storage_after_tool_call(storage, memory):
+    """After a tool call, tool_call and tool_result messages are in storage."""
+    tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "hello"})
+    llm = ScriptedLLM([[tool_call], "Done."])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    await loop.run(SESSION, "run echo", channel)
+
+    history = await storage.load_history(SESSION.id)
+    roles = [m.role for m in history]
+    assert "tool_call" in roles
+    assert "tool_result" in roles
+
+
+async def test_tool_call_text_format(storage, memory):
+    """tool_call content is formatted as 'name(key=value, ...)'."""
+    tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "world"})
+    llm = ScriptedLLM([[tool_call], "Done."])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    await loop.run(SESSION, "run echo", channel)
+
+    history = await storage.load_history(SESSION.id)
+    tool_call_msg = next(m for m in history if m.role == "tool_call")
+    assert tool_call_msg.content == "echo(text='world')"
+
+
+async def test_tool_result_content_truncated_at_2000_chars(storage, memory):
+    """Tool results longer than 2000 characters are truncated with [truncated] marker."""
+
+    class LongOutputTool:
+        name = "long_output"
+        description = "Returns a very long string"
+        parameters = {"type": "object", "properties": {}}
+
+        async def execute(self, **_) -> ToolResult:
+            return ToolResult(tool_call_id="", content="x" * 3000)
+
+    tool_call = ToolCall(id="tc_1", name="long_output", arguments={})
+    llm = ScriptedLLM([[tool_call], "Done."])
+    registry = ToolRegistry()
+    registry.register(LongOutputTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    await loop.run(SESSION, "get long output", channel)
+
+    history = await storage.load_history(SESSION.id)
+    tool_result_msg = next(m for m in history if m.role == "tool_result")
+    assert len(tool_result_msg.content) == 2000 + len("\n[truncated]")
+    assert tool_result_msg.content.endswith("\n[truncated]")
+
+
+async def test_tool_events_not_sent_to_channel(storage, memory):
+    """tool_call/tool_result messages do not appear as channel output."""
+    tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "hi"})
+    llm = ScriptedLLM([[tool_call], "Done."])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    await loop.run(SESSION, "echo hi", channel)
+
+    # Only the final text reply is sent to the channel
+    assert channel.sent == ["Done."]
