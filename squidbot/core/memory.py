@@ -92,8 +92,11 @@ class MemoryManager:
         memory_doc = await self._storage.load_memory_doc(session_id)
         history = await self._storage.load_history(session_id)
 
-        # Consolidate history if over threshold and LLM available
-        if len(history) > self._consolidation_threshold and self._llm is not None:
+        # Load cursor once; used for both trigger and warning checks below
+        cursor = await self._storage.load_consolidated_cursor(session_id)
+
+        # Consolidate history if unconsolidated messages exceed threshold and LLM available
+        if len(history) - cursor > self._consolidation_threshold and self._llm is not None:
             history = await self._consolidate(session_id, history)
             # Reload memory_doc so the freshly written summary appears in the system prompt
             memory_doc = await self._storage.load_memory_doc(session_id)
@@ -115,7 +118,7 @@ class MemoryManager:
                     full_system += f"\n\n{body}"
 
         # Warn the agent one or two turns before consolidation fires
-        if len(history) >= self._consolidation_threshold - 2:
+        if len(history) - cursor >= self._consolidation_threshold - 2:
             full_system += _CONSOLIDATION_WARNING
 
         messages: list[Message] = [
@@ -149,9 +152,9 @@ class MemoryManager:
 
     async def _consolidate(self, session_id: str, history: list[Message]) -> list[Message]:
         """
-        Summarize old messages and append to memory.md, returning recent messages.
+        Summarize unconsolidated messages and append to memory.md, returning recent messages.
 
-        Takes messages[:-keep_recent] to summarize, keeps [-keep_recent:] verbatim.
+        Only summarizes messages[cursor:-keep_recent]. Advances cursor after success.
 
         Args:
             session_id: Unique session identifier.
@@ -160,8 +163,12 @@ class MemoryManager:
         Returns:
             Only the recent messages to keep in context.
         """
-        to_summarize = history[: -self._keep_recent]
+        cursor = await self._storage.load_consolidated_cursor(session_id)
         recent = history[-self._keep_recent :]
+        to_summarize = history[cursor : -self._keep_recent]
+
+        if not to_summarize:
+            return recent
 
         # Build text from user/assistant messages only
         history_text = ""
@@ -197,5 +204,8 @@ class MemoryManager:
         existing = await self._storage.load_memory_doc(session_id)
         updated = f"{existing}\n\n{summary}" if existing.strip() else summary
         await self._storage.save_memory_doc(session_id, updated)
+
+        new_cursor = len(history) - self._keep_recent
+        await self._storage.save_consolidated_cursor(session_id, new_cursor)
 
         return recent

@@ -250,3 +250,70 @@ async def test_cursor_default_is_zero(storage):
 async def test_cursor_roundtrip(storage):
     await storage.save_consolidated_cursor("s1", 42)
     assert await storage.load_consolidated_cursor("s1") == 42
+
+
+async def test_consolidation_uses_cursor_not_full_history(storage):
+    """With cursor=4, only 2 unconsolidated messages; threshold=4 not exceeded."""
+    llm = ScriptedLLM("Summary: only new messages.")
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=4,
+        keep_recent_ratio=0.25,  # keep_recent = max(1, int(4*0.25)) = 1
+        llm=llm,
+    )
+    for i in range(6):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    await storage.save_consolidated_cursor("s1", 4)
+
+    # Only 6 - 4 = 2 unconsolidated; threshold=4, so no consolidation triggered
+    messages = await manager.build_messages("s1", "sys", "new")
+    # All 6 history + system + user = 8 (no consolidation)
+    assert len(messages) == 8
+    doc = await storage.load_memory_doc("s1")
+    assert doc == ""
+
+
+async def test_consolidation_cursor_advances_after_consolidation(storage):
+    """Cursor is saved after successful consolidation."""
+    llm = ScriptedLLM("Summary: advanced.")
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=4,
+        keep_recent_ratio=0.25,  # keep_recent = max(1, int(4*0.25)) = 1
+        llm=llm,
+    )
+    for i in range(5):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    # cursor=0, len=5, 5-0=5 > 4: consolidation fires
+    await manager.build_messages("s1", "sys", "new")
+    # cursor should now be 5 - 1 = 4
+    cursor = await storage.load_consolidated_cursor("s1")
+    assert cursor == 4
+
+
+async def test_no_consolidation_above_threshold_if_cursor_covers_it(storage):
+    """If cursor already covers most history, no LLM call is made."""
+    call_count = 0
+
+    class CountingLLM:
+        async def chat(self, messages, tools, *, stream=True):
+            nonlocal call_count
+            call_count += 1
+
+            async def _gen():
+                yield "summary"
+
+            return _gen()
+
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=4,
+        keep_recent_ratio=0.25,
+        llm=CountingLLM(),
+    )
+    for i in range(10):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    # Cursor at 9 (only 1 unconsolidated message, below threshold of 4)
+    await storage.save_consolidated_cursor("s1", 9)
+    await manager.build_messages("s1", "sys", "new")
+    assert call_count == 0
