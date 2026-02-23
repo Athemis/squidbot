@@ -70,6 +70,8 @@ llm:
 agents:
   workspace: "~/.squidbot/workspace"   # bootstrap files live here
   restrict_to_workspace: true
+  consolidation_threshold: 100         # summarize history into memory.md above this many messages
+  keep_recent: 20                      # keep this many recent messages verbatim in context
 
   heartbeat:
     enabled: true
