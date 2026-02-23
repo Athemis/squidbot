@@ -430,10 +430,17 @@ async def _make_agent_loop(
     extra_dirs = [Path(d).expanduser() for d in settings.skills.extra_dirs]
     skills = FsSkillsLoader(search_dirs=extra_dirs + [workspace / "skills", bundled_skills])
 
-    memory = MemoryManager(storage=storage, max_history_messages=200, skills=skills)
-
     # LLM adapter — resolved from pool/model/provider schema
     llm = _resolve_llm(settings, settings.llm.default_pool)
+
+    memory = MemoryManager(
+        storage=storage,
+        max_history_messages=200,
+        skills=skills,
+        llm=llm,
+        consolidation_threshold=settings.agents.consolidation_threshold,
+        keep_recent=settings.agents.keep_recent,
+    )
 
     # Tool registry
     registry = ToolRegistry()
