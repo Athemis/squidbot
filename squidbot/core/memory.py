@@ -188,18 +188,20 @@ class MemoryManager:
             session_id, Message(role="assistant", content=assistant_reply)
         )
 
-    async def _call_llm(self, messages: list[Message]) -> str | None:
+    async def _call_llm(self, messages: list[Message], *, context: str = "llm") -> str | None:
         """
         Call the LLM with the given messages and return the full response text.
 
         Streams the response, joins all text chunks, and returns the stripped result.
         Returns None if the LLM raises an exception or yields an empty response.
-        Logs a warning on exception.
+        Logs a warning on exception, including the context label for traceability.
 
         Precondition: self._llm is not None (caller must verify).
 
         Args:
             messages: The messages to send to the LLM.
+            context: Label included in the warning log to identify which operation failed
+                     (e.g. "consolidation", "meta-consolidation").
 
         Returns:
             Stripped response text, or None on failure or empty response.
@@ -217,7 +219,7 @@ class MemoryManager:
         except Exception as e:
             from loguru import logger  # noqa: PLC0415
 
-            logger.warning("LLM call failed: {}", e)
+            logger.warning("{} LLM call failed: {}", context, e)
             return None
 
     async def _consolidate(self, session_id: str, history: list[Message]) -> list[Message]:
@@ -256,7 +258,7 @@ class MemoryManager:
             Message(role="system", content=_CONSOLIDATION_SYSTEM),
             Message(role="user", content=prompt),
         ]
-        summary = await self._call_llm(summary_messages)
+        summary = await self._call_llm(summary_messages, context="consolidation")
         if not summary:
             return recent
 
