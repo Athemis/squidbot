@@ -11,7 +11,7 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
 - **Long-term memory** — two-level: global `MEMORY.md` (cross-session, agent-curated) + per-session summaries (auto-generated); meta-consolidation compresses summaries via LLM when they grow large
-- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 360 tests
+- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 362 tests
 
 ## Installation
 
@@ -210,8 +210,9 @@ mtime polling — no restart needed after creating or editing a skill.
 Two-level persistence across sessions:
 
 - **Global memory** (`~/.squidbot/workspace/MEMORY.md`) — agent-curated notes visible in every
-  session under `## Your Memory`. Written by the agent via the `memory_write` tool. Persists
-  facts, preferences, and ongoing projects across all sessions.
+  session under `## Your Memory`. Written by the agent via the `memory_write` tool (available
+  in all channels: CLI, Matrix, Email, cron, heartbeat). Persists facts, preferences, and
+  ongoing projects across all sessions.
 - **Session summaries** (`~/.squidbot/memory/<session-id>/summary.md`) — auto-generated when
   conversation history exceeds `consolidation_threshold`. The agent cannot write these directly;
   the system appends a new summary chunk after each consolidation cycle. When summaries grow
