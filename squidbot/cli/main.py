@@ -457,6 +457,11 @@ async def _make_agent_loop(
 
         registry.register(WebSearchTool(config=settings.tools.web_search))
 
+    if settings.tools.search_history.enabled:
+        from squidbot.adapters.tools.search_history import SearchHistoryTool  # noqa: PLC0415
+
+        registry.register(SearchHistoryTool(base_dir=_storage_dir))
+
     # MCP servers
     mcp_connections: list[McpConnectionProtocol] = []
     if settings.tools.mcp_servers:

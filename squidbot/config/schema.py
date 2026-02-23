@@ -129,10 +129,17 @@ class SpawnSettings(BaseModel):
     profiles: dict[str, SpawnProfile] = Field(default_factory=dict)
 
 
+class SearchHistoryConfig(BaseModel):
+    """Configuration for the search_history tool."""
+
+    enabled: bool = True
+
+
 class ToolsConfig(BaseModel):
     shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
     files: ShellToolConfig = Field(default_factory=ShellToolConfig)  # reuse enabled flag
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    search_history: SearchHistoryConfig = Field(default_factory=SearchHistoryConfig)
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     spawn: SpawnSettings = Field(default_factory=SpawnSettings)
 
