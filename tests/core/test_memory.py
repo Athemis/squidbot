@@ -508,12 +508,13 @@ async def test_consolidation_cursor_not_advanced_if_save_fails():
 async def test_session_summary_capped_when_exceeding_word_limit():
     """Session summary is trimmed to the last 8 paragraphs when > 600 words.
 
-    Uses 10 labeled paragraphs of 70 words each (~700 words total) to reliably
-    trigger trimming. Verifies that the oldest paragraphs are dropped and the
-    newest (including the new consolidation output) are kept.
+    Uses 10 existing paragraphs of 72 words each (720 words total) to reliably
+    trigger trimming. After consolidation adds 1 new paragraph, there are 11
+    total; 11 - 8 = 3 oldest (Paragraphs 0, 1, 2) are dropped.
     """
-    # 10 paragraphs × 70 words each = 700 words — reliably > 600-word trigger
-    filler = "filler " * 69  # 69 copies + the paragraph label = 70 words
+    # 10 paragraphs × 72 words each = 720 words — reliably > 600-word trigger
+    # Each paragraph: 3 label words ("Paragraph N content.") + 69 × "filler" = 72 words
+    filler = "filler " * 69
     existing_summary = "\n\n".join(f"Paragraph {i} content. {filler}" for i in range(10))
     # Paragraph 0 is oldest, Paragraph 9 is newest
 
@@ -539,9 +540,10 @@ async def test_session_summary_capped_when_exceeding_word_limit():
     # Newest paragraph (the new consolidation output) must be present
     assert "Brand new consolidation output." in saved
 
-    # Oldest paragraphs (0, 1) must be gone — they were trimmed
+    # Oldest 3 paragraphs (0, 1, 2) must be gone — 11 in, 8 kept = 3 dropped
     assert "Paragraph 0 content." not in saved
     assert "Paragraph 1 content." not in saved
+    assert "Paragraph 2 content." not in saved
 
 
 async def test_session_summary_not_trimmed_when_under_word_limit():
