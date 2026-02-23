@@ -42,6 +42,7 @@ class InMemoryStorage:
     def __init__(self):
         self._histories: dict[str, list[Message]] = {}
         self._docs: dict[str, str] = {}
+        self._cursors: dict[str, int] = {}
 
     async def load_history(self, session_id):
         return list(self._histories.get(session_id, []))
@@ -54,6 +55,12 @@ class InMemoryStorage:
 
     async def save_memory_doc(self, session_id, content):
         self._docs[session_id] = content
+
+    async def load_consolidated_cursor(self, session_id: str) -> int:
+        return self._cursors.get(session_id, 0)
+
+    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
+        self._cursors[session_id] = cursor
 
     async def load_cron_jobs(self):
         return []

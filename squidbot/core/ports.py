@@ -139,6 +139,14 @@ class MemoryPort(Protocol):
         """Save the agent's memory document."""
         ...
 
+    async def load_consolidated_cursor(self, session_id: str) -> int:
+        """Return the last consolidated message index for this session (0 if none)."""
+        ...
+
+    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
+        """Persist the consolidation cursor after a successful consolidation."""
+        ...
+
     async def load_cron_jobs(self) -> list[CronJob]:
         """Load all scheduled jobs."""
         ...

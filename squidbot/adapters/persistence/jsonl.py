@@ -165,3 +165,11 @@ class JsonlMemory:
             for j in jobs
         ]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    async def load_consolidated_cursor(self, session_id: str) -> int:
+        """Not yet implemented — filesystem persistence added in Task 2."""
+        raise NotImplementedError
+
+    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
+        """Not yet implemented — filesystem persistence added in Task 2."""
+        raise NotImplementedError

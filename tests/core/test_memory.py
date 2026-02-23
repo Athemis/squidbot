@@ -17,6 +17,7 @@ class InMemoryStorage:
     def __init__(self):
         self._histories: dict[str, list[Message]] = {}
         self._docs: dict[str, str] = {}
+        self._cursors: dict[str, int] = {}
 
     async def load_history(self, session_id: str) -> list[Message]:
         return list(self._histories.get(session_id, []))
@@ -29,6 +30,12 @@ class InMemoryStorage:
 
     async def save_memory_doc(self, session_id: str, content: str) -> None:
         self._docs[session_id] = content
+
+    async def load_consolidated_cursor(self, session_id: str) -> int:
+        return self._cursors.get(session_id, 0)
+
+    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
+        self._cursors[session_id] = cursor
 
     async def load_cron_jobs(self):
         return []
@@ -233,3 +240,13 @@ async def test_keep_recent_clamped_to_minimum_one(storage):
     messages = await manager.build_messages("s1", "sys", "new")
     # 1 recent message kept + system + new user = 3 total
     assert len(messages) == 3
+
+
+async def test_cursor_default_is_zero(storage):
+    cursor = await storage.load_consolidated_cursor("s1")
+    assert cursor == 0
+
+
+async def test_cursor_roundtrip(storage):
+    await storage.save_consolidated_cursor("s1", 42)
+    assert await storage.load_consolidated_cursor("s1") == 42
