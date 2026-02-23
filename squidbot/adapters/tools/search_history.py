@@ -8,11 +8,12 @@ messages are excluded from both search and output.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from squidbot.adapters.persistence.jsonl import _deserialize_message
+from squidbot.adapters.persistence.jsonl import deserialize_message
 from squidbot.core.models import Message, ToolDefinition, ToolResult
 
 
@@ -96,19 +97,29 @@ class SearchHistoryTool:
         cutoff: datetime | None = datetime.now() - timedelta(days=days) if days > 0 else None
 
         # Load all messages from all session files
-        all_messages: list[tuple[str, Message]] = []
-        if self._sessions_dir.exists():
-            for jsonl_file in sorted(self._sessions_dir.glob("*.jsonl")):
+        sessions_dir = self._sessions_dir
+
+        def _load_all_messages() -> list[tuple[str, str]]:
+            """Return (session_id, line) pairs from all session files."""
+            pairs: list[tuple[str, str]] = []
+            if not sessions_dir.exists():
+                return pairs
+            for jsonl_file in sorted(sessions_dir.glob("*.jsonl")):
                 session_id = jsonl_file.stem.replace("__", ":")
                 for line in jsonl_file.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        msg = _deserialize_message(line)
-                        all_messages.append((session_id, msg))
-                    except Exception:
-                        continue
+                    if line:
+                        pairs.append((session_id, line))
+            return pairs
+
+        raw_pairs = await asyncio.to_thread(_load_all_messages)
+        all_messages: list[tuple[str, Message]] = []
+        for session_id, line in raw_pairs:
+            try:
+                msg = deserialize_message(line)
+                all_messages.append((session_id, msg))
+            except Exception:
+                continue
 
         # Apply date filter
         if cutoff is not None:
@@ -125,7 +136,7 @@ class SearchHistoryTool:
         if not matches:
             return ToolResult(
                 tool_call_id="",
-                content=f"No matches found for '{query_raw}'.",
+                content=f"No matches found for '{query_raw.strip()}'.",
                 is_error=False,
             )
 

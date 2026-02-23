@@ -119,13 +119,13 @@ async def test_context_includes_surrounding_messages(memory: JsonlMemory, tool: 
     await memory.append_message("cli:local", Message(role="user", content="Before context."))
     await memory.append_message("cli:local", Message(role="user", content="Target keyword here."))
     await memory.append_message(
-        "cli:local", Message(role="assistant", content="Response to target.")
+        "cli:local", Message(role="assistant", content="After context response.")
     )
-    await memory.append_message("cli:local", Message(role="user", content="After context."))
 
     result = await tool.execute(query="Target keyword")
     assert result.is_error is False
-    assert "Before context" in result.content or "After context" in result.content
+    assert "Before context" in result.content
+    assert "After context response" in result.content
 
 
 async def test_query_required(tool: SearchHistoryTool):

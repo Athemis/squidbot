@@ -42,7 +42,7 @@ def _serialize_message(message: Message) -> str:
     return json.dumps(d)
 
 
-def _deserialize_message(line: str) -> Message:
+def deserialize_message(line: str) -> Message:
     """Deserialize a JSON line to a Message."""
     d = json.loads(line)
     tool_calls = None
@@ -104,7 +104,7 @@ class JsonlMemory:
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line:
-                messages.append(_deserialize_message(line))
+                messages.append(deserialize_message(line))
         return messages
 
     async def append_message(self, session_id: str, message: Message) -> None:
