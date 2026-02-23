@@ -7,14 +7,16 @@ JSON file.
 
 Directory layout:
     <base_dir>/
+    ├── workspace/
+    │   └── MEMORY.md               # global cross-session memory
     ├── sessions/
     │   ├── <session-id>.jsonl      # conversation history
     │   └── <session-id>.meta.json  # consolidation cursor
     ├── memory/
     │   └── <session-id>/
-    │       └── memory.md         # agent-maintained notes
+    │       └── summary.md          # auto-generated consolidation summary
     └── cron/
-        └── jobs.json             # scheduled task list
+        └── jobs.json               # scheduled task list
 """
 
 from __future__ import annotations
@@ -85,6 +87,34 @@ def _meta_file(base_dir: Path, session_id: str, *, write: bool = False) -> Path:
     return path
 
 
+def _global_memory_file(base_dir: Path, *, write: bool = False) -> Path:
+    """Return the global MEMORY.md path.
+
+    Args:
+        base_dir: Root storage directory.
+        write: If True, creates parent directories.
+    """
+    path = base_dir / "workspace" / "MEMORY.md"
+    if write:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _session_summary_file(base_dir: Path, session_id: str, *, write: bool = False) -> Path:
+    """Return the session summary.md path.
+
+    Args:
+        base_dir: Root storage directory.
+        session_id: Session identifier (colons replaced with '__').
+        write: If True, creates parent directories.
+    """
+    safe_id = session_id.replace(":", "__")
+    path = base_dir / "memory" / safe_id / "summary.md"
+    if write:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _cron_file(base_dir: Path) -> Path:
     """Return the cron jobs JSON path."""
     path = base_dir / "cron" / "jobs.json"
@@ -122,20 +152,28 @@ class JsonlMemory:
             f.write(_serialize_message(message) + "\n")
 
     async def load_global_memory(self) -> str:
-        """Not yet implemented — added in Task B2."""
-        raise NotImplementedError
+        """Load the global cross-session memory document."""
+        path = _global_memory_file(self._base)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
 
     async def save_global_memory(self, content: str) -> None:
-        """Not yet implemented — added in Task B2."""
-        raise NotImplementedError
+        """Overwrite the global memory document."""
+        path = _global_memory_file(self._base, write=True)
+        path.write_text(content, encoding="utf-8")
 
     async def load_session_summary(self, session_id: str) -> str:
-        """Not yet implemented — added in Task B2."""
-        raise NotImplementedError
+        """Load the auto-generated consolidation summary for this session."""
+        path = _session_summary_file(self._base, session_id)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
 
     async def save_session_summary(self, session_id: str, content: str) -> None:
-        """Not yet implemented — added in Task B2."""
-        raise NotImplementedError
+        """Overwrite the session consolidation summary."""
+        path = _session_summary_file(self._base, session_id, write=True)
+        path.write_text(content, encoding="utf-8")
 
     async def load_cron_jobs(self) -> list[CronJob]:
         """Load all scheduled jobs from the JSON file."""

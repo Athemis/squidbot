@@ -40,30 +40,6 @@ async def test_multiple_messages_preserved_in_order(memory):
     assert [m.content for m in history] == ["first", "second", "third"]
 
 
-async def test_load_global_memory_not_implemented(memory):
-    """JsonlMemory.load_global_memory is a stub until Task B2."""
-    with pytest.raises(NotImplementedError):
-        await memory.load_global_memory()
-
-
-async def test_save_global_memory_not_implemented(memory):
-    """JsonlMemory.save_global_memory is a stub until Task B2."""
-    with pytest.raises(NotImplementedError):
-        await memory.save_global_memory("content")
-
-
-async def test_load_session_summary_not_implemented(memory):
-    """JsonlMemory.load_session_summary is a stub until Task B2."""
-    with pytest.raises(NotImplementedError):
-        await memory.load_session_summary("cli:local")
-
-
-async def test_save_session_summary_not_implemented(memory):
-    """JsonlMemory.save_session_summary is a stub until Task B2."""
-    with pytest.raises(NotImplementedError):
-        await memory.save_session_summary("cli:local", "summary")
-
-
 async def test_cron_jobs_empty_by_default(memory):
     jobs = await memory.load_cron_jobs()
     assert jobs == []
