@@ -117,12 +117,12 @@ class MemoryManager:
         session_summary = await self._storage.load_session_summary(session_id)
         history = await self._storage.load_history(session_id)
 
-        # Load cursor once; used for both trigger and warning checks below
+        # Load cursor once; used for trigger check, warning check, and consolidation
         cursor = await self._storage.load_consolidated_cursor(session_id)
 
         # Consolidate history if unconsolidated messages exceed threshold and LLM available
         if len(history) - cursor > self._consolidation_threshold and self._llm is not None:
-            history = await self._consolidate(session_id, history)
+            history = await self._consolidate(session_id, history, cursor)
             # Reload session_summary so the freshly written summary appears in the system prompt
             session_summary = await self._storage.load_session_summary(session_id)
 
@@ -243,7 +243,9 @@ class MemoryManager:
         result = await self._call_llm(messages, context="meta-consolidation")
         return result if result else summary
 
-    async def _consolidate(self, session_id: str, history: list[Message]) -> list[Message]:
+    async def _consolidate(
+        self, session_id: str, history: list[Message], cursor: int
+    ) -> list[Message]:
         """
         Summarize unconsolidated messages and append to memory.md, returning recent messages.
 
@@ -252,11 +254,11 @@ class MemoryManager:
         Args:
             session_id: Unique session identifier.
             history: Full message history.
+            cursor: The already-loaded consolidation cursor (last consolidated message index).
 
         Returns:
             Only the recent messages to keep in context.
         """
-        cursor = await self._storage.load_consolidated_cursor(session_id)
         recent = history[-self._keep_recent :]
         to_summarize = history[cursor : -self._keep_recent]
 
