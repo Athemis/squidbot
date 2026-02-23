@@ -394,7 +394,9 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
 async def _make_agent_loop(
     settings: Settings,
     storage_dir: Path | None = None,
-) -> tuple[AgentLoop, list[McpConnectionProtocol], JsonlMemory]:
+) -> tuple[
+    AgentLoop, list[McpConnectionProtocol], JsonlMemory
+]:  # TODO: type storage as MemoryPort in main.py once a second persistence implementation exists
     """
     Construct the agent loop from configuration.
 
@@ -736,7 +738,7 @@ async def _run_gateway(config_path: Path) -> None:
                     ChannelStatus(name="matrix", enabled=True, connected=True)
                 )
                 logger.info("matrix channel: starting")
-                tg.create_task(_channel_loop_with_state(matrix_ch, agent_loop, state))
+                tg.create_task(_channel_loop_with_state(matrix_ch, agent_loop, state, storage))
             else:
                 state.channel_status.append(
                     ChannelStatus(name="matrix", enabled=False, connected=False)
@@ -751,7 +753,7 @@ async def _run_gateway(config_path: Path) -> None:
                     ChannelStatus(name="email", enabled=True, connected=True)
                 )
                 logger.info("email channel: starting")
-                tg.create_task(_channel_loop_with_state(email_ch, agent_loop, state))
+                tg.create_task(_channel_loop_with_state(email_ch, agent_loop, state, storage))
             else:
                 state.channel_status.append(
                     ChannelStatus(name="email", enabled=False, connected=False)
