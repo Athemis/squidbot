@@ -38,11 +38,13 @@ class Message:
     role: Literal["system", "user", "assistant", "tool", "tool_call", "tool_result"]
     content: str
     tool_calls: list[ToolCall] | None = None
-    tool_call_id: str | None = None  # set when role == "tool"
+    tool_call_id: str | None = None  # set when role == "tool" (OpenAI API tool response)
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_openai_dict(self) -> dict[str, Any]:
         """Serialize to OpenAI API message format."""
+        if self.role in ("tool_call", "tool_result"):
+            raise ValueError(f"role={self.role!r} must not be sent to the LLM API")
         d: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.tool_calls:
             d["tool_calls"] = [
