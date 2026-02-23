@@ -71,7 +71,7 @@ agents:
   workspace: "~/.squidbot/workspace"   # bootstrap files live here
   restrict_to_workspace: true
   consolidation_threshold: 100         # summarize history into memory.md above this many messages
-  keep_recent: 20                      # keep this many recent messages verbatim in context
+  keep_recent_ratio: 0.2               # fraction of consolidation_threshold kept verbatim (e.g. 0.2 = 20 messages when threshold is 100)
 
   heartbeat:
     enabled: true
