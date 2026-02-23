@@ -221,15 +221,14 @@ class MemoryManager:
         sentences. On LLM failure, returns the original summary unchanged (graceful
         degradation — data loss avoided at the cost of a large summary).
 
-        Precondition: self._llm is not None (caller must verify).
-
         Args:
             summary: The current session summary text.
 
         Returns:
-            Compressed summary text, or original summary if within limit or on failure.
+            Compressed summary text, or original summary if within limit, no LLM
+            available, or on failure.
         """
-        if len(summary.split()) <= _META_SUMMARY_WORD_LIMIT:
+        if self._llm is None or len(summary.split()) <= _META_SUMMARY_WORD_LIMIT:
             return summary
         messages = [
             Message(role="system", content=_META_CONSOLIDATION_SYSTEM),
