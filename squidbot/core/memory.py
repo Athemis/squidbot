@@ -68,7 +68,7 @@ class MemoryManager:
         self._skills = skills
         self._llm = llm
         self._consolidation_threshold = consolidation_threshold
-        self._keep_recent = int(consolidation_threshold * keep_recent_ratio)
+        self._keep_recent = max(1, int(consolidation_threshold * keep_recent_ratio))
 
     async def build_messages(
         self,

@@ -81,13 +81,6 @@ class AgentConfig(BaseModel):
             raise ValueError("agents.consolidation_threshold must be > 0")
         if not (0 < self.keep_recent_ratio < 1):
             raise ValueError("agents.keep_recent_ratio must be between 0 and 1 (exclusive)")
-        keep_recent = int(self.consolidation_threshold * self.keep_recent_ratio)
-        if keep_recent < 1:
-            raise ValueError(
-                f"agents.consolidation_threshold ({self.consolidation_threshold}) * "
-                f"agents.keep_recent_ratio ({self.keep_recent_ratio}) must produce at least 1 "
-                f"message (got {keep_recent})"
-            )
         return self
 
 

@@ -218,3 +218,18 @@ async def test_consolidation_warning_does_not_fire_below_threshold(storage):
         await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
     messages = await manager.build_messages("s1", "sys", "new")
     assert "will soon be summarized" not in messages[0].content
+
+
+async def test_keep_recent_clamped_to_minimum_one(storage):
+    """When threshold * ratio < 1, keep_recent is clamped to 1 instead of 0."""
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=3,
+        keep_recent_ratio=0.2,  # int(3 * 0.2) = 0 → clamped to 1
+        llm=ScriptedLLM("Summary."),
+    )
+    for i in range(4):
+        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("s1", "sys", "new")
+    # 1 recent message kept + system + new user = 3 total
+    assert len(messages) == 3

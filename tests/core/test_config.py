@@ -264,6 +264,8 @@ def test_keep_recent_ratio_valid():
     assert cfg.keep_recent_ratio == 0.3
 
 
-def test_keep_recent_ratio_must_produce_at_least_one_message():
-    with pytest.raises(ValidationError):
-        AgentConfig(consolidation_threshold=3, keep_recent_ratio=0.2)  # int(0.6) = 0
+def test_keep_recent_ratio_low_threshold_is_valid():
+    """threshold * ratio < 1 is allowed — MemoryManager clamps to minimum 1."""
+    cfg = AgentConfig(consolidation_threshold=3, keep_recent_ratio=0.2)  # int(0.6) = 0 → clamped
+    assert cfg.consolidation_threshold == 3
+    assert cfg.keep_recent_ratio == 0.2
