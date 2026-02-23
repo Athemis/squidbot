@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import pytest
-
 from squidbot.core.models import (
     ChannelStatus,
     CronJob,
@@ -114,25 +112,3 @@ class TestChannelStatus:
         status = ChannelStatus(name="email", enabled=True, connected=False, error="timeout")
         assert status.error == "timeout"
         assert status.connected is False
-
-
-def test_message_tool_call_role():
-    msg = Message(role="tool_call", content="shell(command='ls')")
-    assert msg.role == "tool_call"
-
-
-def test_message_tool_result_role():
-    msg = Message(role="tool_result", content="file1\nfile2")
-    assert msg.role == "tool_result"
-
-
-def test_to_openai_dict_raises_for_tool_call_role():
-    msg = Message(role="tool_call", content="shell(cmd='ls')")
-    with pytest.raises(ValueError, match="must not be sent to the LLM API"):
-        msg.to_openai_dict()
-
-
-def test_to_openai_dict_raises_for_tool_result_role():
-    msg = Message(role="tool_result", content="file1")
-    with pytest.raises(ValueError, match="must not be sent to the LLM API"):
-        msg.to_openai_dict()

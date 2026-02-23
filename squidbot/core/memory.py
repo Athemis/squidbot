@@ -117,10 +117,6 @@ class MemoryManager:
         session_summary = await self._storage.load_session_summary(session_id)
         history = await self._storage.load_history(session_id)
 
-        # Filter tool events before cursor arithmetic — these roles are never sent to the LLM
-        # and must not inflate consolidation thresholds or appear in the LLM context.
-        history = [m for m in history if m.role not in ("tool_call", "tool_result")]
-
         # Load cursor once; used for trigger check, warning check, and consolidation
         cursor = await self._storage.load_consolidated_cursor(session_id)
 
@@ -171,6 +167,11 @@ class MemoryManager:
         Only the user message and the final assistant text reply are persisted.
         Intermediate tool-call and tool-result messages are not stored.
 
+        # TODO: persist tool-call/tool-result pairs so the agent regains full
+        # tool context after a restart. Requires storing complete assistant+tool
+        # message sequences (OpenAI format requires paired turns) and handling
+        # partial sequences from mid-round crashes gracefully.
+
         Args:
             session_id: Unique session identifier.
             user_message: The user's input text.
@@ -179,30 +180,6 @@ class MemoryManager:
         await self._storage.append_message(session_id, Message(role="user", content=user_message))
         await self._storage.append_message(
             session_id, Message(role="assistant", content=assistant_reply)
-        )
-
-    async def append_tool_event(
-        self,
-        session_id: str,
-        call_text: str,
-        result_text: str,
-    ) -> None:
-        """
-        Persist a tool call and its result as two searchable JSONL messages.
-
-        These messages use the custom roles "tool_call" and "tool_result" which
-        are never sent to the LLM API — build_messages filters them out before
-        passing history to the LLM.
-        They are searchable via search_history.
-
-        Args:
-            session_id: Unique session identifier.
-            call_text: Human-readable call string, e.g. "shell(cmd='ls -la')".
-            result_text: Tool output (pre-truncated by the caller).
-        """
-        await self._storage.append_message(session_id, Message(role="tool_call", content=call_text))
-        await self._storage.append_message(
-            session_id, Message(role="tool_result", content=result_text)
         )
 
     async def _call_llm(self, messages: list[Message], *, context: str = "llm") -> str | None:

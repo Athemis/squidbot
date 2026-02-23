@@ -26,10 +26,6 @@ from squidbot.core.registry import ToolRegistry
 # Prevents infinite loops in case of buggy tool chains.
 MAX_TOOL_ROUNDS = 20
 
-# Maximum characters stored for a tool result in JSONL history.
-# Prevents bloat from large file reads or shell output.
-_TOOL_RESULT_MAX_CHARS = 2000
-
 
 def _format_llm_error(exc: Exception) -> str:
     """Convert an LLM API exception into a user-readable error message."""
@@ -170,25 +166,12 @@ class AgentLoop:
                     result = await self._registry.execute(
                         tc.name, tool_call_id=tc.id, **tc.arguments
                     )
-                # TODO: consider truncating result.content here too to protect
-                # the LLM context window from very large tool outputs.
                 messages.append(
                     Message(
                         role="tool",
                         content=result.content,
                         tool_call_id=tc.id,
                     )
-                )
-                call_text = (
-                    f"{tc.name}(" + ", ".join(f"{k}={v!r}" for k, v in tc.arguments.items()) + ")"
-                )
-                result_text = result.content
-                if len(result_text) > _TOOL_RESULT_MAX_CHARS:
-                    result_text = result_text[:_TOOL_RESULT_MAX_CHARS] + "\n[truncated]"
-                await self._memory.append_tool_event(
-                    session_id=session.id,
-                    call_text=call_text,
-                    result_text=result_text,
                 )
 
             tool_round += 1
