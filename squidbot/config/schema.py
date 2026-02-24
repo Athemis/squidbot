@@ -197,7 +197,7 @@ class OwnerAliasEntry(BaseModel):
     channel: str | None = None
 
     @classmethod
-    def from_value(cls, value: str | dict[str, str]) -> OwnerAliasEntry:
+    def from_value(cls, value: str | dict[str, Any]) -> OwnerAliasEntry:
         """Accept either a plain string or a {address, channel} dict."""
         if isinstance(value, str):
             return cls(address=value)
@@ -214,7 +214,7 @@ class OwnerConfig(BaseModel):
     def _coerce_aliases(cls, data: Any) -> Any:
         """Allow aliases to be plain strings or dicts."""
         if isinstance(data, dict) and "aliases" in data:
-            data["aliases"] = [OwnerAliasEntry.from_value(v) for v in data["aliases"]]
+            data = {**data, "aliases": [OwnerAliasEntry.from_value(v) for v in data["aliases"]]}
         return data
 
 
