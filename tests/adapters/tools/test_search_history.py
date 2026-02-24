@@ -182,3 +182,5 @@ async def test_search_respects_days_filter(tmp_path: Path) -> None:
     assert not result.is_error
     # Only the recent message should match (within last 5 days)
     assert "old topic recent" in result.content
+    # The old message (10 days ago) must NOT appear
+    assert result.content.count("old topic") == result.content.count("old topic recent")
