@@ -39,44 +39,42 @@ class ScriptedLLM:
 
 
 class InMemoryStorage:
-    def __init__(self):
-        self._histories: dict[str, list[Message]] = {}
+    def __init__(self) -> None:
+        self._history: list[Message] = []
         self._global_memory: str = ""
-        self._summaries: dict[str, str] = {}
-        self._cursors: dict[str, int] = {}
+        self._summary: str = ""
+        self._cursor: int = 0
 
-    async def load_history(self, session_id):
-        return list(self._histories.get(session_id, []))
+    async def load_history(self, last_n: int | None = None) -> list[Message]:
+        if last_n is None:
+            return list(self._history)
+        return list(self._history[-last_n:])
 
-    async def append_message(self, session_id, message):
-        self._histories.setdefault(session_id, []).append(message)
+    async def append_message(self, message: Message) -> None:
+        self._history.append(message)
 
     async def load_global_memory(self) -> str:
-        """Load the global cross-session memory document."""
         return self._global_memory
 
     async def save_global_memory(self, content: str) -> None:
-        """Overwrite the global memory document."""
         self._global_memory = content
 
-    async def load_session_summary(self, session_id: str) -> str:
-        """Load the auto-generated consolidation summary for this session."""
-        return self._summaries.get(session_id, "")
+    async def load_global_summary(self) -> str:
+        return self._summary
 
-    async def save_session_summary(self, session_id: str, content: str) -> None:
-        """Overwrite the session consolidation summary."""
-        self._summaries[session_id] = content
+    async def save_global_summary(self, content: str) -> None:
+        self._summary = content
 
-    async def load_consolidated_cursor(self, session_id: str) -> int:
-        return self._cursors.get(session_id, 0)
+    async def load_global_cursor(self) -> int:
+        return self._cursor
 
-    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
-        self._cursors[session_id] = cursor
+    async def save_global_cursor(self, cursor: int) -> None:
+        self._cursor = cursor
 
-    async def load_cron_jobs(self):
+    async def load_cron_jobs(self) -> list:
         return []
 
-    async def save_cron_jobs(self, jobs):
+    async def save_cron_jobs(self, jobs: list) -> None:
         pass
 
 
@@ -169,7 +167,7 @@ async def test_history_persisted_after_run(storage, memory):
         llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="You are a bot."
     )
     await loop.run(SESSION, "Remember me!", channel)
-    history = await storage.load_history(SESSION.id)
+    history = await storage.load_history()
     assert len(history) == 2  # user + assistant
     assert history[0].role == "user"
     assert history[1].role == "assistant"

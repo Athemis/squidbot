@@ -1,9 +1,9 @@
 """
 Core memory manager for squidbot.
 
-Coordinates short-term (in-session history), global long-term (MEMORY.md),
-and per-session consolidation summaries. The manager is pure domain logic —
-it takes a MemoryPort as dependency and contains no I/O or external service calls.
+Coordinates global cross-channel history, long-term memory (MEMORY.md), and
+global consolidation summaries. The manager is pure domain logic — it takes a
+MemoryPort as dependency and contains no I/O or external service calls.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from squidbot.core.models import Message
 from squidbot.core.ports import MemoryPort, SkillsPort
 
 if TYPE_CHECKING:
+    from squidbot.config.schema import OwnerAliasEntry
     from squidbot.core.ports import LLMPort
 
 # Injected into the system prompt one turn before consolidation fires.
@@ -58,15 +59,16 @@ _META_SUMMARY_SENTENCES = 8
 
 class MemoryManager:
     """
-    Manages message history and memory documents for agent sessions.
+    Manages global message history and memory documents for the agent.
 
     Responsibilities:
-    - Build the full message list for each LLM call (system + history + user)
-    - Inject memory.md content into the system prompt
+    - Build the full message list for each LLM call (system + labelled history + user)
+    - Inject global memory.md content into the system prompt
     - Inject skills XML block and always-skill bodies into the system prompt
+    - Label history messages with channel/sender context, identifying the owner
     - Warn the agent one turn before consolidation via _CONSOLIDATION_WARNING
-    - Consolidate old messages into memory.md when history exceeds the threshold
-    - Persist new exchanges after each agent turn
+    - Consolidate old messages into the global summary when history exceeds the threshold
+    - Persist new exchanges after each agent turn with channel and sender_id metadata
     """
 
     def __init__(
@@ -74,6 +76,7 @@ class MemoryManager:
         storage: MemoryPort,
         skills: SkillsPort | None = None,
         llm: LLMPort | None = None,
+        owner_aliases: list[OwnerAliasEntry] | None = None,
         consolidation_threshold: int = 100,
         keep_recent_ratio: float = 0.2,
     ) -> None:
@@ -84,6 +87,9 @@ class MemoryManager:
                     and always-skill bodies into every system prompt.
             llm: Optional LLM adapter for history consolidation. If None,
                  consolidation is disabled.
+            owner_aliases: List of owner alias entries used to identify the owner
+                           in labelled history. Unscoped aliases match any channel;
+                           scoped aliases only match their specified channel.
             consolidation_threshold: Number of messages that triggers consolidation.
             keep_recent_ratio: Fraction of consolidation_threshold to keep verbatim
                                after consolidation (e.g. 0.2 = 20%).
@@ -91,47 +97,114 @@ class MemoryManager:
         self._storage = storage
         self._skills = skills
         self._llm = llm
+        self._owner_aliases: list[OwnerAliasEntry] = owner_aliases or []
         self._consolidation_threshold = consolidation_threshold
         self._keep_recent = max(1, int(consolidation_threshold * keep_recent_ratio))
 
+    def _is_owner(self, sender_id: str, channel: str) -> bool:
+        """
+        Return True if sender_id matches an owner alias for the given channel.
+
+        First checks channel-scoped aliases (entry.channel == channel and
+        entry.address == sender_id), then unscoped aliases (entry.channel is None
+        and entry.address == sender_id). Case-sensitive.
+
+        Args:
+            sender_id: The sender identifier to check.
+            channel: The channel the message was sent in.
+
+        Returns:
+            True if any alias matches, False otherwise.
+        """
+        # Channel-scoped check first
+        for entry in self._owner_aliases:
+            if entry.channel == channel and entry.address == sender_id:
+                return True
+        # Unscoped check
+        for entry in self._owner_aliases:
+            if entry.channel is None and entry.address == sender_id:
+                return True
+        return False
+
+    def _label_message(self, msg: Message) -> Message:
+        """
+        Return a copy of msg with a channel/sender label prepended to content.
+
+        Skips labelling if msg.channel is None (legacy messages without channel info).
+        The label format is: "[{channel} / {label}]\\n{content}" where label is
+        "owner" if the sender is identified as the owner, else the sender_id
+        (or "unknown" if sender_id is None).
+
+        Args:
+            msg: The message to label.
+
+        Returns:
+            A new Message with the label prefix, or the original if no channel.
+        """
+        if msg.channel is None:
+            return msg
+        if msg.sender_id == "assistant":
+            label = "assistant"
+        elif self._is_owner(msg.sender_id or "", msg.channel):
+            label = "owner"
+        else:
+            label = msg.sender_id or "unknown"
+        new_content = f"[{msg.channel} / {label}]\n{msg.content}"
+        return Message(
+            role=msg.role,
+            content=new_content,
+            tool_calls=msg.tool_calls,
+            tool_call_id=msg.tool_call_id,
+            timestamp=msg.timestamp,
+            channel=msg.channel,
+            sender_id=msg.sender_id,
+        )
+
     async def build_messages(
         self,
-        session_id: str,
-        system_prompt: str,
+        channel: str,
+        sender_id: str,
         user_message: str,
+        system_prompt: str,
     ) -> list[Message]:
         """
         Construct the full message list for an LLM call.
 
-        Layout: [system_prompt + memory.md + skills + optional warning] + [history] + [user_message]
+        Layout: [system_prompt + memory + summary + skills + optional warning]
+                + [labelled_history] + [user_message]
 
         Args:
-            session_id: Unique session identifier.
-            system_prompt: The base system prompt (AGENTS.md content).
+            channel: The channel this message came in on.
+            sender_id: The sender identifier for this message.
             user_message: The current user input.
+            system_prompt: The base system prompt (AGENTS.md content).
 
         Returns:
             Ordered list of messages ready to send to the LLM.
         """
+        load_n = self._consolidation_threshold + self._keep_recent
+        history = await self._storage.load_history(last_n=load_n)
         global_memory = await self._storage.load_global_memory()
-        session_summary = await self._storage.load_session_summary(session_id)
-        history = await self._storage.load_history(session_id)
+        global_summary = await self._storage.load_global_summary()
 
         # Load cursor once; used for trigger check, warning check, and consolidation
-        cursor = await self._storage.load_consolidated_cursor(session_id)
+        cursor = await self._storage.load_global_cursor()
 
         # Consolidate history if unconsolidated messages exceed threshold and LLM available
         if len(history) - cursor > self._consolidation_threshold and self._llm is not None:
-            history = await self._consolidate(session_id, history, cursor)
-            # Reload session_summary so the freshly written summary appears in the system prompt
-            session_summary = await self._storage.load_session_summary(session_id)
+            history = await self._consolidate(history, cursor)
+            # Reload summary so the freshly written summary appears in the system prompt
+            global_summary = await self._storage.load_global_summary()
 
-        # Build system prompt with global memory and session summary appended
+        # Label each history message with channel/sender context
+        labelled_history = [self._label_message(msg) for msg in history]
+
+        # Build system prompt with global memory and conversation summary appended
         full_system = system_prompt
         if global_memory.strip():
             full_system += f"\n\n## Your Memory\n\n{global_memory}"
-        if session_summary.strip():
-            full_system += f"\n\n## Session Summary\n\n{session_summary}"
+        if global_summary.strip():
+            full_system += f"\n\n## Conversation Summary\n\n{global_summary}"
 
         # Inject skills: XML index + full bodies of always-skills
         if self._skills is not None:
@@ -150,19 +223,20 @@ class MemoryManager:
 
         messages: list[Message] = [
             Message(role="system", content=full_system),
-            *history,
+            *labelled_history,
             Message(role="user", content=user_message),
         ]
         return messages
 
     async def persist_exchange(
         self,
-        session_id: str,
+        channel: str,
+        sender_id: str,
         user_message: str,
         assistant_reply: str,
     ) -> None:
         """
-        Save a completed user–assistant exchange to history.
+        Save a completed user–assistant exchange to global history.
 
         Only the user message and the final assistant text reply are persisted.
         Intermediate tool-call and tool-result messages are not stored.
@@ -173,13 +247,18 @@ class MemoryManager:
         # partial sequences from mid-round crashes gracefully.
 
         Args:
-            session_id: Unique session identifier.
+            channel: The channel this exchange occurred on.
+            sender_id: The sender identifier for the user message.
             user_message: The user's input text.
             assistant_reply: The final text response from the assistant.
         """
-        await self._storage.append_message(session_id, Message(role="user", content=user_message))
         await self._storage.append_message(
-            session_id, Message(role="assistant", content=assistant_reply)
+            Message(role="user", content=user_message, channel=channel, sender_id=sender_id)
+        )
+        await self._storage.append_message(
+            Message(
+                role="assistant", content=assistant_reply, channel=channel, sender_id="assistant"
+            )
         )
 
     async def _call_llm(self, messages: list[Message], *, context: str = "llm") -> str | None:
@@ -218,7 +297,7 @@ class MemoryManager:
 
     async def _maybe_meta_consolidate(self, summary: str) -> str:
         """
-        Compress the session summary via LLM if it exceeds the word limit.
+        Compress the global summary via LLM if it exceeds the word limit.
 
         If the summary is within _META_SUMMARY_WORD_LIMIT words, returns it unchanged
         (fast path, no LLM call). Otherwise calls the LLM with a meta-consolidation
@@ -227,7 +306,7 @@ class MemoryManager:
         degradation — data loss avoided at the cost of a large summary).
 
         Args:
-            summary: The current session summary text.
+            summary: The current global summary text.
 
         Returns:
             Compressed summary text, or original summary if within limit, no LLM
@@ -248,17 +327,14 @@ class MemoryManager:
         result = await self._call_llm(messages, context="meta-consolidation")
         return result if result else summary
 
-    async def _consolidate(
-        self, session_id: str, history: list[Message], cursor: int
-    ) -> list[Message]:
+    async def _consolidate(self, history: list[Message], cursor: int) -> list[Message]:
         """
-        Summarize unconsolidated messages and append to memory.md, returning recent messages.
+        Summarize unconsolidated messages and save to global summary, returning recent messages.
 
-        Only summarizes messages[cursor:-keep_recent]. Advances cursor after success.
+        Only summarizes messages[cursor:-keep_recent]. Advances global cursor after success.
 
         Args:
-            session_id: Unique session identifier.
-            history: Full message history.
+            history: Full message history (already loaded with load_n limit).
             cursor: The already-loaded consolidation cursor (last consolidated message index).
 
         Returns:
@@ -290,14 +366,14 @@ class MemoryManager:
         if not summary:
             return recent
 
-        # Append to existing session summary
-        existing = await self._storage.load_session_summary(session_id)
+        # Append to existing global summary
+        existing = await self._storage.load_global_summary()
         updated = f"{existing}\n\n{summary}" if existing.strip() else summary
         updated = await self._maybe_meta_consolidate(updated)
         try:
-            await self._storage.save_session_summary(session_id, updated)
+            await self._storage.save_global_summary(updated)
             new_cursor = len(history) - self._keep_recent
-            await self._storage.save_consolidated_cursor(session_id, new_cursor)
+            await self._storage.save_global_cursor(new_cursor)
         except Exception as e:
             from loguru import logger  # noqa: PLC0415
 

@@ -105,9 +105,10 @@ class AgentLoop:
         _extra: dict[str, ToolPort] = {t.name: t for t in (extra_tools or [])}
 
         messages = await self._memory.build_messages(
-            session_id=session.id,
-            system_prompt=self._system_prompt,
+            channel=session.channel,
+            sender_id=session.sender_id,
             user_message=user_message,
+            system_prompt=self._system_prompt,
         )
         tool_definitions = self._registry.get_definitions() + [
             ToolDefinition(name=t.name, description=t.description, parameters=t.parameters)
@@ -184,7 +185,8 @@ class AgentLoop:
 
         # Persist the exchange
         await self._memory.persist_exchange(
-            session_id=session.id,
+            channel=session.channel,
+            sender_id=session.sender_id,
             user_message=user_message,
             assistant_reply=final_text,
         )

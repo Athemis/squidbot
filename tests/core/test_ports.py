@@ -65,10 +65,10 @@ class MockTool:
 class MockMemory:
     """Minimal mock memory that satisfies MemoryPort."""
 
-    async def load_history(self, session_id: str) -> list[Message]:
+    async def load_history(self, last_n: int | None = None) -> list[Message]:
         return []
 
-    async def append_message(self, session_id: str, message: Message) -> None:
+    async def append_message(self, message: Message) -> None:
         pass
 
     async def load_global_memory(self) -> str:
@@ -77,22 +77,22 @@ class MockMemory:
     async def save_global_memory(self, content: str) -> None:
         pass
 
-    async def load_session_summary(self, session_id: str) -> str:
+    async def load_global_summary(self) -> str:
         return ""
 
-    async def save_session_summary(self, session_id: str, content: str) -> None:
+    async def save_global_summary(self, content: str) -> None:
         pass
 
-    async def load_consolidated_cursor(self, session_id: str) -> int:
+    async def load_global_cursor(self) -> int:
         return 0
 
-    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
+    async def save_global_cursor(self, cursor: int) -> None:
         pass
 
-    async def load_cron_jobs(self):
+    async def load_cron_jobs(self) -> list:
         return []
 
-    async def save_cron_jobs(self, jobs) -> None:
+    async def save_cron_jobs(self, jobs: list) -> None:
         pass
 
 
