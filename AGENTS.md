@@ -87,6 +87,12 @@ Use these Context7 IDs whenever you ask for documentation or snippets involving 
 
 **Branch workflow:** All features, fixes, refactors, and non-trivial changes must be developed on a dedicated branch and merged via PR. Direct commits to `main` are only acceptable for trivial documentation changes (e.g. `README.md`, `docs/plans/`).
 
+**Feature workflow:** Before implementing any new feature, create:
+1. A design document at `docs/plans/YYYY-MM-DD-<topic>-design.md` — architecture, components, data flow, error handling, testing approach.
+2. An implementation plan at `docs/plans/YYYY-MM-DD-<topic>-implementation-plan.md` — ordered list of concrete steps derived from the design.
+
+Both documents must be committed before implementation begins. Bug fixes do not require design documents unless the fix involves significant structural changes.
+
 ---
 
 ## Architecture — Hexagonal (Ports & Adapters)
