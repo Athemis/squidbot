@@ -10,7 +10,7 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Tools** — shell commands, file read/write/edit, web search, memory write, MCP servers, sub-agents (spawn)
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
-- **Long-term memory** — two-level: global `MEMORY.md` (cross-session, agent-curated) + per-session summaries (auto-generated); meta-consolidation compresses summaries via LLM when they grow large
+- **Long-term memory** — two-level: global `MEMORY.md` (agent-curated, cross-channel) + global conversation summary (auto-generated from `history.jsonl`); meta-consolidation compresses summaries via LLM when they grow large
 - **Hexagonal architecture** — ports & adapters, `mypy --strict`, 362 tests
 
 ## Installation
@@ -207,35 +207,34 @@ mtime polling — no restart needed after creating or editing a skill.
 
 **Memory system:**
 
-Two-level persistence across sessions:
+Two-level persistence, global across all channels:
 
 - **Global memory** (`~/.squidbot/workspace/MEMORY.md`) — agent-curated notes visible in every
   session under `## Your Memory`. Written by the agent via the `memory_write` tool (available
   in all channels: CLI, Matrix, Email, cron, heartbeat). Persists facts, preferences, and
-  ongoing projects across all sessions.
-- **Session summaries** (`~/.squidbot/memory/<session-id>/summary.md`) — auto-generated when
-  conversation history exceeds `consolidation_threshold`. The agent cannot write these directly;
-  the system appends a new summary chunk after each consolidation cycle. When summaries grow
-  beyond ~600 words, meta-consolidation recompresses the full summary via LLM rather than
-  discarding old entries.
-- **Consolidation cursor** (`.meta.json` per session) — tracks the last consolidated message
-  index so restarts don't re-summarise already-processed history.
+  ongoing projects across all channels.
+- **Global summary** (`~/.squidbot/memory/summary.md`) — auto-generated when conversation
+  history exceeds `consolidation_threshold`. Covers all channels; messages are labelled with
+  `[channel / sender]` for attribution. The agent cannot write these directly; the system
+  appends a new summary chunk after each consolidation cycle. When summaries grow beyond ~600
+  words, meta-consolidation recompresses the full summary via LLM rather than discarding old
+  entries.
+- **Consolidation cursor** (`~/.squidbot/history.meta.json`) — tracks the last consolidated
+  message index so restarts don't re-summarise already-processed history.
 
 **Persistence layout:**
 
 ```
 ~/.squidbot/
 ├── squidbot.yaml
-├── sessions/
-│   ├── <session-id>.jsonl       # Conversation history (one message per line)
-│   └── <session-id>.meta.json   # Consolidation cursor
+├── history.jsonl              # Global conversation history — all channels, append-only
+├── history.meta.json          # Global consolidation cursor
 ├── memory/
-│   └── <session-id>/
-│       └── summary.md           # Auto-generated session summary
-└── cron/jobs.json               # Scheduled task definitions
+│   └── summary.md             # Auto-generated global summary (all channels)
+└── cron/jobs.json             # Scheduled task definitions
 
 ~/.squidbot/workspace/
-├── MEMORY.md           # Global cross-session memory (agent-curated via memory_write)
+├── MEMORY.md           # Global cross-channel memory (agent-curated via memory_write)
 ├── BOOTSTRAP.md        # First-run ritual: identity interview (self-deletes when done)
 ├── SOUL.md             # Bot values, character, operating principles — loaded first each session
 ├── IDENTITY.md         # Bot name, creature, vibe, emoji
