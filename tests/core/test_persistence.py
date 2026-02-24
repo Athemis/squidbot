@@ -15,14 +15,14 @@ def memory(tmp_dir):
 
 
 async def test_load_empty_history(memory):
-    history = await memory.load_history("cli:local")
+    history = await memory.load_history()
     assert history == []
 
 
 async def test_append_and_load_message(memory):
     msg = Message(role="user", content="hello")
-    await memory.append_message("cli:local", msg)
-    history = await memory.load_history("cli:local")
+    await memory.append_message(msg)
+    history = await memory.load_history()
     assert len(history) == 1
     assert history[0].content == "hello"
     assert history[0].role == "user"
@@ -35,8 +35,8 @@ async def test_multiple_messages_preserved_in_order(memory):
         Message(role="user", content="third"),
     ]
     for m in msgs:
-        await memory.append_message("cli:local", m)
-    history = await memory.load_history("cli:local")
+        await memory.append_message(m)
+    history = await memory.load_history()
     assert [m.content for m in history] == ["first", "second", "third"]
 
 
@@ -57,12 +57,17 @@ async def test_cron_jobs_save_and_load(memory):
     assert loaded[0].channel == "cli:local"
 
 
-async def test_sessions_are_isolated(memory):
-    await memory.append_message("cli:local", Message(role="user", content="session A"))
-    await memory.append_message("matrix:user", Message(role="user", content="session B"))
-    cli_history = await memory.load_history("cli:local")
-    matrix_history = await memory.load_history("matrix:user")
-    assert len(cli_history) == 1
-    assert cli_history[0].content == "session A"
-    assert len(matrix_history) == 1
-    assert matrix_history[0].content == "session B"
+async def test_messages_from_all_channels_in_global_history(memory):
+    await memory.append_message(Message(role="user", content="from cli", channel="cli:local"))
+    await memory.append_message(Message(role="user", content="from matrix", channel="matrix:user"))
+    history = await memory.load_history()
+    assert len(history) == 2
+    assert history[0].content == "from cli"
+    assert history[1].content == "from matrix"
+
+
+async def test_load_history_last_n(memory):
+    for i in range(5):
+        await memory.append_message(Message(role="user", content=str(i)))
+    history = await memory.load_history(last_n=3)
+    assert [m.content for m in history] == ["2", "3", "4"]
