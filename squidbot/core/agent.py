@@ -79,6 +79,80 @@ class AgentLoop:
         self._registry = registry
         self._system_prompt = system_prompt
 
+    def _build_tool_definitions(
+        self, extra_tools: Sequence[ToolPort] | None
+    ) -> tuple[list[ToolDefinition], dict[str, ToolPort]]:
+        extra_tool_map = {tool.name: tool for tool in (extra_tools or [])}
+        tool_definitions = self._registry.get_definitions() + [
+            ToolDefinition(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.parameters,
+            )
+            for tool in extra_tool_map.values()
+        ]
+        return tool_definitions, extra_tool_map
+
+    async def _run_llm_stream(
+        self,
+        llm: LLMPort,
+        messages: list[Message],
+        tool_definitions: list[ToolDefinition],
+        channel: ChannelPort,
+        session: Session,
+    ) -> tuple[str, list[ToolCall]]:
+        tool_calls: list[ToolCall] = []
+        text_chunks: list[str] = []
+
+        response_stream = await llm.chat(messages, tool_definitions)
+        async for chunk in response_stream:
+            if isinstance(chunk, str):
+                text_chunks.append(chunk)
+                if channel.streaming:
+                    await channel.send(OutboundMessage(session=session, text=chunk))
+                continue
+
+            if isinstance(chunk, list):
+                tool_calls = chunk
+
+        return "".join(text_chunks), tool_calls
+
+    async def _append_tool_results(
+        self,
+        messages: list[Message],
+        tool_calls: list[ToolCall],
+        extra_tools: dict[str, ToolPort],
+    ) -> None:
+        for tool_call in tool_calls:
+            extra_tool = extra_tools.get(tool_call.name)
+            if extra_tool is not None:
+                extra_result = await extra_tool.execute(**tool_call.arguments)
+                result = ToolResult(
+                    tool_call_id=tool_call.id,
+                    content=extra_result.content,
+                    is_error=extra_result.is_error,
+                )
+            else:
+                result = await self._registry.execute(
+                    tool_call.name,
+                    tool_call_id=tool_call.id,
+                    **tool_call.arguments,
+                )
+
+            messages.append(
+                Message(
+                    role="tool",
+                    content=result.content,
+                    tool_call_id=tool_call.id,
+                )
+            )
+
+    async def _deliver_final_text(
+        self, channel: ChannelPort, session: Session, final_text: str
+    ) -> None:
+        if not channel.streaming and final_text:
+            await channel.send(OutboundMessage(session=session, text=final_text))
+
     async def run(
         self,
         session: Session,
@@ -101,41 +175,31 @@ class AgentLoop:
                          These are merged with the registry for this call and do not
                          mutate self._registry.
         """
-        _llm = llm if llm is not None else self._llm
-        _extra: dict[str, ToolPort] = {t.name: t for t in (extra_tools or [])}
+        selected_llm = llm if llm is not None else self._llm
 
         messages = await self._memory.build_messages(
             user_message=user_message,
             system_prompt=self._system_prompt,
         )
-        tool_definitions = self._registry.get_definitions() + [
-            ToolDefinition(name=t.name, description=t.description, parameters=t.parameters)
-            for t in _extra.values()
-        ]
+        tool_definitions, extra_tool_map = self._build_tool_definitions(extra_tools)
 
         final_text = ""
         tool_round = 0
 
         while tool_round < MAX_TOOL_ROUNDS:
-            tool_calls: list[ToolCall] = []
-            text_chunks: list[str] = []
-
             try:
-                response_stream = await _llm.chat(messages, tool_definitions)
-                async for chunk in response_stream:
-                    if isinstance(chunk, str):
-                        text_chunks.append(chunk)
-                        if channel.streaming:
-                            # Forward each chunk immediately for typewriter effect
-                            await channel.send(OutboundMessage(session=session, text=chunk))
-                    elif isinstance(chunk, list):
-                        tool_calls = chunk
+                text_response, tool_calls = await self._run_llm_stream(
+                    llm=selected_llm,
+                    messages=messages,
+                    tool_definitions=tool_definitions,
+                    channel=channel,
+                    session=session,
+                )
             except Exception as e:
                 error_msg = _format_llm_error(e)
                 await channel.send(OutboundMessage(session=session, text=error_msg))
                 return
 
-            text_response = "".join(text_chunks)
             if text_response:
                 final_text = text_response
 
@@ -143,7 +207,6 @@ class AgentLoop:
                 # No tool calls — the agent is done
                 break
 
-            # Execute tool calls and append results to message history
             messages.append(
                 Message(
                     role="assistant",
@@ -152,34 +215,13 @@ class AgentLoop:
                 )
             )
 
-            for tc in tool_calls:
-                extra_tool = _extra.get(tc.name)
-                if extra_tool is not None:
-                    result = await extra_tool.execute(**tc.arguments)
-                    result = ToolResult(
-                        tool_call_id=tc.id,
-                        content=result.content,
-                        is_error=result.is_error,
-                    )
-                else:
-                    result = await self._registry.execute(
-                        tc.name, tool_call_id=tc.id, **tc.arguments
-                    )
-                messages.append(
-                    Message(
-                        role="tool",
-                        content=result.content,
-                        tool_call_id=tc.id,
-                    )
-                )
+            await self._append_tool_results(messages, tool_calls, extra_tool_map)
 
             tool_round += 1
         else:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 
-        # For non-streaming channels, send the full accumulated reply at the end
-        if not channel.streaming and final_text:
-            await channel.send(OutboundMessage(session=session, text=final_text))
+        await self._deliver_final_text(channel, session, final_text)
 
         # Persist the exchange
         await self._memory.persist_exchange(

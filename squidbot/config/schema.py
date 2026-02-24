@@ -74,10 +74,14 @@ class AgentConfig(BaseModel):
 
 
 class ShellToolConfig(BaseModel):
+    """Configuration for shell-like tools (enabled/disabled)."""
+
     enabled: bool = True
 
 
 class WebSearchConfig(BaseModel):
+    """Configuration for the web_search tool adapter."""
+
     enabled: bool = False
     provider: str = "searxng"  # "searxng", "brave", "duckduckgo"
     url: str = ""
@@ -121,6 +125,8 @@ class SearchHistoryConfig(BaseModel):
 
 
 class ToolsConfig(BaseModel):
+    """Root configuration for built-in tools and optional tool adapters."""
+
     shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
     files: ShellToolConfig = Field(default_factory=ShellToolConfig)  # reuse enabled flag
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
@@ -162,6 +168,8 @@ class EmailChannelConfig(BaseModel):
 
 
 class ChannelsConfig(BaseModel):
+    """Root configuration for all channel adapters."""
+
     matrix: MatrixChannelConfig = Field(default_factory=MatrixChannelConfig)
     email: EmailChannelConfig = Field(default_factory=EmailChannelConfig)
 
