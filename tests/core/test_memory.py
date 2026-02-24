@@ -588,6 +588,36 @@ async def test_no_consolidation_above_threshold_if_cursor_covers_it(
     assert call_count == 0
 
 
+async def test_consolidation_triggers_multiple_times_over_long_run(
+    storage: InMemoryStorage,
+) -> None:
+    """Consolidation should continue to trigger as new turns accumulate."""
+    call_count = 0
+
+    class CountingLLM:
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
+            nonlocal call_count
+            call_count += 1
+
+            async def _gen():
+                yield f"summary-{call_count}"
+
+            return _gen()
+
+    manager = MemoryManager(
+        storage=storage,
+        consolidation_threshold=4,
+        keep_recent_ratio=0.25,
+        llm=CountingLLM(),
+    )
+
+    for i in range(15):
+        await manager.build_messages("cli", "local", f"user {i}", "sys")
+        await manager.persist_exchange("cli", "local", f"user {i}", f"assistant {i}")
+
+    assert call_count >= 2
+
+
 async def test_global_memory_default_empty(storage: InMemoryStorage) -> None:
     doc = await storage.load_global_memory()
     assert doc == ""
