@@ -5,8 +5,11 @@ Uses in-memory storage to test consolidation logic and memory.md injection
 without touching the filesystem.
 """
 
+from __future__ import annotations
+
 import pytest
 
+from squidbot.config.schema import OwnerAliasEntry
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import Message
 
@@ -14,63 +17,63 @@ from squidbot.core.models import Message
 class InMemoryStorage:
     """Test double for MemoryPort — stores everything in RAM."""
 
-    def __init__(self):
-        self._histories: dict[str, list[Message]] = {}
+    def __init__(self) -> None:
+        self._history: list[Message] = []
         self._global_memory: str = ""
-        self._summaries: dict[str, str] = {}
-        self._cursors: dict[str, int] = {}
+        self._summary: str = ""
+        self._cursor: int = 0
+        self._cron: list = []
 
-    async def load_history(self, session_id: str) -> list[Message]:
-        return list(self._histories.get(session_id, []))
+    async def load_history(self, last_n: int | None = None) -> list[Message]:
+        if last_n is None:
+            return list(self._history)
+        return list(self._history[-last_n:])
 
-    async def append_message(self, session_id: str, message: Message) -> None:
-        self._histories.setdefault(session_id, []).append(message)
+    async def append_message(self, message: Message) -> None:
+        self._history.append(message)
 
     async def load_global_memory(self) -> str:
-        """Load the global cross-session memory document."""
         return self._global_memory
 
     async def save_global_memory(self, content: str) -> None:
-        """Overwrite the global memory document."""
         self._global_memory = content
 
-    async def load_session_summary(self, session_id: str) -> str:
-        """Load the auto-generated consolidation summary for this session."""
-        return self._summaries.get(session_id, "")
+    async def load_global_summary(self) -> str:
+        return self._summary
 
-    async def save_session_summary(self, session_id: str, content: str) -> None:
-        """Overwrite the session consolidation summary."""
-        self._summaries[session_id] = content
+    async def save_global_summary(self, content: str) -> None:
+        self._summary = content
 
-    async def load_consolidated_cursor(self, session_id: str) -> int:
-        return self._cursors.get(session_id, 0)
+    async def load_global_cursor(self) -> int:
+        return self._cursor
 
-    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
-        self._cursors[session_id] = cursor
+    async def save_global_cursor(self, cursor: int) -> None:
+        self._cursor = cursor
 
-    async def load_cron_jobs(self):
-        return []
+    async def load_cron_jobs(self) -> list:
+        return self._cron
 
-    async def save_cron_jobs(self, jobs) -> None:
-        pass
+    async def save_cron_jobs(self, jobs: list) -> None:
+        self._cron = jobs
 
 
 @pytest.fixture
-def storage():
+def storage() -> InMemoryStorage:
     return InMemoryStorage()
 
 
 @pytest.fixture
-def manager(storage):
+def manager(storage: InMemoryStorage) -> MemoryManager:
     return MemoryManager(storage=storage)
 
 
-async def test_build_messages_empty_session(manager):
-    messages = await manager.build_messages(
-        session_id="cli:local",
-        system_prompt="You are a bot.",
-        user_message="Hello",
-    )
+# ---------------------------------------------------------------------------
+# Basic build_messages / persist_exchange
+# ---------------------------------------------------------------------------
+
+
+async def test_build_messages_empty_history(manager: MemoryManager) -> None:
+    messages = await manager.build_messages("cli", "local", "Hello", "You are a bot.")
     # system + user = 2 messages
     assert len(messages) == 2
     assert messages[0].role == "system"
@@ -78,49 +81,136 @@ async def test_build_messages_empty_session(manager):
     assert messages[-1].content == "Hello"
 
 
-async def test_build_messages_includes_global_memory(manager, storage):
+async def test_build_messages_includes_global_memory(
+    manager: MemoryManager, storage: InMemoryStorage
+) -> None:
     await storage.save_global_memory("User is a developer.")
-    messages = await manager.build_messages(
-        session_id="cli:local",
-        system_prompt="You are a bot.",
-        user_message="Hello",
-    )
-    # system prompt should include global memory content
+    messages = await manager.build_messages("cli", "local", "Hello", "You are a bot.")
     assert "User is a developer." in messages[0].content
 
 
-async def test_build_messages_includes_session_summary(manager, storage):
-    await storage.save_session_summary("cli:local", "Previous session recap.")
-    messages = await manager.build_messages(
-        session_id="cli:local",
-        system_prompt="You are a bot.",
-        user_message="Hello",
-    )
-    assert "Previous session recap." in messages[0].content
+async def test_build_messages_includes_global_summary(
+    manager: MemoryManager, storage: InMemoryStorage
+) -> None:
+    await storage.save_global_summary("Previous conversation recap.")
+    messages = await manager.build_messages("cli", "local", "Hello", "You are a bot.")
+    assert "Previous conversation recap." in messages[0].content
 
 
-async def test_build_messages_includes_history(manager, storage):
-    await storage.append_message("cli:local", Message(role="user", content="prev"))
-    await storage.append_message("cli:local", Message(role="assistant", content="response"))
-    messages = await manager.build_messages(
-        session_id="cli:local",
-        system_prompt="You are a bot.",
-        user_message="follow up",
-    )
-    # system + prev + response + follow up = 4
+async def test_build_messages_summary_heading_is_conversation(
+    manager: MemoryManager, storage: InMemoryStorage
+) -> None:
+    await storage.save_global_summary("Some summary.")
+    messages = await manager.build_messages("cli", "local", "Hello", "You are a bot.")
+    assert "## Conversation Summary" in messages[0].content
+
+
+async def test_build_messages_includes_history(
+    manager: MemoryManager, storage: InMemoryStorage
+) -> None:
+    storage._history = [
+        Message(role="user", content="prev", channel="cli", sender_id="local"),
+        Message(role="assistant", content="response", channel="cli", sender_id="assistant"),
+    ]
+    messages = await manager.build_messages("cli", "local", "follow up", "You are a bot.")
+    # system + 2 history + user = 4
     assert len(messages) == 4
 
 
-async def test_persist_exchange(manager, storage):
-    await manager.persist_exchange(
-        session_id="cli:local",
-        user_message="Hello",
-        assistant_reply="Hi there!",
-    )
-    history = await storage.load_history("cli:local")
-    assert len(history) == 2
-    assert history[0].role == "user"
-    assert history[1].role == "assistant"
+async def test_persist_exchange(manager: MemoryManager, storage: InMemoryStorage) -> None:
+    await manager.persist_exchange("cli", "local", "Hello", "Hi there!")
+    assert len(storage._history) == 2
+    assert storage._history[0].role == "user"
+    assert storage._history[1].role == "assistant"
+
+
+# ---------------------------------------------------------------------------
+# Owner labelling
+# ---------------------------------------------------------------------------
+
+
+async def test_build_messages_labels_owner_by_alias() -> None:
+    aliases = [OwnerAliasEntry(address="alex")]
+    storage = InMemoryStorage()
+    storage._history = [
+        Message(role="user", content="hi", channel="cli", sender_id="alex"),
+        Message(role="assistant", content="hello", channel="cli", sender_id="assistant"),
+    ]
+    manager = MemoryManager(storage=storage, owner_aliases=aliases)
+    msgs = await manager.build_messages("cli", "alex", "what's up?", "You are helpful.")
+    # messages[0] is system, messages[1] is first history message, messages[2] is second
+    assert "[cli / owner]" in msgs[1].content
+    assert "[cli / assistant]" in msgs[2].content
+
+
+async def test_build_messages_labels_scoped_alias() -> None:
+    aliases = [OwnerAliasEntry(address="@alex:matrix.org", channel="matrix")]
+    storage = InMemoryStorage()
+    storage._history = [
+        Message(role="user", content="hi", channel="matrix", sender_id="@alex:matrix.org"),
+    ]
+    manager = MemoryManager(storage=storage, owner_aliases=aliases)
+    msgs = await manager.build_messages("matrix", "@alex:matrix.org", "hello", "sys")
+    assert "[matrix / owner]" in msgs[1].content
+
+
+async def test_build_messages_scoped_alias_does_not_match_other_channel() -> None:
+    aliases = [OwnerAliasEntry(address="@alex:matrix.org", channel="matrix")]
+    storage = InMemoryStorage()
+    storage._history = [
+        Message(role="user", content="hi", channel="cli", sender_id="@alex:matrix.org"),
+    ]
+    manager = MemoryManager(storage=storage, owner_aliases=aliases)
+    msgs = await manager.build_messages("cli", "local", "hello", "sys")
+    # scoped alias for matrix should NOT match cli channel
+    assert "[cli / owner]" not in msgs[1].content
+    assert "@alex:matrix.org" in msgs[1].content
+
+
+async def test_persist_exchange_stores_channel_and_sender() -> None:
+    storage = InMemoryStorage()
+    manager = MemoryManager(storage=storage)
+    await manager.persist_exchange("cli", "alex", "hello", "hi there")
+    assert storage._history[0].channel == "cli"
+    assert storage._history[0].sender_id == "alex"
+    assert storage._history[1].channel == "cli"
+    assert storage._history[1].sender_id == "assistant"
+
+
+async def test_build_messages_no_label_when_channel_is_none() -> None:
+    storage = InMemoryStorage()
+    storage._history = [
+        Message(role="user", content="legacy message"),  # no channel/sender_id
+    ]
+    manager = MemoryManager(storage=storage)
+    msgs = await manager.build_messages("cli", "local", "hi", "sys")
+    # no label prefix when channel is None
+    assert msgs[1].content == "legacy message"
+
+
+async def test_build_messages_labels_unknown_sender_without_alias() -> None:
+    storage = InMemoryStorage()
+    storage._history = [
+        Message(role="user", content="hey", channel="matrix", sender_id="@stranger:matrix.org"),
+    ]
+    manager = MemoryManager(storage=storage)
+    msgs = await manager.build_messages("matrix", "local", "hi", "sys")
+    assert "[matrix / @stranger:matrix.org]" in msgs[1].content
+
+
+async def test_build_messages_labels_unknown_sender_id_as_unknown_when_none() -> None:
+    storage = InMemoryStorage()
+    storage._history = [
+        Message(role="user", content="hey", channel="cli", sender_id=None),
+    ]
+    manager = MemoryManager(storage=storage)
+    msgs = await manager.build_messages("cli", "local", "hi", "sys")
+    assert "[cli / unknown]" in msgs[1].content
+
+
+# ---------------------------------------------------------------------------
+# Consolidation tests (adapted for global API)
+# ---------------------------------------------------------------------------
 
 
 class ScriptedLLM:
@@ -129,14 +219,14 @@ class ScriptedLLM:
     def __init__(self, summary: str) -> None:
         self._summary = summary
 
-    async def chat(self, messages, tools, *, stream=True):
+    async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
         async def _gen():
             yield self._summary
 
         return _gen()
 
 
-async def test_consolidation_not_triggered_below_threshold(storage):
+async def test_consolidation_not_triggered_below_threshold(storage: InMemoryStorage) -> None:
     llm = ScriptedLLM("Summary: talked about nothing.")
     manager = MemoryManager(
         storage=storage,
@@ -145,14 +235,14 @@ async def test_consolidation_not_triggered_below_threshold(storage):
         llm=llm,
     )
     for i in range(5):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     assert len(messages) == 7
-    doc = await storage.load_session_summary("s1")
+    doc = await storage.load_global_summary()
     assert doc == ""
 
 
-async def test_consolidation_triggered_above_threshold(storage):
+async def test_consolidation_triggered_above_threshold(storage: InMemoryStorage) -> None:
     llm = ScriptedLLM("Summary: talked about Python.")
     manager = MemoryManager(
         storage=storage,
@@ -161,17 +251,16 @@ async def test_consolidation_triggered_above_threshold(storage):
         llm=llm,
     )
     for i in range(6):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     # Only keep_recent=2 history messages + system + new user = 4 total
     assert len(messages) == 4
-    # Summary was saved to session summary
-    doc = await storage.load_session_summary("s1")
+    doc = await storage.load_global_summary()
     assert "Summary: talked about Python." in doc
 
 
-async def test_consolidation_appends_to_existing_memory_doc(storage):
-    await storage.save_session_summary("s1", "# Existing\nUser likes cats.")
+async def test_consolidation_appends_to_existing_summary(storage: InMemoryStorage) -> None:
+    await storage.save_global_summary("# Existing\nUser likes cats.")
     llm = ScriptedLLM("Summary: discussed dogs.")
     manager = MemoryManager(
         storage=storage,
@@ -180,14 +269,14 @@ async def test_consolidation_appends_to_existing_memory_doc(storage):
         llm=llm,
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    await manager.build_messages("s1", "sys", "new")
-    doc = await storage.load_session_summary("s1")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("cli", "local", "new", "sys")
+    doc = await storage.load_global_summary()
     assert "User likes cats." in doc
     assert "Summary: discussed dogs." in doc
 
 
-async def test_consolidation_summary_appears_in_system_prompt(storage):
+async def test_consolidation_summary_appears_in_system_prompt(storage: InMemoryStorage) -> None:
     """The consolidated summary must be visible in the system prompt, not just in storage."""
     llm = ScriptedLLM("Summary: key facts here.")
     manager = MemoryManager(
@@ -197,13 +286,16 @@ async def test_consolidation_summary_appears_in_system_prompt(storage):
         llm=llm,
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     system_content = messages[0].content
     assert "Summary: key facts here." in system_content
 
 
-async def test_consolidation_skipped_when_no_llm(storage):
+async def test_consolidation_skipped_when_no_llm(storage: InMemoryStorage) -> None:
+    # threshold=3, keep_recent=1, load_n=4. 6 msgs total → load last 4.
+    # 4 - 0 = 4 > threshold=3, but LLM is None → no consolidation.
+    # Result: 4 history + sys + user = 6 messages.
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=3,
@@ -211,14 +303,16 @@ async def test_consolidation_skipped_when_no_llm(storage):
         llm=None,
     )
     for i in range(6):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
-    assert len(messages) == 8
-    doc = await storage.load_session_summary("s1")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
+    assert len(messages) == 6  # 4 loaded + system + user
+    doc = await storage.load_global_summary()
     assert doc == ""
 
 
-async def test_consolidation_warning_fires_one_turn_before_threshold(storage):
+async def test_consolidation_warning_fires_one_turn_before_threshold(
+    storage: InMemoryStorage,
+) -> None:
     """Warning appears in system prompt when history reaches consolidation_threshold - 2."""
     manager = MemoryManager(
         storage=storage,
@@ -228,12 +322,14 @@ async def test_consolidation_warning_fires_one_turn_before_threshold(storage):
     )
     # Add exactly threshold - 2 = 8 messages
     for i in range(8):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     assert "will soon be summarized" in messages[0].content
 
 
-async def test_consolidation_warning_does_not_fire_below_threshold(storage):
+async def test_consolidation_warning_does_not_fire_below_threshold(
+    storage: InMemoryStorage,
+) -> None:
     """Warning does not appear when history is below consolidation_threshold - 2."""
     manager = MemoryManager(
         storage=storage,
@@ -243,12 +339,12 @@ async def test_consolidation_warning_does_not_fire_below_threshold(storage):
     )
     # Add threshold - 3 = 7 messages (one below warning trigger)
     for i in range(7):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     assert "will soon be summarized" not in messages[0].content
 
 
-async def test_keep_recent_clamped_to_minimum_one(storage):
+async def test_keep_recent_clamped_to_minimum_one(storage: InMemoryStorage) -> None:
     """When threshold * ratio < 1, keep_recent is clamped to 1 instead of 0."""
     manager = MemoryManager(
         storage=storage,
@@ -257,24 +353,24 @@ async def test_keep_recent_clamped_to_minimum_one(storage):
         llm=ScriptedLLM("Summary."),
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    messages = await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     # 1 recent message kept + system + new user = 3 total
     assert len(messages) == 3
 
 
-async def test_cursor_default_is_zero(storage):
-    cursor = await storage.load_consolidated_cursor("s1")
+async def test_cursor_default_is_zero(storage: InMemoryStorage) -> None:
+    cursor = await storage.load_global_cursor()
     assert cursor == 0
 
 
-async def test_cursor_roundtrip(storage):
-    await storage.save_consolidated_cursor("s1", 42)
-    assert await storage.load_consolidated_cursor("s1") == 42
+async def test_cursor_roundtrip(storage: InMemoryStorage) -> None:
+    await storage.save_global_cursor(42)
+    assert await storage.load_global_cursor() == 42
 
 
-async def test_consolidation_uses_cursor_not_full_history(storage):
-    """With cursor=4, only 2 unconsolidated messages; threshold=4 not exceeded."""
+async def test_consolidation_uses_cursor_not_full_history(storage: InMemoryStorage) -> None:
+    # With cursor=4, only 2 unconsolidated messages (in loaded window); threshold=4 not exceeded.
     llm = ScriptedLLM("Summary: only new messages.")
     manager = MemoryManager(
         storage=storage,
@@ -283,18 +379,21 @@ async def test_consolidation_uses_cursor_not_full_history(storage):
         llm=llm,
     )
     for i in range(6):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    await storage.save_consolidated_cursor("s1", 4)
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    await storage.save_global_cursor(4)
 
-    # Only 6 - 4 = 2 unconsolidated; threshold=4, so no consolidation triggered
-    messages = await manager.build_messages("s1", "sys", "new")
-    # All 6 history + system + user = 8 (no consolidation)
-    assert len(messages) == 8
-    doc = await storage.load_session_summary("s1")
+    # load_n = 4 + 1 = 5, so last 5 of 6 msgs loaded.
+    # len(history)=5, cursor=4 → 5 - 4 = 1 ≤ threshold=4, no consolidation triggered.
+    # Result: 5 history msgs + system + user = 7 messages.
+    messages = await manager.build_messages("cli", "local", "new", "sys")
+    assert len(messages) == 7  # 5 loaded + system + user
+    doc = await storage.load_global_summary()
     assert doc == ""
 
 
-async def test_consolidation_cursor_advances_after_consolidation(storage):
+async def test_consolidation_cursor_advances_after_consolidation(
+    storage: InMemoryStorage,
+) -> None:
     """Cursor is saved after successful consolidation."""
     llm = ScriptedLLM("Summary: advanced.")
     manager = MemoryManager(
@@ -304,20 +403,22 @@ async def test_consolidation_cursor_advances_after_consolidation(storage):
         llm=llm,
     )
     for i in range(5):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+        storage._history.append(Message(role="user", content=f"msg {i}"))
     # cursor=0, len=5, 5-0=5 > 4: consolidation fires
-    await manager.build_messages("s1", "sys", "new")
+    await manager.build_messages("cli", "local", "new", "sys")
     # cursor should now be 5 - 1 = 4
-    cursor = await storage.load_consolidated_cursor("s1")
+    cursor = await storage.load_global_cursor()
     assert cursor == 4
 
 
-async def test_no_consolidation_above_threshold_if_cursor_covers_it(storage):
+async def test_no_consolidation_above_threshold_if_cursor_covers_it(
+    storage: InMemoryStorage,
+) -> None:
     """If cursor already covers most history, no LLM call is made."""
     call_count = 0
 
     class CountingLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             nonlocal call_count
             call_count += 1
 
@@ -333,38 +434,31 @@ async def test_no_consolidation_above_threshold_if_cursor_covers_it(storage):
         llm=CountingLLM(),
     )
     for i in range(10):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+        storage._history.append(Message(role="user", content=f"msg {i}"))
     # Cursor at 9 (only 1 unconsolidated message, below threshold of 4)
-    await storage.save_consolidated_cursor("s1", 9)
-    await manager.build_messages("s1", "sys", "new")
+    await storage.save_global_cursor(9)
+    await manager.build_messages("cli", "local", "new", "sys")
     assert call_count == 0
 
 
-async def test_global_memory_default_empty(storage):
+async def test_global_memory_default_empty(storage: InMemoryStorage) -> None:
     doc = await storage.load_global_memory()
     assert doc == ""
 
 
-async def test_global_memory_roundtrip(storage):
+async def test_global_memory_roundtrip(storage: InMemoryStorage) -> None:
     await storage.save_global_memory("User likes Python.")
     assert await storage.load_global_memory() == "User likes Python."
 
 
-async def test_session_summary_default_empty(storage):
-    doc = await storage.load_session_summary("s1")
+async def test_global_summary_default_empty(storage: InMemoryStorage) -> None:
+    doc = await storage.load_global_summary()
     assert doc == ""
 
 
-async def test_session_summary_roundtrip(storage):
-    await storage.save_session_summary("s1", "Summary: discussed Rust.")
-    assert await storage.load_session_summary("s1") == "Summary: discussed Rust."
-
-
-async def test_session_summary_isolated_per_session(storage):
-    await storage.save_session_summary("s1", "s1 summary")
-    await storage.save_session_summary("s2", "s2 summary")
-    assert await storage.load_session_summary("s1") == "s1 summary"
-    assert await storage.load_session_summary("s2") == "s2 summary"
+async def test_global_summary_roundtrip(storage: InMemoryStorage) -> None:
+    await storage.save_global_summary("Summary: discussed Rust.")
+    assert await storage.load_global_summary() == "Summary: discussed Rust."
 
 
 # ---------------------------------------------------------------------------
@@ -372,12 +466,19 @@ async def test_session_summary_isolated_per_session(storage):
 # ---------------------------------------------------------------------------
 
 
-async def test_consolidation_prompt_scales_with_history_size():
-    """Larger histories get a larger sentence budget in the consolidation prompt."""
+async def test_consolidation_prompt_scales_with_history_size() -> None:
+    """Larger to_summarize windows get a larger sentence budget in the consolidation prompt.
+
+    With the global API, load_history(last_n=threshold+keep_recent) bounds the loaded window.
+    Different thresholds produce different to_summarize sizes and therefore different budgets.
+
+    manager_small: threshold=20, keep_recent=2, load_n=22 → to_summarize=20 → budget=5
+    manager_large: threshold=100, keep_recent=10, load_n=110 → to_summarize=100 → budget=10
+    """
     captured_prompts: list[str] = []
 
     class CapturingLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             # messages[-1] is the user message with the prompt
             captured_prompts.append(messages[-1].content)
 
@@ -396,24 +497,26 @@ async def test_consolidation_prompt_scales_with_history_size():
     storage_large = InMemoryStorage()
     manager_large = MemoryManager(
         storage=storage_large,
-        consolidation_threshold=20,
-        keep_recent_ratio=0.1,
+        consolidation_threshold=100,
+        keep_recent_ratio=0.1,  # keep_recent = max(1, int(100*0.1)) = 10
         llm=CapturingLLM(),
     )
 
+    # Small: fill beyond threshold so consolidation triggers; load_n=22 → loads 22
     for i in range(25):
-        await storage_small.append_message("s1", Message(role="user", content=f"msg {i}"))
-    for i in range(100):
-        await storage_large.append_message("s2", Message(role="user", content=f"msg {i}"))
+        storage_small._history.append(Message(role="user", content=f"msg {i}"))
+    # Large: fill beyond threshold; load_n=110 → loads 110
+    for i in range(115):
+        storage_large._history.append(Message(role="user", content=f"msg {i}"))
 
-    await manager_small.build_messages("s1", "sys", "new")
-    await manager_large.build_messages("s2", "sys", "new")
+    await manager_small.build_messages("cli", "local", "new", "sys")
+    await manager_large.build_messages("cli", "local", "new", "sys")
 
     assert len(captured_prompts) == 2
-    # Small: 25 - 2 = 23 messages to_summarize → budget = max(5, 23//10) = 5 → "5 sentences"
+    # Small: to_summarize = 22 - 2 = 20 msgs → budget = max(5, 20//10) = 5 → "5 sentences"
     assert "5 sentences" in captured_prompts[0]
-    # Large: 100 - 2 = 98 messages → budget = max(5, 98//10) = 9 → "9 sentences"
-    assert "9 sentences" in captured_prompts[1]
+    # Large: to_summarize = 110 - 10 = 100 msgs → budget = max(5, 100//10) = 10 → "10 sentences"
+    assert "10 sentences" in captured_prompts[1]
 
 
 # ---------------------------------------------------------------------------
@@ -421,12 +524,12 @@ async def test_consolidation_prompt_scales_with_history_size():
 # ---------------------------------------------------------------------------
 
 
-async def test_consolidation_uses_system_prompt():
+async def test_consolidation_uses_system_prompt() -> None:
     """The consolidation LLM call includes a system message as first message."""
     received_messages: list[Message] = []
 
     class InspectingLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             received_messages.extend(messages)
 
             async def _gen():
@@ -442,8 +545,8 @@ async def test_consolidation_uses_system_prompt():
         llm=InspectingLLM(),
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    await manager.build_messages("s1", "sys", "new")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("cli", "local", "new", "sys")
 
     assert len(received_messages) >= 2
     assert received_messages[0].role == "system"
@@ -451,15 +554,15 @@ async def test_consolidation_uses_system_prompt():
 
 
 # ---------------------------------------------------------------------------
-# C3: Catch save_session_summary failure
+# C3: Catch save_global_summary failure
 # ---------------------------------------------------------------------------
 
 
-async def test_consolidation_save_failure_is_caught():
-    """If save_session_summary raises, the turn continues without crashing."""
+async def test_consolidation_save_failure_is_caught() -> None:
+    """If save_global_summary raises, the turn continues without crashing."""
 
     class FailingSaveStorage(InMemoryStorage):
-        async def save_session_summary(self, session_id: str, content: str) -> None:
+        async def save_global_summary(self, content: str) -> None:
             raise OSError("disk full")
 
     storage = FailingSaveStorage()
@@ -471,18 +574,18 @@ async def test_consolidation_save_failure_is_caught():
         llm=llm,
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+        storage._history.append(Message(role="user", content=f"msg {i}"))
 
     # Should not raise
-    messages = await manager.build_messages("s1", "sys", "new")
+    messages = await manager.build_messages("cli", "local", "new", "sys")
     assert len(messages) >= 2
 
 
-async def test_consolidation_cursor_not_advanced_if_save_fails():
-    """Cursor stays at 0 if save_session_summary fails."""
+async def test_consolidation_cursor_not_advanced_if_save_fails() -> None:
+    """Cursor stays at 0 if save_global_summary fails."""
 
     class FailingSaveStorage(InMemoryStorage):
-        async def save_session_summary(self, session_id: str, content: str) -> None:
+        async def save_global_summary(self, content: str) -> None:
             raise OSError("disk full")
 
     storage = FailingSaveStorage()
@@ -494,9 +597,9 @@ async def test_consolidation_cursor_not_advanced_if_save_fails():
         llm=llm,
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
-    await manager.build_messages("s1", "sys", "new")
-    cursor = await storage.load_consolidated_cursor("s1")
+        storage._history.append(Message(role="user", content=f"msg {i}"))
+    await manager.build_messages("cli", "local", "new", "sys")
+    cursor = await storage.load_global_cursor()
     assert cursor == 0  # not advanced
 
 
@@ -505,7 +608,7 @@ async def test_consolidation_cursor_not_advanced_if_save_fails():
 # ---------------------------------------------------------------------------
 
 
-async def test_call_llm_returns_text_on_success():
+async def test_call_llm_returns_text_on_success() -> None:
     """_call_llm joins streamed chunks and returns stripped text."""
     storage = InMemoryStorage()
     llm = ScriptedLLM("  hello world  ")
@@ -515,11 +618,11 @@ async def test_call_llm_returns_text_on_success():
     assert result == "hello world"
 
 
-async def test_call_llm_returns_none_on_exception():
+async def test_call_llm_returns_none_on_exception() -> None:
     """_call_llm returns None and logs a warning when the LLM raises."""
 
     class FailingLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             raise RuntimeError("network error")
 
     storage = InMemoryStorage()
@@ -528,7 +631,7 @@ async def test_call_llm_returns_none_on_exception():
     assert result is None
 
 
-async def test_call_llm_returns_none_on_empty_response():
+async def test_call_llm_returns_none_on_empty_response() -> None:
     """_call_llm returns None when the LLM yields only whitespace."""
     storage = InMemoryStorage()
     llm = ScriptedLLM("   ")
@@ -538,16 +641,16 @@ async def test_call_llm_returns_none_on_empty_response():
 
 
 # ---------------------------------------------------------------------------
-# _maybe_meta_consolidate: meta-consolidation of session summary
+# _maybe_meta_consolidate: meta-consolidation of global summary
 # ---------------------------------------------------------------------------
 
 
-async def test_meta_consolidation_not_triggered_below_word_limit():
+async def test_meta_consolidation_not_triggered_below_word_limit() -> None:
     """No extra LLM call when summary is within the word limit."""
     call_count = 0
 
     class CountingLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             nonlocal call_count
             call_count += 1
 
@@ -564,7 +667,7 @@ async def test_meta_consolidation_not_triggered_below_word_limit():
     assert call_count == 0
 
 
-async def test_meta_consolidation_triggered_above_word_limit():
+async def test_meta_consolidation_triggered_above_word_limit() -> None:
     """LLM is called to compress summary when > 600 words."""
     storage = InMemoryStorage()
     llm = ScriptedLLM("Compressed meta summary.")
@@ -574,11 +677,11 @@ async def test_meta_consolidation_triggered_above_word_limit():
     assert result == "Compressed meta summary."
 
 
-async def test_meta_consolidation_failure_keeps_original_summary():
+async def test_meta_consolidation_failure_keeps_original_summary() -> None:
     """When LLM fails, the original oversized summary is returned unchanged."""
 
     class FailingLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             raise RuntimeError("timeout")
 
     storage = InMemoryStorage()
@@ -588,7 +691,9 @@ async def test_meta_consolidation_failure_keeps_original_summary():
     assert result == fat_summary
 
 
-async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exceeds_limit():
+async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exceeds_limit() -> (
+    None
+):
     """End-to-end: _consolidate calls _maybe_meta_consolidate when existing + new > 600 words.
 
     Existing summary is ~580 words. The new consolidation chunk pushes it over 600.
@@ -607,7 +712,7 @@ async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exc
     response_index = 0
 
     class TwoShotLLM:
-        async def chat(self, messages, tools, *, stream=True):
+        async def chat(self, messages: list[Message], tools: list, *, stream: bool = True):  # type: ignore[override]
             nonlocal response_index
             text = responses[response_index]
             response_index += 1
@@ -618,7 +723,7 @@ async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exc
             return _gen()
 
     storage = InMemoryStorage()
-    await storage.save_session_summary("s1", existing_summary)
+    await storage.save_global_summary(existing_summary)
     manager = MemoryManager(
         storage=storage,
         consolidation_threshold=3,
@@ -626,11 +731,11 @@ async def test_consolidate_triggers_meta_consolidation_when_combined_summary_exc
         llm=TwoShotLLM(),
     )
     for i in range(4):
-        await storage.append_message("s1", Message(role="user", content=f"msg {i}"))
+        storage._history.append(Message(role="user", content=f"msg {i}"))
 
-    await manager.build_messages("s1", "sys", "new")
+    await manager.build_messages("cli", "local", "new", "sys")
 
-    saved = await storage.load_session_summary("s1")
+    saved = await storage.load_global_summary()
     # The saved summary must be the meta-consolidated output, not the raw concatenation
     assert saved == "Meta summary."
     # Both LLM calls were made

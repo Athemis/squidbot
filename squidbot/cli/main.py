@@ -440,6 +440,7 @@ async def _make_agent_loop(
         storage=storage,
         skills=skills,
         llm=llm,
+        owner_aliases=settings.owner.aliases,
         consolidation_threshold=settings.agents.consolidation_threshold,
         keep_recent_ratio=settings.agents.keep_recent_ratio,
     )
@@ -858,6 +859,27 @@ async def _run_onboard(config_path: Path) -> None:
         template_path = _BUNDLED_WORKSPACE / "BOOTSTRAP.md"
         bootstrap_path.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
         print(f"Created {bootstrap_path}")
+
+    from squidbot.config.schema import OwnerAliasEntry  # noqa: PLC0415
+
+    print("\nWhat names, nicknames, or addresses should I use to recognise you across channels?")
+    print("Enter one alias per line. For channel-scoped aliases, use the format: address channel")
+    print('(e.g. "@alex:matrix.org matrix" or "alex@example.com email")')
+    print("Press Enter on an empty line when done.")
+    aliases: list[OwnerAliasEntry] = []
+    while True:
+        line = input("> ").strip()
+        if not line:
+            break
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            aliases.append(OwnerAliasEntry(address=parts[0], channel=parts[1]))
+        else:
+            aliases.append(OwnerAliasEntry(address=parts[0]))
+    if aliases:
+        settings.owner.aliases = aliases
+        settings.save(config_path)
+        print(f"Saved {len(aliases)} alias(es).")
 
     print("Run 'squidbot agent' to start chatting!")
 

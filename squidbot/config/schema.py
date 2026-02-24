@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -190,6 +190,34 @@ class SkillsConfig(BaseModel):
     )
 
 
+class OwnerAliasEntry(BaseModel):
+    """A single owner alias, optionally scoped to a specific channel."""
+
+    address: str
+    channel: str | None = None
+
+    @classmethod
+    def from_value(cls, value: str | dict[str, Any]) -> OwnerAliasEntry:
+        """Accept either a plain string or a {address, channel} dict."""
+        if isinstance(value, str):
+            return cls(address=value)
+        return cls.model_validate(value)
+
+
+class OwnerConfig(BaseModel):
+    """Identifies the assistant's owner across channels via aliases."""
+
+    aliases: list[OwnerAliasEntry] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, data: Any) -> Any:
+        """Allow aliases to be plain strings or dicts."""
+        if isinstance(data, dict) and "aliases" in data:
+            data = {**data, "aliases": [OwnerAliasEntry.from_value(v) for v in data["aliases"]]}
+        return data
+
+
 class Settings(BaseModel):
     """Root configuration object for squidbot."""
 
@@ -198,6 +226,7 @@ class Settings(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    owner: OwnerConfig = Field(default_factory=OwnerConfig)
 
     @model_validator(mode="after")
     def _validate_llm_references(self) -> Settings:

@@ -1,5 +1,11 @@
 # squidbot — Agent Coding Guide
 
+**Primary use case:** Personal assistant — a locally running LLM agent for daily personal productivity tasks.
+
+**Single user:** The assistant serves exactly one user, who may interact with it concurrently across multiple channels (e-mail, Matrix, CLI). The user may also add the assistant to group chats where other people are present.
+
+**Cross-channel memory:** The assistant must be able to recall knowledge from all channels in any other channel. If the user discusses a topic over e-mail and later asks about it in a Matrix chat (or vice versa), the assistant must have that context available. The assistant may also participate in group chats without the user present — that knowledge is equally accessible across channels.
+
 ## Commands
 
 ```bash
@@ -47,14 +53,14 @@ squidbot/
 │   ├── models.py   # Pure dataclasses (Message, Session, CronJob, ToolCall, …)
 │   ├── ports.py    # Protocol interfaces (LLMPort, ChannelPort, ToolPort, …)
 │   ├── agent.py    # AgentLoop: orchestrates LLM + tools + memory + channel
-│   ├── memory.py   # MemoryManager: history, memory.md, skills injection
+│   ├── memory.py   # MemoryManager: global history, memory.md, skills injection
 │   ├── registry.py # ToolRegistry: register and dispatch tools
 │   ├── scheduler.py# CronScheduler: schedule parsing and background loop
 │   └── skills.py   # SkillMetadata dataclass + build_skills_xml()
 ├── adapters/       # Concrete implementations of ports
 │   ├── llm/        # OpenAIAdapter
 │   ├── channels/   # CliChannel, RichCliChannel
-│   ├── persistence/# JsonlMemory
+│   ├── persistence/# JsonlMemory (global history.jsonl — no session_id)
 │   ├── tools/      # file, shell, memory_write tools
 │   └── skills/     # FsSkillsLoader
 ├── config/         # Pydantic Settings (schema.py)
@@ -66,6 +72,27 @@ tests/
 ├── adapters/       # Adapter tests using unittest.mock
 └── integration/    # Placeholder (empty)
 ```
+
+**Storage layout** (`~/.squidbot/`):
+
+```
+~/.squidbot/
+├── history.jsonl          # global history — all channels, append-only
+├── history.meta.json      # global consolidation cursor
+├── memory/
+│   └── summary.md         # global consolidation summary (all channels)
+├── workspace/
+│   └── MEMORY.md          # agent-writable long-term memory
+└── cron/
+    └── jobs.json           # scheduled jobs
+```
+
+`Message` carries `channel: str | None` and `sender_id: str | None`. `MemoryManager`
+labels history entries with `[channel / owner]` or `[channel / sender_id]` for attribution.
+`MemoryPort` has no `session_id` arguments — all operations are global.
+
+**Config:** `owner.aliases` lists names/handles the bot should recognise as the owner
+(used during onboarding and for cross-channel attribution).
 
 **Core rule:** `squidbot/core/` never imports from `squidbot/adapters/`. The dependency
 direction is `CLI/Adapters → Ports ← Core`. Adapters satisfy protocols structurally

@@ -117,19 +117,19 @@ class MemoryPort(Protocol):
     """
     Interface for session state persistence.
 
-    Manages two kinds of data:
-    - Conversation history: JSONL log of all messages in a session
+    Manages:
+    - Conversation history: global JSONL log of all messages across all channels
     - Global memory document: cross-session notes (MEMORY.md), written by the agent
-    - Session summary: per-session auto-generated consolidation summary
+    - Global summary: cross-channel auto-generated consolidation summary
     - Cron jobs: scheduled task definitions
     """
 
-    async def load_history(self, session_id: str) -> list[Message]:
-        """Load all messages for a session."""
+    async def load_history(self, last_n: int | None = None) -> list[Message]:
+        """Load messages from global history. Returns last_n if specified, else all."""
         ...
 
-    async def append_message(self, session_id: str, message: Message) -> None:
-        """Append a single message to the session history."""
+    async def append_message(self, message: Message) -> None:
+        """Append a single message to the global history."""
         ...
 
     async def load_global_memory(self) -> str:
@@ -140,20 +140,20 @@ class MemoryPort(Protocol):
         """Overwrite the global memory document."""
         ...
 
-    async def load_session_summary(self, session_id: str) -> str:
-        """Load the auto-generated consolidation summary for this session."""
+    async def load_global_summary(self) -> str:
+        """Load the auto-generated global consolidation summary."""
         ...
 
-    async def save_session_summary(self, session_id: str, content: str) -> None:
-        """Overwrite the session consolidation summary."""
+    async def save_global_summary(self, content: str) -> None:
+        """Overwrite the global consolidation summary."""
         ...
 
-    async def load_consolidated_cursor(self, session_id: str) -> int:
-        """Return the last consolidated message index for this session (0 if none)."""
+    async def load_global_cursor(self) -> int:
+        """Return the last consolidated message index (0 if none)."""
         ...
 
-    async def save_consolidated_cursor(self, session_id: str, cursor: int) -> None:
-        """Persist the consolidation cursor after a successful consolidation."""
+    async def save_global_cursor(self, cursor: int) -> None:
+        """Persist the consolidation cursor."""
         ...
 
     async def load_cron_jobs(self) -> list[CronJob]:
