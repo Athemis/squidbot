@@ -73,6 +73,13 @@ class AgentConfig(BaseModel):
     # TODO: replace with token-based threshold derived from the model's context window size
     consolidation_threshold: int = 100
     keep_recent_ratio: float = 0.2
+    context_budget_mode: Literal["words", "tokens"] = "words"
+    context_memory_max_words: int = 300
+    context_summary_max_words: int = 500
+    context_history_max_words: int = 2500
+    context_total_max_words: int = 4500
+    context_dedupe_summary_against_memory: bool = True
+    context_min_recent_messages: int = 2
 
     @model_validator(mode="after")
     def _validate_consolidation(self) -> AgentConfig:
@@ -81,6 +88,20 @@ class AgentConfig(BaseModel):
             raise ValueError("agents.consolidation_threshold must be > 0")
         if not (0 < self.keep_recent_ratio < 1):
             raise ValueError("agents.keep_recent_ratio must be between 0 and 1 (exclusive)")
+        if self.context_memory_max_words <= 0:
+            raise ValueError("agents.context_memory_max_words must be > 0")
+        if self.context_summary_max_words <= 0:
+            raise ValueError("agents.context_summary_max_words must be > 0")
+        if self.context_history_max_words <= 0:
+            raise ValueError("agents.context_history_max_words must be > 0")
+        if self.context_total_max_words <= 0:
+            raise ValueError("agents.context_total_max_words must be > 0")
+        if self.context_min_recent_messages <= 0:
+            raise ValueError("agents.context_min_recent_messages must be > 0")
+        if self.context_total_max_words < self.context_history_max_words:
+            raise ValueError(
+                "agents.context_total_max_words must be >= agents.context_history_max_words"
+            )
         return self
 
 

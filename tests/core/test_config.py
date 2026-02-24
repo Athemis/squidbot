@@ -269,3 +269,37 @@ def test_keep_recent_ratio_low_threshold_is_valid():
     cfg = AgentConfig(consolidation_threshold=3, keep_recent_ratio=0.2)  # int(0.6) = 0 → clamped
     assert cfg.consolidation_threshold == 3
     assert cfg.keep_recent_ratio == 0.2
+
+
+def test_context_budget_defaults():
+    cfg = AgentConfig()
+    assert cfg.context_budget_mode == "words"
+    assert cfg.context_memory_max_words == 300
+    assert cfg.context_summary_max_words == 500
+    assert cfg.context_history_max_words == 2500
+    assert cfg.context_total_max_words == 4500
+    assert cfg.context_dedupe_summary_against_memory is True
+    assert cfg.context_min_recent_messages == 2
+
+
+def test_context_budget_values_must_be_positive():
+    with pytest.raises(ValidationError):
+        AgentConfig(context_memory_max_words=0)
+    with pytest.raises(ValidationError):
+        AgentConfig(context_summary_max_words=0)
+    with pytest.raises(ValidationError):
+        AgentConfig(context_history_max_words=0)
+    with pytest.raises(ValidationError):
+        AgentConfig(context_total_max_words=0)
+    with pytest.raises(ValidationError):
+        AgentConfig(context_min_recent_messages=0)
+
+
+def test_context_total_words_must_cover_history_words():
+    with pytest.raises(ValidationError):
+        AgentConfig(context_history_max_words=2500, context_total_max_words=2499)
+
+
+def test_context_budget_mode_rejects_unknown_values():
+    with pytest.raises(ValidationError):
+        AgentConfig(context_budget_mode="chars")
