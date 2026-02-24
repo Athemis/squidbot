@@ -40,6 +40,8 @@ class Message:
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None  # set when role == "tool"
     timestamp: datetime = field(default_factory=datetime.now)
+    channel: str | None = None
+    sender_id: str | None = None
 
     def to_openai_dict(self) -> dict[str, Any]:
         """Serialize to OpenAI API message format."""

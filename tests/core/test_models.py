@@ -100,6 +100,18 @@ class TestSessionInfo:
         assert info.message_count == 3
 
 
+def test_message_has_channel_and_sender_id() -> None:
+    msg = Message(role="user", content="hello", channel="matrix", sender_id="@alice:matrix.org")
+    assert msg.channel == "matrix"
+    assert msg.sender_id == "@alice:matrix.org"
+
+
+def test_message_channel_defaults_to_none() -> None:
+    msg = Message(role="user", content="hello")
+    assert msg.channel is None
+    assert msg.sender_id is None
+
+
 class TestChannelStatus:
     def test_connected_with_no_error(self) -> None:
         status = ChannelStatus(name="matrix", enabled=True, connected=True)
