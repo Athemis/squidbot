@@ -26,7 +26,7 @@ async def test_onboard_fresh_uses_defaults_on_empty_input(tmp_path: Path) -> Non
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", ""]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
     ):
@@ -49,7 +49,7 @@ async def test_onboard_fresh_saves_provided_values(tmp_path: Path) -> None:
     with (
         patch(
             "squidbot.cli.main.input",
-            side_effect=["https://api.example.com/v1", "sk-test", "gpt-4o"],
+            side_effect=["https://api.example.com/v1", "sk-test", "gpt-4o", ""],
         ),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
@@ -77,7 +77,7 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
     with (
         patch(
             "squidbot.cli.main.input",
-            side_effect=["https://first.example.com/v1", "sk-first", "claude-3"],
+            side_effect=["https://first.example.com/v1", "sk-first", "claude-3", ""],
         ),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
@@ -93,8 +93,10 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
         return s
 
     with (
-        # api_base, api_key, model, overwrite-all=N, N×5 per-file (one per BOOTSTRAP_FILES_MAIN)
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N"]),
+        # api_base, api_key, model, overwrite-all=N, N×5 per-file, alias=""
+        patch(
+            "squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N", ""]
+        ),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
@@ -117,7 +119,7 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
     with (
         patch(
             "squidbot.cli.main.input",
-            side_effect=["https://first.example.com/v1", "sk-first", "claude-3"],
+            side_effect=["https://first.example.com/v1", "sk-first", "claude-3", ""],
         ),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
@@ -146,6 +148,8 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
                 "N",
                 "N",
                 "N",
+                # alias loop terminator
+                "",
             ],
         ),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
@@ -171,7 +175,7 @@ async def test_onboard_creates_bootstrap_files_on_fresh_workspace(tmp_path: Path
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", ""]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
     ):
@@ -198,8 +202,8 @@ async def test_onboard_does_not_overwrite_existing_files(tmp_path: Path) -> None
     settings = _make_settings(workspace)
     with (
         # api_base, api_key, model
-        # overwrite-all=N, per-file AGENTS.md=N, per-file IDENTITY.md=N, bootstrap-rerun=N
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N"]),
+        # overwrite-all=N, per-file AGENTS.md=N, per-file IDENTITY.md=N, bootstrap-rerun=N, alias=""
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -282,7 +286,7 @@ async def test_onboard_bootstrap_rerun_yes_creates_file(tmp_path: Path) -> None:
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "y"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "y", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -306,7 +310,7 @@ async def test_onboard_bootstrap_rerun_no_does_not_create_file(tmp_path: Path) -
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -329,7 +333,7 @@ async def test_onboard_overwrite_all_yes_replaces_existing_files(tmp_path: Path)
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "y"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "y", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
     ):
@@ -347,9 +351,9 @@ async def test_onboard_overwrite_all_no_then_per_file_yes_replaces(tmp_path: Pat
     (workspace / "SOUL.md").write_text("old soul", encoding="utf-8")
 
     settings = _make_settings(workspace)
-    # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=y
+    # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=y, alias=""
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "y"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "y", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
     ):
@@ -366,9 +370,9 @@ async def test_onboard_overwrite_all_no_then_per_file_no_keeps(tmp_path: Path) -
     (workspace / "SOUL.md").write_text("old soul", encoding="utf-8")
 
     settings = _make_settings(workspace)
-    # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=n
+    # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=n, alias=""
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "n"]),
+        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "n", ""]),
         patch("squidbot.cli.main.Settings", return_value=settings),
         patch("builtins.print"),
     ):
