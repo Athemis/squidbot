@@ -43,6 +43,8 @@ uv tool install --reinstall /home/alex/git/squidbot
 
 **GPG signing is enabled globally (`commit.gpgsign=true`). Never use `--no-gpg-sign`. Commits without a signature are a bug.** Simply run `git commit -m "..."` — signing happens automatically.
 
+**Branch workflow:** All features, fixes, refactors, and non-trivial changes must be developed on a dedicated branch and merged via PR. Direct commits to `main` are only acceptable for trivial documentation changes (e.g. `README.md`, `docs/plans/`).
+
 ---
 
 ## Architecture — Hexagonal (Ports & Adapters)
