@@ -15,6 +15,93 @@ from typing import Any
 from squidbot.adapters.persistence.jsonl import JsonlMemory
 from squidbot.core.models import Message, ToolDefinition, ToolResult
 
+SEARCHABLE_ROLES = ("user", "assistant")
+MAX_CONTEXT_CHARS = 300
+
+
+def _parse_query(kwargs: dict[str, Any]) -> tuple[str, str] | ToolResult:
+    query_raw = kwargs.get("query")
+    if not isinstance(query_raw, str) or not query_raw.strip():
+        return ToolResult(tool_call_id="", content="Error: query is required", is_error=True)
+
+    raw_query = query_raw.strip()
+    return raw_query, raw_query.lower()
+
+
+def _parse_days(kwargs: dict[str, Any]) -> int:
+    days_raw = kwargs.get("days")
+    if isinstance(days_raw, int):
+        return max(0, days_raw)
+    return 0
+
+
+def _parse_max_results(kwargs: dict[str, Any]) -> int:
+    max_results_raw = kwargs.get("max_results")
+    if isinstance(max_results_raw, int):
+        return min(50, max(1, max_results_raw))
+    return 10
+
+
+def _filter_by_cutoff(messages: list[Message], cutoff: datetime | None) -> list[Message]:
+    if cutoff is None:
+        return messages
+    return [message for message in messages if message.timestamp >= cutoff]
+
+
+def _find_matches(
+    messages: list[Message], normalized_query: str, max_results: int
+) -> list[tuple[Message, int]]:
+    matches: list[tuple[Message, int]] = []
+    for index, message in enumerate(messages):
+        if (
+            message.role in SEARCHABLE_ROLES
+            and message.content
+            and normalized_query in message.content.lower()
+        ):
+            matches.append((message, index))
+
+        if len(matches) >= max_results:
+            break
+
+    return matches
+
+
+def _truncate_content(content: str) -> str:
+    if len(content) <= MAX_CONTEXT_CHARS:
+        return content
+    return content[:MAX_CONTEXT_CHARS] + "..."
+
+
+def _format_matches(messages: list[Message], matches: list[tuple[Message, int]]) -> str:
+    lines: list[str] = []
+    for match_number, (message, index) in enumerate(matches, 1):
+        timestamp = message.timestamp.strftime("%Y-%m-%d %H:%M")
+        channel = message.channel or "unknown"
+        sender = message.sender_id or "unknown"
+        lines.append(f"## Match {match_number} — [{channel} / {sender}] | {timestamp}")
+        lines.append("")
+
+        for offset in (-1, 0, 1):
+            context_index = index + offset
+            if not 0 <= context_index < len(messages):
+                continue
+
+            context_message = messages[context_index]
+            if context_message.role not in SEARCHABLE_ROLES or not context_message.content:
+                continue
+
+            role_label = context_message.role.upper()
+            context_text = _truncate_content(context_message.content)
+            if offset == 0:
+                lines.append(f"**{role_label}: {context_text}**")
+                continue
+
+            lines.append(f"{role_label}: {context_text}")
+
+        lines.append("---")
+
+    return "\n".join(lines)
+
 
 class SearchHistoryTool:
     """
@@ -79,63 +166,26 @@ class SearchHistoryTool:
         Returns:
             ToolResult with Markdown-formatted matches, or error if query missing.
         """
-        query_raw = kwargs.get("query")
-        if not isinstance(query_raw, str) or not query_raw.strip():
-            return ToolResult(tool_call_id="", content="Error: query is required", is_error=True)
-        query = query_raw.strip().lower()
+        parsed_query = _parse_query(kwargs)
+        if isinstance(parsed_query, ToolResult):
+            return parsed_query
+        raw_query, normalized_query = parsed_query
 
-        days: int = 0
-        if isinstance(kwargs.get("days"), int):
-            days = max(0, kwargs["days"])
-
-        max_results: int = 10
-        if isinstance(kwargs.get("max_results"), int):
-            max_results = min(50, max(1, kwargs["max_results"]))
-
+        days = _parse_days(kwargs)
+        max_results = _parse_max_results(kwargs)
         cutoff: datetime | None = datetime.now() - timedelta(days=days) if days > 0 else None
 
         # Load all messages from global history
-        all_messages: list[Message] = await JsonlMemory(self._base_dir).load_history()
-
-        # Apply date filter
-        if cutoff is not None:
-            all_messages = [m for m in all_messages if m.timestamp >= cutoff]
-
-        # Find matches in user/assistant messages only
-        matches: list[tuple[Message, int]] = []
-        for idx, msg in enumerate(all_messages):
-            if msg.role in ("user", "assistant") and msg.content and query in msg.content.lower():
-                matches.append((msg, idx))
-            if len(matches) >= max_results:
-                break
+        all_messages = _filter_by_cutoff(await JsonlMemory(self._base_dir).load_history(), cutoff)
+        matches = _find_matches(all_messages, normalized_query, max_results)
 
         if not matches:
             return ToolResult(
                 tool_call_id="",
-                content=f"No matches found for '{query_raw.strip()}'.",
+                content=f"No matches found for '{raw_query}'.",
                 is_error=False,
             )
 
-        # Format output with context
-        lines: list[str] = []
-        for i, (msg, idx) in enumerate(matches, 1):
-            ts = msg.timestamp.strftime("%Y-%m-%d %H:%M")
-            channel = msg.channel or "unknown"
-            sender = msg.sender_id or "unknown"
-            lines.append(f"## Match {i} — [{channel} / {sender}] | {ts}")
-            lines.append("")
-            for offset in (-1, 0, 1):
-                j = idx + offset
-                if 0 <= j < len(all_messages):
-                    ctx = all_messages[j]
-                    if ctx.role not in ("user", "assistant") or not ctx.content:
-                        continue
-                    text = ctx.content[:300] + ("..." if len(ctx.content) > 300 else "")
-                    role_label = ctx.role.upper()
-                    if offset == 0:
-                        lines.append(f"**{role_label}: {text}**")
-                    else:
-                        lines.append(f"{role_label}: {text}")
-            lines.append("---")
-
-        return ToolResult(tool_call_id="", content="\n".join(lines), is_error=False)
+        return ToolResult(
+            tool_call_id="", content=_format_matches(all_messages, matches), is_error=False
+        )
