@@ -54,7 +54,7 @@ async def test_spawn_tools_registered_when_enabled(settings_with_spawn, tmp_path
         patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
         patch.object(Path, "exists", return_value=False),
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         loop, conns, _storage = await _make_agent_loop(
             settings_with_spawn,
@@ -70,7 +70,7 @@ async def test_spawn_tools_not_registered_when_disabled(settings_spawn_disabled,
         patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
         patch.object(Path, "exists", return_value=False),
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         loop, conns, _storage = await _make_agent_loop(
             settings_spawn_disabled,
@@ -86,7 +86,7 @@ async def test_profile_injected_in_system_prompt(settings_with_spawn, tmp_path):
         patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
         patch.object(Path, "exists", return_value=False),
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         loop, _, _storage = await _make_agent_loop(settings_with_spawn, storage_dir=tmp_path)
     assert "coder" in loop._system_prompt
@@ -104,7 +104,7 @@ async def test_no_profile_injection_when_no_profiles(tmp_path):
         patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
         patch.object(Path, "exists", return_value=False),
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         loop, _, _storage = await _make_agent_loop(s, storage_dir=tmp_path)
     assert "<available_spawn_profiles>" not in loop._system_prompt

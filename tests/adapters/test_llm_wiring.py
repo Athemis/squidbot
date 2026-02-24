@@ -9,7 +9,7 @@ import pytest
 
 from squidbot.adapters.llm.openai import OpenAIAdapter
 from squidbot.adapters.llm.pool import PooledLLMAdapter
-from squidbot.cli.main import _resolve_llm
+from squidbot.cli.gateway import _resolve_llm
 from squidbot.config.schema import (
     LLMConfig,
     LLMModelConfig,
@@ -88,7 +88,7 @@ async def test_make_agent_loop_wires_memory_with_history_context_messages(tmp_pa
         patch.object(Path, "exists", return_value=False),
         patch("squidbot.core.memory.MemoryManager", autospec=True) as memory_manager_cls,
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         await _make_agent_loop(s, storage_dir=tmp_path)
 
