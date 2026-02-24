@@ -443,6 +443,13 @@ async def _make_agent_loop(
         owner_aliases=settings.owner.aliases,
         consolidation_threshold=settings.agents.consolidation_threshold,
         keep_recent_ratio=settings.agents.keep_recent_ratio,
+        context_budget_mode=settings.agents.context_budget_mode,
+        context_memory_max_words=settings.agents.context_memory_max_words,
+        context_summary_max_words=settings.agents.context_summary_max_words,
+        context_history_max_words=settings.agents.context_history_max_words,
+        context_total_max_words=settings.agents.context_total_max_words,
+        context_dedupe_summary_against_memory=settings.agents.context_dedupe_summary_against_memory,
+        context_min_recent_messages=settings.agents.context_min_recent_messages,
     )
 
     # Tool registry

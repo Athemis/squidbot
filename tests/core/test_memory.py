@@ -67,6 +67,17 @@ def manager(storage: InMemoryStorage) -> MemoryManager:
     return MemoryManager(storage=storage)
 
 
+def _extract_system_section(system_text: str, heading: str) -> str:
+    """Extract a `## <heading>` block from the system prompt text."""
+    marker = f"## {heading}\n\n"
+    if marker not in system_text:
+        return ""
+    section = system_text.split(marker, 1)[1]
+    if "\n\n## " in section:
+        return section.split("\n\n## ", 1)[0]
+    return section
+
+
 # ---------------------------------------------------------------------------
 # Basic build_messages / persist_exchange
 # ---------------------------------------------------------------------------
@@ -206,6 +217,142 @@ async def test_build_messages_labels_unknown_sender_id_as_unknown_when_none() ->
     manager = MemoryManager(storage=storage)
     msgs = await manager.build_messages("cli", "local", "hi", "sys")
     assert "[cli / unknown]" in msgs[1].content
+
+
+# ---------------------------------------------------------------------------
+# Context compaction and de-duplication
+# ---------------------------------------------------------------------------
+
+
+async def test_build_messages_dedupes_summary_lines_present_in_memory_with_normalization(
+    storage: InMemoryStorage,
+) -> None:
+    await storage.save_global_memory("- User prefers    pytest\n- timezone: Europe/Berlin")
+    await storage.save_global_summary("* user prefers pytest\n- discussed release checklist")
+    manager = MemoryManager(
+        storage=storage,
+        context_dedupe_summary_against_memory=True,
+    )
+
+    messages = await manager.build_messages("cli", "local", "next?", "sys")
+    system = messages[0].content
+    memory_block = _extract_system_section(system, "Your Memory")
+    summary_block = _extract_system_section(system, "Conversation Summary")
+
+    assert "User prefers    pytest" in memory_block
+    assert "user prefers pytest" not in summary_block.lower()
+    assert "discussed release checklist" in summary_block
+
+
+async def test_build_messages_truncates_memory_and_summary_to_exact_word_limits(
+    storage: InMemoryStorage,
+) -> None:
+    await storage.save_global_memory(" ".join(f"mem{i}" for i in range(10)))
+    await storage.save_global_summary(" ".join(f"sum{i}" for i in range(9)))
+    manager = MemoryManager(
+        storage=storage,
+        context_memory_max_words=3,
+        context_summary_max_words=4,
+        context_history_max_words=999,
+        context_total_max_words=999,
+    )
+
+    messages = await manager.build_messages("cli", "local", "hello", "sys")
+    system = messages[0].content
+    memory_block = _extract_system_section(system, "Your Memory")
+    summary_block = _extract_system_section(system, "Conversation Summary")
+
+    assert len(memory_block.split()) == 3
+    assert len(summary_block.split()) == 4
+
+
+async def test_build_messages_caps_history_recent_first_and_keeps_chronological_order(
+    storage: InMemoryStorage,
+) -> None:
+    storage._history = [
+        Message(role="user", content="old1", channel="cli", sender_id="local"),
+        Message(role="user", content="old2", channel="cli", sender_id="local"),
+        Message(role="user", content="old3", channel="cli", sender_id="local"),
+        Message(role="user", content="old4", channel="cli", sender_id="local"),
+    ]
+    manager = MemoryManager(
+        storage=storage,
+        context_history_max_words=8,
+        context_total_max_words=100,
+        context_min_recent_messages=1,
+    )
+
+    messages = await manager.build_messages("cli", "local", "latest", "sys")
+    history_contents = [m.content for m in messages[1:-1]]
+    assert history_contents == ["[cli / local]\nold3", "[cli / local]\nold4"]
+
+
+async def test_build_messages_keeps_minimum_recent_messages_when_history_budget_is_tiny(
+    storage: InMemoryStorage,
+) -> None:
+    storage._history = [
+        Message(role="user", content="old1", channel="cli", sender_id="local"),
+        Message(role="user", content="old2", channel="cli", sender_id="local"),
+        Message(role="user", content="old3", channel="cli", sender_id="local"),
+        Message(role="user", content="old4", channel="cli", sender_id="local"),
+    ]
+    manager = MemoryManager(
+        storage=storage,
+        context_history_max_words=1,
+        context_total_max_words=100,
+        context_min_recent_messages=2,
+    )
+
+    messages = await manager.build_messages("cli", "local", "latest", "sys")
+    history_contents = [m.content for m in messages[1:-1]]
+    assert history_contents == ["[cli / local]\nold3", "[cli / local]\nold4"]
+
+
+async def test_build_messages_tokens_mode_without_counter_falls_back_to_words(
+    storage: InMemoryStorage,
+) -> None:
+    await storage.save_global_memory(" ".join(f"mem{i}" for i in range(10)))
+    manager = MemoryManager(
+        storage=storage,
+        context_budget_mode="tokens",
+        context_memory_max_words=3,
+    )
+
+    messages = await manager.build_messages("cli", "local", "hello", "sys")
+    system = messages[0].content
+    memory_block = _extract_system_section(system, "Your Memory")
+    assert len(memory_block.split()) == 3
+
+
+async def test_build_messages_total_budget_trims_history_then_summary_before_memory(
+    storage: InMemoryStorage,
+) -> None:
+    await storage.save_global_memory("mem0 mem1 mem2")
+    await storage.save_global_summary("sum0 sum1 sum2")
+    storage._history = [
+        Message(role="user", content="old1", channel="cli", sender_id="local"),
+        Message(role="user", content="old2", channel="cli", sender_id="local"),
+        Message(role="user", content="old3", channel="cli", sender_id="local"),
+        Message(role="user", content="old4", channel="cli", sender_id="local"),
+    ]
+    manager = MemoryManager(
+        storage=storage,
+        context_memory_max_words=3,
+        context_summary_max_words=3,
+        context_history_max_words=100,
+        context_total_max_words=14,
+        context_min_recent_messages=2,
+    )
+
+    messages = await manager.build_messages("cli", "local", "latest", "sys")
+    system = messages[0].content
+    history_contents = [m.content for m in messages[1:-1]]
+    memory_block = _extract_system_section(system, "Your Memory")
+    summary_block = _extract_system_section(system, "Conversation Summary")
+
+    assert history_contents == ["[cli / local]\nold3", "[cli / local]\nold4"]
+    assert len(memory_block.split()) == 3
+    assert summary_block == ""
 
 
 # ---------------------------------------------------------------------------
