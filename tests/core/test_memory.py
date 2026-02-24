@@ -154,6 +154,42 @@ async def test_build_messages_scoped_alias_only_labels_in_matching_channel(
     assert messages[2].content == "[cli / @alex:matrix.org]\ncli hi"
 
 
+async def test_build_messages_owner_alias_matching_is_case_sensitive(
+    storage: InMemoryStorage,
+) -> None:
+    """Owner alias matching is case-sensitive for sender IDs."""
+    storage._history = [
+        Message(role="user", content="hi", channel="cli", sender_id="alex"),
+    ]
+    aliases = [OwnerAliasEntry(address="Alex")]
+    manager = MemoryManager(storage=storage, owner_aliases=aliases)
+
+    messages = await manager.build_messages(
+        user_message="follow up",
+        system_prompt="sys",
+    )
+
+    assert messages[1].content == "[cli / alex]\nhi"
+
+
+async def test_build_messages_sender_id_none_with_channel_labels_unknown(
+    storage: InMemoryStorage,
+) -> None:
+    """A missing sender_id in a channel is labelled unknown and does not crash."""
+    storage._history = [
+        Message(role="user", content="hi", channel="cli", sender_id=None),
+    ]
+    aliases = [OwnerAliasEntry(address="cli")]
+    manager = MemoryManager(storage=storage, owner_aliases=aliases)
+
+    messages = await manager.build_messages(
+        user_message="follow up",
+        system_prompt="sys",
+    )
+
+    assert messages[1].content == "[cli / unknown]\nhi"
+
+
 async def test_build_messages_checks_scoped_alias_before_returning_unscoped_match(
     storage: InMemoryStorage,
 ) -> None:
