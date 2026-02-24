@@ -69,8 +69,6 @@ async def test_build_messages_includes_your_memory_heading_when_present(
     manager = MemoryManager(storage=storage)
 
     messages = await manager.build_messages(
-        channel="cli",
-        sender_id="local",
         user_message="Hello",
         system_prompt="You are a helpful assistant.",
     )
@@ -95,8 +93,6 @@ async def test_build_messages_includes_only_last_history_context_messages_labell
     manager = MemoryManager(storage=storage, **memory_kwargs)
 
     messages = await manager.build_messages(
-        channel="cli",
-        sender_id="alice",
         user_message="follow up",
         system_prompt="sys",
     )
@@ -115,8 +111,6 @@ async def test_build_messages_does_not_inject_conversation_summary_block(
     manager = MemoryManager(storage=storage)
 
     messages = await manager.build_messages(
-        channel="cli",
-        sender_id="local",
         user_message="Hello",
         system_prompt="You are a helpful assistant.",
     )
@@ -133,8 +127,6 @@ async def test_build_messages_labels_owner_for_unscoped_alias(storage: InMemoryS
     manager = MemoryManager(storage=storage, owner_aliases=aliases)
 
     messages = await manager.build_messages(
-        channel="email",
-        sender_id="alex@example.com",
         user_message="follow up",
         system_prompt="sys",
     )
@@ -154,8 +146,6 @@ async def test_build_messages_scoped_alias_only_labels_in_matching_channel(
     manager = MemoryManager(storage=storage, owner_aliases=aliases)
 
     messages = await manager.build_messages(
-        channel="cli",
-        sender_id="local",
         user_message="follow up",
         system_prompt="sys",
     )
@@ -174,8 +164,6 @@ async def test_build_messages_legacy_history_without_channel_or_sender_is_unchan
     manager = MemoryManager(storage=storage)
 
     messages = await manager.build_messages(
-        channel="cli",
-        sender_id="local",
         user_message="new message",
         system_prompt="sys",
     )
