@@ -104,15 +104,18 @@ squidbot/
 │   ├── ports.py    # Protocol interfaces (LLMPort, ChannelPort, ToolPort, …)
 │   ├── agent.py    # AgentLoop: orchestrates LLM + tools + memory + channel
 │   ├── memory.py   # MemoryManager: global history, memory.md, skills injection
+│   ├── heartbeat.py# Heartbeat: periodic autonomous wake-ups and task checking
 │   ├── registry.py # ToolRegistry: register and dispatch tools
 │   ├── scheduler.py# CronScheduler: schedule parsing and background loop
 │   └── skills.py   # SkillMetadata dataclass + build_skills_xml()
 ├── adapters/       # Concrete implementations of ports
-│   ├── llm/        # OpenAIAdapter
-│   ├── channels/   # CliChannel, RichCliChannel
+│   ├── llm/        # OpenAIAdapter, PooledLLMAdapter
+│   ├── channels/   # CliChannel, RichCliChannel, MatrixChannel, EmailChannel
 │   ├── persistence/# JsonlMemory (global history.jsonl — no session_id)
-│   ├── tools/      # file, shell, memory_write tools
-│   └── skills/     # FsSkillsLoader
+│   ├── tools/      # shell, files, memory_write, web_search, spawn, search_history, mcp
+│   ├── skills/     # FsSkillsLoader
+│   └── dashboard/  # (reserved for future use)
+├── workspace/      # Bootstrap files bundled with the package (SOUL.md, AGENTS.md, …)
 ├── config/         # Pydantic Settings (schema.py)
 ├── cli/            # CLI entry point (main.py, cyclopts)
 └── skills/         # Bundled SKILL.md files shipped with the package

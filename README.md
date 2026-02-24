@@ -11,7 +11,7 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
 - **Long-term memory** — two-level: global `MEMORY.md` (agent-curated, cross-channel) + global conversation summary (auto-generated from `history.jsonl`); meta-consolidation compresses summaries via LLM when they grow large
-- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 362 tests
+- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 382 tests
 
 ## Installation
 
