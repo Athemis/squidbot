@@ -1,5 +1,13 @@
 # squidbot — Agent Coding Guide
 
+## Agent Behaviour Defaults
+
+- **Parallel tools:** Always use parallel tool calls when the operations are independent. Batch all independent reads, searches, and writes into a single message.
+- **Default branch:** `main` — branch off `main`, open PRs against `main`.
+- **Prefer automation:** Execute requested actions without asking for confirmation unless blocked by missing information or a safety/irreversibility concern.
+
+---
+
 **Primary use case:** Personal assistant — a locally running LLM agent for daily personal productivity tasks.
 
 **Single user:** The assistant serves exactly one user, who may interact with it concurrently across multiple channels (e-mail, Matrix, CLI). The user may also add the assistant to group chats where other people are present.
