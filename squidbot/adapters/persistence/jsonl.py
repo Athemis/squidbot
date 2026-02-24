@@ -76,14 +76,21 @@ def _history_file(base_dir: Path) -> Path:
 
 
 def _history_meta_file(base_dir: Path) -> Path:
-    """Return the global history meta JSON path."""
+    """Return the global consolidation cursor path."""
+    base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / "history.meta.json"
 
 
-def _global_summary_file(base_dir: Path) -> Path:
-    """Return the global summary markdown path, creating parent directories."""
+def _global_summary_file(base_dir: Path, *, write: bool = False) -> Path:
+    """Return the global consolidation summary path.
+
+    Args:
+        base_dir: Root storage directory.
+        write: If True, creates parent directories.
+    """
     path = base_dir / "memory" / "summary.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if write:
+        path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -185,7 +192,7 @@ class JsonlMemory:
         Args:
             content: The summary text to persist.
         """
-        path = _global_summary_file(self._base)
+        path = _global_summary_file(self._base, write=True)
         path.write_text(content, encoding="utf-8")
 
     async def load_cron_jobs(self) -> list[CronJob]:
