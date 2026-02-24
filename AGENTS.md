@@ -38,6 +38,29 @@ uv tool install --reinstall /home/alex/git/squidbot
 ```
 
 **Always run `uv run ruff check .` and `uv run pytest` before committing.**
+## Context7 Library IDs
+
+- `pydantic` -> `/pydantic/pydantic`
+- `pydantic-settings` -> `/pydantic/pydantic-settings`
+- `openai` -> `/openai/openai`
+- `httpx` -> `/encode/httpx`
+- `matrix-nio` -> `/matrix-org/matrix-nio`
+- `mcp` -> `/mcp/mcp`
+- `cyclopts` -> `/cyclopts/cyclopts`
+- `ruamel.yaml` -> `/ruamel/yaml`
+- `cronsim` -> `/cronsim/cronsim`
+- `duckduckgo-search` -> `/duckduckgo-search/duckduckgo-search`
+- `rich` -> `/Textualize/rich`
+- `loguru` -> `/Delgan/loguru`
+- `Pillow` -> `/python-pillow/Pillow`
+- `markdown-it-py` -> `/lepture/markdown-it-py`
+- `aioimaplib` -> `/kksilicon/aioimaplib`
+- `aiosmtplib` -> `/aio-libs/aiosmtplib`
+- `openclaw` -> `/openclaw/openclaw`
+
+IDs follow the `/org/project` pattern that Context7 uses in prompts; update them if the package source moves.
+
+Use these Context7 IDs whenever you ask for documentation or snippets involving the respective dependency so the lookup stays precise and you hit the cached entries directly.
 
 **Use Conventional Commits:** `type(scope): description` — types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `deps`. Examples: `feat: add RichCliChannel`, `fix: handle KeyboardInterrupt in _prompt`, `deps: add rich as explicit dependency`.
 
