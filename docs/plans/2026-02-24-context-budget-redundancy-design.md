@@ -1,134 +1,174 @@
-# Design: Context Budget and Redundancy Control
+# Design: Context Budget and Redundancy Control (AGENTS-Aligned)
 
 **Date:** 2026-02-24  
 **Status:** Proposed  
-**Related issue:** https://github.com/Athemis/squidbot/issues/2
+**Related issues:**  
+- Primary: https://github.com/Athemis/squidbot/issues/2  
+- Dependency risk: https://github.com/Athemis/squidbot/issues/7
 
-## Problem
+## Problem Validation
 
-Per-turn context is currently assembled from multiple sources:
+The current prompt assembly in `MemoryManager.build_messages()` appends:
 
 - base system prompt
-- `MEMORY.md` (long-term facts)
-- global conversation summary
-- recent labelled history
+- `MEMORY.md` (`## Your Memory`)
+- global summary (`## Conversation Summary`)
+- labelled recent history
 
-This is robust, but it can accumulate overlapping content. In practice, the same fact may appear in both Memory and Summary, and near-duplicate details may appear again in recent History. This increases token usage and can reduce signal-to-noise as history grows.
+without any explicit per-block context budget or read-time de-duplication.
+
+This creates two real problems:
+
+1. **Unbounded prompt growth by content size:** the history window is message-count-based, not size-based.
+2. **Cross-block redundancy:** facts can appear in Memory and Summary simultaneously, then reappear in recent history.
+
+Issue #2 asks for token-budget-based cutoff. This design addresses the same operational pain immediately, but
+in two phases, keeping the first phase lightweight.
 
 ## Goals
 
-1. Keep context compact and predictable per turn.
-2. Reduce obvious redundancy between Memory and Summary.
-3. Preserve recency and continuity for active conversations.
-4. Avoid schema/storage migrations.
+1. Keep per-turn context compact and predictable.
+2. Reduce obvious redundancy between Memory and Summary deterministically.
+3. Preserve recent conversational continuity across channels.
+4. Stay compliant with AGENTS principles: readable, test-driven, lightweight.
+5. Avoid persistence/schema migrations.
 
 ## Non-Goals
 
-- Full token-accurate budgeting in this iteration.
-- Semantic deduplication using embeddings/vector stores.
-- Changes to persistence format (`history.jsonl`, `summary.md`, `MEMORY.md`).
+- Full token-perfect budgeting in phase 1.
+- Embedding/vector retrieval.
+- Changes to storage format (`history.jsonl`, `summary.md`, `MEMORY.md`).
+- Mandatory tokenizer dependency for all users.
 
-## Approaches Considered
+## Constraints from AGENTS.md
 
-### A) Token-based budgeting now
-
-Use model-specific token counting and strict per-block token limits.
-
-**Pros:** Cost predictability, model-aligned limits.  
-**Cons:** More implementation complexity and tokenizer coupling.  
-**Decision:** Defer (already tracked by issue #2).
-
-### B) Word-budget + deterministic de-duplication (recommended)
-
-Apply fixed per-block word budgets and remove exact duplicate summary lines already present in Memory.
-
-**Pros:** Simple, deterministic, low-risk, no new dependencies.  
-**Cons:** Word count is only an approximation of token usage.
-
-### C) Retrieval-first architecture
-
-Retrieve relevant chunks from history/memory dynamically instead of assembling fixed blocks.
-
-**Pros:** Potentially best relevance/efficiency long-term.  
-**Cons:** Significant complexity and behavior changes; overkill for current scope.
+- `core/` remains adapter-independent (hexagonal boundary).
+- TDD is required: failing tests first, then implementation.
+- No heavy new dependency in phase 1; startup must stay fast.
+- Verification standard before completion: `ruff`, `mypy --strict`, `pytest`.
 
 ## Decision
 
-Implement **Approach B** as an immediate mitigation. Keep code paths simple and configurable. Revisit token-accurate budgeting in a follow-up under issue #2.
+Adopt a **two-phase design**:
+
+- **Phase 1 (this design/plan):** word-budget controls + deterministic de-duplication + strong invariants.
+- **Phase 2 (follow-up for issue #2 closure):** optional token-budget mode with graceful fallback to words.
+
+This gives immediate mitigation without blocking a tokenizer-backed future.
 
 ## Detailed Design
 
-### 1) New configuration in `AgentConfig`
+### 1) Configuration (`AgentConfig`)
 
-Add four fields under `agents`:
+Add:
 
-- `context_memory_max_words` (default: `300`)
-- `context_summary_max_words` (default: `500`)
-- `context_history_max_words` (default: `2500`)
-- `context_dedupe_summary_against_memory` (default: `true`)
+- `context_budget_mode: Literal["words", "tokens"] = "words"`
+- `context_memory_max_words: int = 300`
+- `context_summary_max_words: int = 500`
+- `context_history_max_words: int = 2500`
+- `context_total_max_words: int = 4500`
+- `context_dedupe_summary_against_memory: bool = True`
+- `context_min_recent_messages: int = 2`
 
-Validation: all `*_max_words` values must be `> 0`.
+Validation:
 
-### 2) Prompt assembly pipeline in `MemoryManager.build_messages()`
+- all word limits and `context_min_recent_messages` must be `> 0`
+- `context_total_max_words >= context_history_max_words`
+- mode must be one of `"words"`, `"tokens"`
 
-Order of operations:
+Notes:
 
-1. Load raw `global_memory`, `global_summary`, and history.
-2. If enabled, de-duplicate summary lines that exactly match normalized Memory lines.
-3. Truncate Memory and Summary to their configured word budgets.
-4. Label history messages as before.
-5. Apply history word budget using a recent-first strategy.
-6. Build final system prompt sections and append user message.
+- Phase 1 executes only words mode behavior.
+- Tokens mode is accepted in config now to avoid later config churn.
 
-### 3) De-duplication rule
+### 2) Prompt Assembly Pipeline (`MemoryManager.build_messages()`)
 
-Use a deterministic and conservative rule:
+Order (deterministic):
 
-- Normalize by trimming whitespace and lowercasing each non-empty line.
-- Remove summary lines whose normalized form already exists in Memory.
-- Keep everything else untouched.
+1. Load raw memory, summary, history.
+2. If enabled, de-duplicate summary lines already present in memory.
+3. Apply per-block truncation to memory and summary.
+4. Label history messages (existing behavior).
+5. Apply recent-first history budget with minimum recent-message floor.
+6. Enforce total context budget by trimming in this order:
+   - history first
+   - summary second
+   - memory last
+7. Build final system message and append user message.
 
-This avoids aggressive semantic matching and minimizes accidental data loss.
+### 3) De-duplication Rule
 
-### 4) History budget rule
+Conservative, deterministic normalization for line matching:
 
-Use recent-first inclusion:
+- trim leading/trailing whitespace
+- lowercase
+- strip simple bullet markers (`-`, `*`, `•`) prefix
+- collapse repeated internal whitespace
 
-- walk history from newest to oldest
-- accumulate message word cost
-- stop when adding another old message would exceed budget
-- reverse back to chronological order
+If normalized summary line equals any normalized memory line, drop that summary line.
+Everything else remains unchanged.
 
-This preserves the newest conversational detail under constrained budget.
+### 4) History Budget Rule
+
+Recent-first inclusion:
+
+- walk newest to oldest
+- keep adding while within budget
+- always keep at least newest `context_min_recent_messages` history messages
+- return in chronological order
+
+Invariants:
+
+- chronology preserved
+- newest history message preserved
+- no role/channel/sender metadata mutation
+
+### 5) Optional Tokenizer Mode (Phase 2)
+
+When `context_budget_mode="tokens"`:
+
+- use a token counter abstraction provided via composition root
+- if unavailable, fall back to words mode and log one warning
+- no hard runtime failure because tokenizer is missing
+
+This keeps the default path lightweight while making issue #2 closable later.
+
+### 6) Observability
+
+Add debug-level budget telemetry (no persistence impact):
+
+- words before/after per block (memory, summary, history)
+- number of removed summary lines
+- whether fallback from tokens->words occurred
 
 ## Error Handling and Safety
 
-- If de-duplication results in empty Summary, omit `## Conversation Summary` block.
-- If truncation is required, truncate deterministically by words.
-- No persistence writes are introduced in this feature; all changes are read-time context assembly only.
+- If de-duplication empties summary, omit `## Conversation Summary`.
+- Truncation is deterministic and side-effect-free (read-time only).
+- No new writes to storage.
 
 ## Testing Strategy
 
-Add/extend tests to cover:
+Required coverage:
 
-1. config defaults and validation for new fields
-2. summary de-duplication against memory
-3. memory and summary budget truncation
-4. history budget keeps recent messages first
-5. no regressions in consolidation behavior and existing memory tests
+1. config defaults/validation for new fields
+2. de-duplication behavior (positive and negative cases)
+3. exact budget truncation of memory/summary/history
+4. history ordering + minimum-recent invariant
+5. total-budget enforcement order
+6. token-mode fallback behavior (phase 2 scaffolding tests)
+7. no regression in consolidation/cursor semantics (issue #7 interactions)
 
-Full verification remains:
+Tests must assert observable outcomes, not duplicate implementation details.
 
-- `uv run ruff check .`
-- `uv run mypy squidbot/`
-- `uv run pytest`
+## Issue Mapping and Closure Criteria
+
+- **This design phase mitigates issue #2 but does not close it.**
+- Issue #2 is closable only when token-budget mode is implemented and verified in runtime behavior.
+- If issue #7 is unresolved in target branch, complete #7 first or rebase on the fix.
 
 ## Rollout and Compatibility
 
-- Backward-compatible defaults; existing configs continue to load.
-- No migration required.
-- Feature is tunable by config and can be relaxed/tightened without code changes.
-
-## Follow-up
-
-- Implement token-aware budgeting as a separate iteration (issue #2).
+- Backward-compatible defaults.
+- No storage migration.
+- Configurable strictness by environment/user preference.
