@@ -47,7 +47,8 @@ _META_CONSOLIDATION_SYSTEM = (
 )
 
 _META_CONSOLIDATION_PROMPT = (
-    "The following is a conversation summary that has grown too long and needs to be compressed.\n\n"
+    "The following is a conversation summary that has grown too long and needs to be compressed."
+    "\n\n"
     "{summary}\n\n"
     "Rewrite this as a compact summary of approximately {sentences} sentences. "
     "Retain all facts, decisions, and context. Do not discard any information."
