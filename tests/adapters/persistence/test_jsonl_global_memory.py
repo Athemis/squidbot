@@ -1,4 +1,4 @@
-"""Tests for JsonlMemory global memory and session summary persistence."""
+"""Tests for JsonlMemory global memory persistence."""
 
 from __future__ import annotations
 

@@ -78,18 +78,14 @@ Owner messages are identified via the `aliases` config and labelled uniformly as
 The system prompt layout is otherwise unchanged:
 
 ```
-system: [soul/identity/config] + [## Your Memory\n<MEMORY.md>] + [## Session Summary\n<summary.md>] + [<skills>]
+system: [soul/identity/config] + [## Your Memory\n<MEMORY.md>] + [<skills>]
 <labelled history messages>
 user: <current input>
 ```
 
 ## Consolidation
 
-Same logic as today, but global:
-
-- Single cursor in `history.meta.json`
-- Single `memory/summary.md` covering all channels
-- Summary injected into every system prompt (no longer per-session)
+Under the manual-only memory model, summary injection is not implemented: global recall relies on `MEMORY.md` for curated facts and on explicit `search_history` lookups when details fall outside the most recent N injected history messages.
 
 ## search_history Tool
 
