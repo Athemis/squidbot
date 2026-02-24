@@ -1,25 +1,24 @@
 """
 Search history tool — allows the agent to search past conversations.
 
-Reads JSONL session files directly from the sessions directory.
-Only user and assistant messages are searchable; tool calls and system
-messages are excluded from both search and output.
+Reads from the global history.jsonl via JsonlMemory. Only user and assistant
+messages are searchable; tool calls and system messages are excluded from both
+search and output.
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from squidbot.adapters.persistence.jsonl import deserialize_message
+from squidbot.adapters.persistence.jsonl import JsonlMemory
 from squidbot.core.models import Message, ToolDefinition, ToolResult
 
 
 class SearchHistoryTool:
     """
-    Search across all session JSONL files for a text pattern.
+    Search the global history JSONL for a text pattern.
 
     Returns matching user/assistant messages with ±1 surrounding messages
     for context. Supports filtering by time period (last N days) and
@@ -28,7 +27,7 @@ class SearchHistoryTool:
 
     name = "search_history"
     description = (
-        "Search conversation history across all sessions for a text pattern. "
+        "Search conversation history across all channels for a text pattern. "
         "Returns matching messages with surrounding context. "
         "Use this to recall past conversations, decisions, or facts the user mentioned."
     )
@@ -57,9 +56,8 @@ class SearchHistoryTool:
         """
         Args:
             base_dir: Root data directory (same as JsonlMemory base_dir).
-                      Session files are read from base_dir/sessions/*.jsonl.
         """
-        self._sessions_dir = base_dir / "sessions"
+        self._base_dir = base_dir
 
     def to_definition(self) -> ToolDefinition:
         """Return the tool's definition for registration in the tool registry."""
@@ -96,40 +94,18 @@ class SearchHistoryTool:
 
         cutoff: datetime | None = datetime.now() - timedelta(days=days) if days > 0 else None
 
-        # Load all messages from all session files
-        sessions_dir = self._sessions_dir
-
-        def _load_all_messages() -> list[tuple[str, str]]:
-            """Return (session_id, line) pairs from all session files."""
-            pairs: list[tuple[str, str]] = []
-            if not sessions_dir.exists():
-                return pairs
-            for jsonl_file in sorted(sessions_dir.glob("*.jsonl")):
-                session_id = jsonl_file.stem.replace("__", ":")
-                for line in jsonl_file.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
-                    if line:
-                        pairs.append((session_id, line))
-            return pairs
-
-        raw_pairs = await asyncio.to_thread(_load_all_messages)
-        all_messages: list[tuple[str, Message]] = []
-        for session_id, line in raw_pairs:
-            try:
-                msg = deserialize_message(line)
-                all_messages.append((session_id, msg))
-            except Exception:
-                continue
+        # Load all messages from global history
+        all_messages: list[Message] = await JsonlMemory(self._base_dir).load_history()
 
         # Apply date filter
         if cutoff is not None:
-            all_messages = [(sid, m) for sid, m in all_messages if m.timestamp >= cutoff]
+            all_messages = [m for m in all_messages if m.timestamp >= cutoff]
 
         # Find matches in user/assistant messages only
-        matches: list[tuple[str, Message, int]] = []
-        for idx, (session_id, msg) in enumerate(all_messages):
+        matches: list[tuple[Message, int]] = []
+        for idx, msg in enumerate(all_messages):
             if msg.role in ("user", "assistant") and msg.content and query in msg.content.lower():
-                matches.append((session_id, msg, idx))
+                matches.append((msg, idx))
             if len(matches) >= max_results:
                 break
 
@@ -142,14 +118,16 @@ class SearchHistoryTool:
 
         # Format output with context
         lines: list[str] = []
-        for i, (session_id, msg, idx) in enumerate(matches, 1):
+        for i, (msg, idx) in enumerate(matches, 1):
             ts = msg.timestamp.strftime("%Y-%m-%d %H:%M")
-            lines.append(f"## Match {i} — Session: {session_id} | {ts}")
+            channel = msg.channel or "unknown"
+            sender = msg.sender_id or "unknown"
+            lines.append(f"## Match {i} — [{channel} / {sender}] | {ts}")
             lines.append("")
             for offset in (-1, 0, 1):
                 j = idx + offset
                 if 0 <= j < len(all_messages):
-                    _, ctx = all_messages[j]
+                    ctx = all_messages[j]
                     if ctx.role not in ("user", "assistant") or not ctx.content:
                         continue
                     text = ctx.content[:300] + ("..." if len(ctx.content) > 300 else "")
