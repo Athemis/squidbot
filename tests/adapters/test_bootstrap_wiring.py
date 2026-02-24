@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from squidbot.cli.main import (
+from squidbot.cli.gateway import (
     BOOTSTRAP_FILES_MAIN,
-    BOOTSTRAP_FILES_ONBOARD,
     BOOTSTRAP_FILES_SUBAGENT,
     _load_bootstrap_prompt,
 )
+from squidbot.cli.main import BOOTSTRAP_FILES_ONBOARD
 
 
 def test_load_bootstrap_prompt_all_present(tmp_path: Path) -> None:

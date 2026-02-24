@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from squidbot.cli.main import GatewayState, _channel_loop, _channel_loop_with_state
+from squidbot.cli.gateway import GatewayState, _channel_loop, _channel_loop_with_state
 from squidbot.core.models import InboundMessage, Session
 
 

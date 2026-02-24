@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from squidbot.cli.main import BOOTSTRAP_FILES_MAIN, _run_onboard
+from squidbot.cli.gateway import BOOTSTRAP_FILES_MAIN
+from squidbot.cli.main import _run_onboard
 from squidbot.config.schema import Settings
 
 
@@ -26,8 +27,8 @@ async def test_onboard_fresh_uses_defaults_on_empty_input(tmp_path: Path) -> Non
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -48,10 +49,10 @@ async def test_onboard_fresh_saves_provided_values(tmp_path: Path) -> None:
     settings = _make_settings(workspace)
     with (
         patch(
-            "squidbot.cli.main.input",
+            "squidbot.cli.onboard.input",
             side_effect=["https://api.example.com/v1", "sk-test", "gpt-4o", ""],
         ),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -76,10 +77,10 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
     settings = _make_settings(workspace)
     with (
         patch(
-            "squidbot.cli.main.input",
+            "squidbot.cli.onboard.input",
             side_effect=["https://first.example.com/v1", "sk-first", "claude-3", ""],
         ),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -95,9 +96,9 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
     with (
         # api_base, api_key, model, overwrite-all=N, N×5 per-file, alias=""
         patch(
-            "squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N", ""]
+            "squidbot.cli.onboard.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N", ""]
         ),
-        patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
+        patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -118,10 +119,10 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
     settings = _make_settings(workspace)
     with (
         patch(
-            "squidbot.cli.main.input",
+            "squidbot.cli.onboard.input",
             side_effect=["https://first.example.com/v1", "sk-first", "claude-3", ""],
         ),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -135,7 +136,7 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
 
     with (
         patch(
-            "squidbot.cli.main.input",
+            "squidbot.cli.onboard.input",
             side_effect=[
                 # api_base, api_key, model
                 "https://second.example.com/v1",
@@ -152,7 +153,7 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
                 "",
             ],
         ),
-        patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
+        patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -175,8 +176,8 @@ async def test_onboard_creates_bootstrap_files_on_fresh_workspace(tmp_path: Path
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -199,13 +200,11 @@ async def test_onboard_does_not_overwrite_existing_files(tmp_path: Path) -> None
         s.agents.workspace = str(workspace)
         return s
 
-    settings = _make_settings(workspace)
     with (
         # api_base, api_key, model
         # overwrite-all=N, per-file AGENTS.md=N, per-file IDENTITY.md=N, bootstrap-rerun=N, alias=""
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", "N", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
-        patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", "N", "N", "N", "N", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -230,8 +229,8 @@ async def test_onboard_no_bootstrap_rerun_prompt_on_fresh_workspace(tmp_path: Pa
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=capturing_input),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=capturing_input),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -259,11 +258,9 @@ async def test_onboard_offers_bootstrap_rerun_when_already_set_up(tmp_path: Path
         s.agents.workspace = str(workspace)
         return s
 
-    settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=capturing_input),
-        patch("squidbot.cli.main.Settings", return_value=settings),
-        patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
+        patch("squidbot.cli.onboard.input", side_effect=capturing_input),
+        patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -284,11 +281,9 @@ async def test_onboard_bootstrap_rerun_yes_creates_file(tmp_path: Path) -> None:
         s.agents.workspace = str(workspace)
         return s
 
-    settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "y", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
-        patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", "N", "N", "y", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -308,11 +303,9 @@ async def test_onboard_bootstrap_rerun_no_does_not_create_file(tmp_path: Path) -
         s.agents.workspace = str(workspace)
         return s
 
-    settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "N", "N", "N", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
-        patch("squidbot.cli.main.Settings.load", side_effect=load_with_workspace),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", "N", "N", "N", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -333,8 +326,8 @@ async def test_onboard_overwrite_all_yes_replaces_existing_files(tmp_path: Path)
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "y", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", "y", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -353,8 +346,8 @@ async def test_onboard_overwrite_all_no_then_per_file_yes_replaces(tmp_path: Pat
     settings = _make_settings(workspace)
     # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=y, alias=""
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "y", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", "n", "y", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -372,8 +365,8 @@ async def test_onboard_overwrite_all_no_then_per_file_no_keeps(tmp_path: Path) -
     settings = _make_settings(workspace)
     # inputs: api_base, api_key, model, overwrite_all=n, overwrite_SOUL.md=n, alias=""
     with (
-        patch("squidbot.cli.main.input", side_effect=["", "", "", "n", "n", ""]),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=["", "", "", "n", "n", ""]),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)
@@ -394,8 +387,8 @@ async def test_onboard_no_overwrite_prompt_when_no_existing_files(tmp_path: Path
 
     settings = _make_settings(workspace)
     with (
-        patch("squidbot.cli.main.input", side_effect=capturing_input),
-        patch("squidbot.cli.main.Settings", return_value=settings),
+        patch("squidbot.cli.onboard.input", side_effect=capturing_input),
+        patch("squidbot.cli.main._load_or_init_settings", return_value=settings),
         patch("builtins.print"),
     ):
         await _run_onboard(config_path)

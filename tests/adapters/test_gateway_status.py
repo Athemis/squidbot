@@ -16,7 +16,7 @@ async def _noop(*args: object, **kwargs: object) -> None:
 
 class TestGatewayStatusAdapter:
     def test_get_active_sessions_empty(self) -> None:
-        from squidbot.cli.main import GatewayState, GatewayStatusAdapter
+        from squidbot.cli.gateway import GatewayState, GatewayStatusAdapter
 
         state = GatewayState(
             active_sessions={},
@@ -28,7 +28,7 @@ class TestGatewayStatusAdapter:
         assert adapter.get_active_sessions() == []
 
     def test_get_active_sessions_returns_values(self) -> None:
-        from squidbot.cli.main import GatewayState, GatewayStatusAdapter
+        from squidbot.cli.gateway import GatewayState, GatewayStatusAdapter
 
         info = SessionInfo(
             session_id="email:user@example.com",
@@ -47,7 +47,7 @@ class TestGatewayStatusAdapter:
         assert adapter.get_active_sessions() == [info]
 
     def test_get_channel_status(self) -> None:
-        from squidbot.cli.main import GatewayState, GatewayStatusAdapter
+        from squidbot.cli.gateway import GatewayState, GatewayStatusAdapter
 
         cs = ChannelStatus(name="matrix", enabled=True, connected=True)
         state = GatewayState(
@@ -60,7 +60,7 @@ class TestGatewayStatusAdapter:
         assert adapter.get_channel_status() == [cs]
 
     def test_get_cron_jobs(self) -> None:
-        from squidbot.cli.main import GatewayState, GatewayStatusAdapter
+        from squidbot.cli.gateway import GatewayState, GatewayStatusAdapter
 
         job = CronJob(
             id="j1",
@@ -79,7 +79,7 @@ class TestGatewayStatusAdapter:
         assert adapter.get_cron_jobs() == [job]
 
     def test_get_skills_delegates_to_loader(self) -> None:
-        from squidbot.cli.main import GatewayState, GatewayStatusAdapter
+        from squidbot.cli.gateway import GatewayState, GatewayStatusAdapter
 
         skill = SkillMetadata(
             name="git",
@@ -101,7 +101,7 @@ class TestGatewayStatusAdapter:
 
 class TestChannelLoopWithState:
     async def test_first_message_creates_session_info(self) -> None:
-        from squidbot.cli.main import GatewayState, _channel_loop_with_state
+        from squidbot.cli.gateway import GatewayState, _channel_loop_with_state
         from squidbot.core.models import InboundMessage, Session
 
         state = GatewayState(
@@ -133,7 +133,7 @@ class TestChannelLoopWithState:
         assert info.sender_id == "user@example.com"
 
     async def test_second_message_increments_count(self) -> None:
-        from squidbot.cli.main import GatewayState, _channel_loop_with_state
+        from squidbot.cli.gateway import GatewayState, _channel_loop_with_state
         from squidbot.core.models import InboundMessage, Session
 
         state = GatewayState(

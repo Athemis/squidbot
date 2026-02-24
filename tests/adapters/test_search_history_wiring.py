@@ -53,7 +53,7 @@ async def test_search_history_registered_when_enabled(
         patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
         patch.object(Path, "exists", return_value=False),
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         loop, conns, _storage = await _make_agent_loop(
             settings_search_history_enabled,
@@ -70,7 +70,7 @@ async def test_search_history_not_registered_when_disabled(
         patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
         patch.object(Path, "exists", return_value=False),
     ):
-        from squidbot.cli.main import _make_agent_loop
+        from squidbot.cli.gateway import _make_agent_loop
 
         loop, conns, _storage = await _make_agent_loop(
             settings_search_history_disabled,
