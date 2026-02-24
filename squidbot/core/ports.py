@@ -120,7 +120,6 @@ class MemoryPort(Protocol):
     Manages:
     - Conversation history: global JSONL log of all messages across all channels
     - Global memory document: cross-session notes (MEMORY.md), written by the agent
-    - Global summary: cross-channel auto-generated consolidation summary
     - Cron jobs: scheduled task definitions
     """
 
@@ -138,22 +137,6 @@ class MemoryPort(Protocol):
 
     async def save_global_memory(self, content: str) -> None:
         """Overwrite the global memory document."""
-        ...
-
-    async def load_global_summary(self) -> str:
-        """Load the auto-generated global consolidation summary."""
-        ...
-
-    async def save_global_summary(self, content: str) -> None:
-        """Overwrite the global consolidation summary."""
-        ...
-
-    async def load_global_cursor(self) -> int:
-        """Return the last consolidated message index (0 if none)."""
-        ...
-
-    async def save_global_cursor(self, cursor: int) -> None:
-        """Persist the consolidation cursor."""
         ...
 
     async def load_cron_jobs(self) -> list[CronJob]:

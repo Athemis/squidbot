@@ -131,9 +131,6 @@ tests/
 ```
 ~/.squidbot/
 ├── history.jsonl          # global history — all channels, append-only
-├── history.meta.json      # global consolidation cursor
-├── memory/
-│   └── summary.md         # global consolidation summary (all channels)
 ├── workspace/
 │   └── MEMORY.md          # agent-writable long-term memory
 └── cron/
@@ -142,6 +139,7 @@ tests/
 
 `Message` carries `channel: str | None` and `sender_id: str | None`. `MemoryManager`
 labels history entries with `[channel / owner]` or `[channel / sender_id]` for attribution.
+Long-tail recall is explicit: use the `search_history` tool when older details are needed.
 `MemoryPort` has no `session_id` arguments — all operations are global.
 
 **Config:** `owner.aliases` lists names/handles the bot should recognise as the owner

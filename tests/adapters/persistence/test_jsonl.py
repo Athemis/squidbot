@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from squidbot.adapters.persistence.jsonl import JsonlMemory
-from squidbot.core.models import Message
+from squidbot.core.models import CronJob, Message
 
 
 @pytest.mark.asyncio
@@ -41,18 +41,12 @@ async def test_load_history_returns_last_n(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_global_summary_roundtrip(tmp_path: Path) -> None:
+async def test_summary_and_cursor_api_removed(tmp_path: Path) -> None:
     storage = JsonlMemory(base_dir=tmp_path)
-    await storage.save_global_summary("summary text")
-    assert await storage.load_global_summary() == "summary text"
-
-
-@pytest.mark.asyncio
-async def test_global_cursor_roundtrip(tmp_path: Path) -> None:
-    storage = JsonlMemory(base_dir=tmp_path)
-    assert await storage.load_global_cursor() == 0
-    await storage.save_global_cursor(42)
-    assert await storage.load_global_cursor() == 42
+    assert not hasattr(storage, "load_global_summary")
+    assert not hasattr(storage, "save_global_summary")
+    assert not hasattr(storage, "load_global_cursor")
+    assert not hasattr(storage, "save_global_cursor")
 
 
 @pytest.mark.asyncio
@@ -63,3 +57,27 @@ async def test_message_channel_sender_roundtrip(tmp_path: Path) -> None:
     loaded = await storage.load_history()
     assert loaded[0].channel == "matrix"
     assert loaded[0].sender_id == "@bot:matrix.org"
+
+
+@pytest.mark.asyncio
+async def test_global_memory_roundtrip(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    await storage.save_global_memory("facts")
+    assert await storage.load_global_memory() == "facts"
+
+
+@pytest.mark.asyncio
+async def test_cron_jobs_roundtrip(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    job = CronJob(
+        id="job-1",
+        name="Daily",
+        message="ping",
+        schedule="0 9 * * *",
+        channel="cli:local",
+    )
+    await storage.save_cron_jobs([job])
+    loaded = await storage.load_cron_jobs()
+    assert len(loaded) == 1
+    assert loaded[0].id == "job-1"
+    assert loaded[0].message == "ping"

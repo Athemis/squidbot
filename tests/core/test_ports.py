@@ -77,18 +77,6 @@ class MockMemory:
     async def save_global_memory(self, content: str) -> None:
         pass
 
-    async def load_global_summary(self) -> str:
-        return ""
-
-    async def save_global_summary(self, content: str) -> None:
-        pass
-
-    async def load_global_cursor(self) -> int:
-        return 0
-
-    async def save_global_cursor(self, cursor: int) -> None:
-        pass
-
     async def load_cron_jobs(self) -> list:
         return []
 
@@ -124,6 +112,13 @@ class MockSkills:
 def test_mock_memory_satisfies_protocol():
     memory: MemoryPort = MockMemory()  # type: ignore[assignment]
     assert memory is not None
+
+
+def test_memory_port_no_summary_or_cursor_methods():
+    assert "load_global_summary" not in MemoryPort.__dict__
+    assert "save_global_summary" not in MemoryPort.__dict__
+    assert "load_global_cursor" not in MemoryPort.__dict__
+    assert "save_global_cursor" not in MemoryPort.__dict__
 
 
 def test_mock_skills_satisfies_protocol():
