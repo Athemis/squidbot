@@ -184,18 +184,23 @@ class MemoryManager:
             Ordered list of messages ready to send to the LLM.
         """
         load_n = self._consolidation_threshold + self._keep_recent
-        history = await self._storage.load_history(last_n=load_n)
+        all_history = await self._storage.load_history()
+        history = all_history[-load_n:]
         global_memory = await self._storage.load_global_memory()
         global_summary = await self._storage.load_global_summary()
 
         # Load cursor once; used for trigger check, warning check, and consolidation
         cursor = await self._storage.load_global_cursor()
 
+        unconsolidated_count = len(all_history) - cursor
+
         # Consolidate history if unconsolidated messages exceed threshold and LLM available
-        if len(history) - cursor > self._consolidation_threshold and self._llm is not None:
-            history = await self._consolidate(history, cursor)
+        if unconsolidated_count > self._consolidation_threshold and self._llm is not None:
+            history = await self._consolidate(all_history, cursor)
             # Reload summary so the freshly written summary appears in the system prompt
             global_summary = await self._storage.load_global_summary()
+            cursor = await self._storage.load_global_cursor()
+            unconsolidated_count = len(all_history) - cursor
 
         # Label each history message with channel/sender context
         labelled_history = [self._label_message(msg) for msg in history]
@@ -219,7 +224,7 @@ class MemoryManager:
                     full_system += f"\n\n{body}"
 
         # Warn the agent one or two turns before consolidation fires
-        if len(history) - cursor >= self._consolidation_threshold - 2:
+        if unconsolidated_count >= self._consolidation_threshold - 2:
             full_system += _CONSOLIDATION_WARNING
 
         messages: list[Message] = [
@@ -335,7 +340,7 @@ class MemoryManager:
         Only summarizes messages[cursor:-keep_recent]. Advances global cursor after success.
 
         Args:
-            history: Full message history (already loaded with load_n limit).
+            history: Full global message history.
             cursor: The already-loaded consolidation cursor (last consolidated message index).
 
         Returns:
