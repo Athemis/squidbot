@@ -917,6 +917,7 @@ async def _run_onboard(config_path: Path) -> None:
 
 
 def main() -> None:
+    """Run the squidbot CLI application."""
     app()
 
 
