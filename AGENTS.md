@@ -8,6 +8,14 @@
 
 **Project language:** English is the project language for code, documentation, issues, plans, and pull requests.
 
+## Project Principles
+
+- **Readable and documented:** Code is written to be read by humans first.
+  All modules, classes, and public methods have docstrings.
+- **Test-driven:** Tests are written before implementation. All changes must pass
+  `pytest` and `mypy --strict`.
+- **Lightweight:** Minimize dependencies. Prefer simple solutions. Keep startup fast.
+
 ## Commands
 
 ```bash
@@ -40,6 +48,7 @@ uv tool install --reinstall /home/alex/git/squidbot
 ```
 
 **Always run `uv run ruff check .` and `uv run pytest` before committing.**
+
 ## Context7 Library IDs
 
 - `pydantic` -> `/pydantic/pydantic`
@@ -137,6 +146,18 @@ the import graph clean and startup fast.
 - **Formatter:** `ruff format` (replaces black)
 - **Linter rules:** `E, F, I, UP, B, SIM` (see `pyproject.toml`)
 - **Python version:** 3.14 (`requires-python = ">=3.14"`, `target-version = "py314"`)
+
+## Pythonic Style Preferences
+
+- Follow the Zen of Python in practice: readability over cleverness, explicit over implicit,
+  and simple over complex.
+- Prefer guard clauses and early returns over deep nesting; avoid `else` after a `return`.
+- Keep control flow straightforward; avoid dense one-liners for non-trivial logic.
+- Use descriptive variable names and small scopes; avoid ambiguous abbreviations.
+- Name booleans as predicates (`is_`, `has_`, `can_`, `should_`) for readable conditions.
+- Use verb phrases for functions and noun phrases for classes.
+- Replace magic numbers and strings with named constants when they affect behavior.
+- Validate invariants early and fail with clear, local checks.
 
 ---
 
@@ -240,6 +261,8 @@ async def chat(self, messages: list[Message], tools: list[ToolDefinition]) -> ..
 
 - `asyncio_mode = "auto"` is set globally — `async def test_*` functions run without
   `@pytest.mark.asyncio`. Adding the decorator explicitly is also fine.
+- Avoid mocks as much as possible; prefer tests that exercise the real implementation.
+- Do not duplicate production logic in tests; assert observable behavior and outcomes.
 - **Core tests** (`tests/core/`) use hand-written in-memory doubles — no `unittest.mock`,
   no network, no real filesystem. Use `pytest`'s `tmp_path` fixture for FS tests.
 - **Adapter tests** (`tests/adapters/`) use `unittest.mock.patch`, `MagicMock`, `AsyncMock`.
