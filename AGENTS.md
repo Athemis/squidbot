@@ -6,6 +6,8 @@
 
 **Cross-channel memory:** The assistant must be able to recall knowledge from all channels in any other channel. If the user discusses a topic over e-mail and later asks about it in a Matrix chat (or vice versa), the assistant must have that context available. The assistant may also participate in group chats without the user present — that knowledge is equally accessible across channels.
 
+**Project language:** English is the project language for code, documentation, issues, plans, and pull requests.
+
 ## Commands
 
 ```bash
