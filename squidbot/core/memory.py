@@ -41,13 +41,13 @@ _CONSOLIDATION_SYSTEM = (
 
 _META_CONSOLIDATION_SYSTEM = (
     "You are a memory consolidation assistant. "
-    "You are given an existing session summary that has grown too long. "
+    "You are given an existing conversation summary that has grown too long. "
     "Compress it into a shorter summary that retains all facts, decisions, and context. "
     "Output only the summary text — no preamble, no commentary, no formatting."
 )
 
 _META_CONSOLIDATION_PROMPT = (
-    "The following is a session summary that has grown too long and needs to be compressed.\n\n"
+    "The following is a conversation summary that has grown too long and needs to be compressed.\n\n"
     "{summary}\n\n"
     "Rewrite this as a compact summary of approximately {sentences} sentences. "
     "Retain all facts, decisions, and context. Do not discard any information."
