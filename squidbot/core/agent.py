@@ -105,8 +105,6 @@ class AgentLoop:
         _extra: dict[str, ToolPort] = {t.name: t for t in (extra_tools or [])}
 
         messages = await self._memory.build_messages(
-            channel=session.channel,
-            sender_id=session.sender_id,
             user_message=user_message,
             system_prompt=self._system_prompt,
         )

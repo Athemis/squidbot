@@ -116,8 +116,6 @@ class MemoryManager:
 
     async def build_messages(
         self,
-        channel: str,
-        sender_id: str,
         user_message: str,
         system_prompt: str,
     ) -> list[Message]:
@@ -128,8 +126,6 @@ class MemoryManager:
                 + [labelled_history] + [user_message]
 
         Args:
-            channel: The channel this message came in on.
-            sender_id: The sender identifier for this message.
             user_message: The current user input.
             system_prompt: The base system prompt (AGENTS.md content).
 
