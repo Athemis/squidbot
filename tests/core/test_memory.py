@@ -154,6 +154,40 @@ async def test_build_messages_scoped_alias_only_labels_in_matching_channel(
     assert messages[2].content == "[cli / @alex:matrix.org]\ncli hi"
 
 
+async def test_build_messages_checks_scoped_alias_before_returning_unscoped_match(
+    storage: InMemoryStorage,
+) -> None:
+    """A later scoped match must win over an earlier unscoped match."""
+
+    class SpyAlias:
+        def __init__(self, address: str, channel: str | None) -> None:
+            self._address = address
+            self._channel = channel
+            self.channel_accesses = 0
+
+        @property
+        def address(self) -> str:
+            return self._address
+
+        @property
+        def channel(self) -> str | None:
+            self.channel_accesses += 1
+            return self._channel
+
+    scoped_alias = SpyAlias(address="alex", channel="matrix")
+    aliases: list[Any] = [SpyAlias(address="alex", channel=None), scoped_alias]
+    storage._history = [Message(role="user", content="hi", channel="matrix", sender_id="alex")]
+    manager = MemoryManager(storage=storage, owner_aliases=aliases)
+
+    messages = await manager.build_messages(
+        user_message="follow up",
+        system_prompt="sys",
+    )
+
+    assert messages[1].content == "[matrix / owner]\nhi"
+    assert scoped_alias.channel_accesses == 1
+
+
 async def test_build_messages_legacy_history_without_channel_or_sender_is_unchanged(
     storage: InMemoryStorage,
 ) -> None:

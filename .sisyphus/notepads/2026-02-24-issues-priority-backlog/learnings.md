@@ -1,0 +1,5 @@
+# Learnings
+Closed issue #6: build_messages signature already clean (2 args) on main.
+_is_owner can stay single-pass by tracking an unscoped match flag while continuing to scan for a scoped match.
+The safe flow is: return immediately on scoped equality, defer unscoped True until after the loop.
+A spy alias with side-effecting channel property makes precedence observable and catches early unscoped returns.

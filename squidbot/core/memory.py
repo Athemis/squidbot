@@ -70,15 +70,15 @@ class MemoryManager:
         Returns:
             True if any alias matches, False otherwise.
         """
-        # Channel-scoped check first
+        has_unscoped_match = False
         for entry in self._owner_aliases:
-            if entry.channel == channel and entry.address == sender_id:
+            if entry.address != sender_id:
+                continue
+            if entry.channel == channel:
                 return True
-        # Unscoped check
-        for entry in self._owner_aliases:
-            if entry.channel is None and entry.address == sender_id:
-                return True
-        return False
+            if entry.channel is None:
+                has_unscoped_match = True
+        return has_unscoped_match
 
     def _label_message(self, msg: Message) -> Message:
         """
