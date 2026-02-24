@@ -42,8 +42,6 @@ class InMemoryStorage:
     def __init__(self) -> None:
         self._history: list[Message] = []
         self._global_memory: str = ""
-        self._summary: str = ""
-        self._cursor: int = 0
 
     async def load_history(self, last_n: int | None = None) -> list[Message]:
         if last_n is None:
@@ -58,18 +56,6 @@ class InMemoryStorage:
 
     async def save_global_memory(self, content: str) -> None:
         self._global_memory = content
-
-    async def load_global_summary(self) -> str:
-        return self._summary
-
-    async def save_global_summary(self, content: str) -> None:
-        self._summary = content
-
-    async def load_global_cursor(self) -> int:
-        return self._cursor
-
-    async def save_global_cursor(self, cursor: int) -> None:
-        self._cursor = cursor
 
     async def load_cron_jobs(self) -> list:
         return []

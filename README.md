@@ -10,7 +10,7 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Tools** — shell commands, file read/write/edit, web search, memory write, MCP servers, sub-agents (spawn)
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
-- **Long-term memory** — two-level: global `MEMORY.md` (agent-curated, cross-channel) + global conversation summary (auto-generated from `history.jsonl`); meta-consolidation compresses summaries via LLM when they grow large
+- **Long-term memory** — manual-only: global `MEMORY.md` (agent-curated, cross-channel) plus global `history.jsonl`; use `search_history` for explicit recall of older details
 - **Hexagonal architecture** — ports & adapters, `mypy --strict`, 382 tests
 
 ## Installation
@@ -71,8 +71,7 @@ llm:
 agents:
   workspace: "~/.squidbot/workspace"   # bootstrap files live here
   restrict_to_workspace: true
-  consolidation_threshold: 100         # summarize history when this many new messages accumulate since last consolidation
-  keep_recent_ratio: 0.2               # fraction of threshold kept verbatim after consolidation (e.g. 0.2 = 20 messages when threshold is 100)
+  history_context_messages: 80         # number of recent global history messages included in prompt context
 
   heartbeat:
     enabled: true
@@ -207,20 +206,15 @@ mtime polling — no restart needed after creating or editing a skill.
 
 **Memory system:**
 
-Two-level persistence, global across all channels:
+Manual-only persistence, global across all channels:
 
 - **Global memory** (`~/.squidbot/workspace/MEMORY.md`) — agent-curated notes visible in every
   session under `## Your Memory`. Written by the agent via the `memory_write` tool (available
   in all channels: CLI, Matrix, Email, cron, heartbeat). Persists facts, preferences, and
   ongoing projects across all channels.
-- **Global summary** (`~/.squidbot/memory/summary.md`) — auto-generated when conversation
-  history exceeds `consolidation_threshold`. Covers all channels; messages are labelled with
-  `[channel / sender]` for attribution. The agent cannot write these directly; the system
-  appends a new summary chunk after each consolidation cycle. When summaries grow beyond ~600
-  words, meta-consolidation recompresses the full summary via LLM rather than discarding old
-  entries.
-- **Consolidation cursor** (`~/.squidbot/history.meta.json`) — tracks the last consolidated
-  message index so restarts don't re-summarise already-processed history.
+- **Global history** (`~/.squidbot/history.jsonl`) — append-only history across all channels,
+  with entries labelled by channel/sender. Recent messages are included in prompt context,
+  and older details are recalled explicitly with the `search_history` tool.
 
 **Persistence layout:**
 
@@ -228,9 +222,6 @@ Two-level persistence, global across all channels:
 ~/.squidbot/
 ├── squidbot.yaml
 ├── history.jsonl              # Global conversation history — all channels, append-only
-├── history.meta.json          # Global consolidation cursor
-├── memory/
-│   └── summary.md             # Auto-generated global summary (all channels)
 └── cron/jobs.json             # Scheduled task definitions
 
 ~/.squidbot/workspace/

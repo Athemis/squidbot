@@ -8,9 +8,6 @@ JSON file. Concurrent writes to history.jsonl are safe via fcntl.flock.
 Directory layout:
     <base_dir>/
     ├── history.jsonl          # all channels, append-only
-    ├── history.meta.json      # global consolidation cursor
-    ├── memory/
-    │   └── summary.md         # single global consolidation summary
     ├── workspace/
     │   └── MEMORY.md          # global cross-session memory (unchanged)
     └── cron/
@@ -73,25 +70,6 @@ def _history_file(base_dir: Path) -> Path:
     """Return the global history JSONL path, creating parent directories."""
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / "history.jsonl"
-
-
-def _history_meta_file(base_dir: Path) -> Path:
-    """Return the global consolidation cursor path."""
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir / "history.meta.json"
-
-
-def _global_summary_file(base_dir: Path, *, write: bool = False) -> Path:
-    """Return the global consolidation summary path.
-
-    Args:
-        base_dir: Root storage directory.
-        write: If True, creates parent directories.
-    """
-    path = base_dir / "memory" / "summary.md"
-    if write:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def _global_memory_file(base_dir: Path, *, write: bool = False) -> Path:
@@ -179,22 +157,6 @@ class JsonlMemory:
         path = _global_memory_file(self._base, write=True)
         path.write_text(content, encoding="utf-8")
 
-    async def load_global_summary(self) -> str:
-        """Load the global consolidation summary."""
-        path = _global_summary_file(self._base)
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
-
-    async def save_global_summary(self, content: str) -> None:
-        """Overwrite the global consolidation summary.
-
-        Args:
-            content: The summary text to persist.
-        """
-        path = _global_summary_file(self._base, write=True)
-        path.write_text(content, encoding="utf-8")
-
     async def load_cron_jobs(self) -> list[CronJob]:
         """Load all scheduled jobs from the JSON file."""
         path = _cron_file(self._base)
@@ -239,20 +201,3 @@ class JsonlMemory:
             for j in jobs
         ]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    async def load_global_cursor(self) -> int:
-        """Return the last_consolidated cursor, or 0 if no meta file exists."""
-        path = _history_meta_file(self._base)
-        if not path.exists():
-            return 0
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return int(data.get("last_consolidated", 0))
-
-    async def save_global_cursor(self, cursor: int) -> None:
-        """Write the last_consolidated cursor to history.meta.json.
-
-        Args:
-            cursor: The byte/line offset to persist.
-        """
-        path = _history_meta_file(self._base)
-        path.write_text(json.dumps({"last_consolidated": cursor}), encoding="utf-8")

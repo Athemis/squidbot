@@ -242,30 +242,20 @@ def test_agent_config_no_longer_has_system_prompt_file():
     assert not hasattr(cfg, "system_prompt_file")
 
 
-def test_consolidation_defaults():
+def test_history_context_messages_defaults():
     settings = Settings()
-    assert settings.agents.consolidation_threshold == 100
-    assert settings.agents.keep_recent_ratio == 0.2
-    assert not hasattr(settings.agents, "keep_recent")
-    assert not hasattr(settings.agents, "consolidation_pool")
+    assert settings.agents.history_context_messages == 80
+    assert not hasattr(settings.agents, "consolidation_threshold")
+    assert not hasattr(settings.agents, "keep_recent_ratio")
 
 
-def test_keep_recent_ratio_must_be_between_0_and_1_exclusive():
+def test_history_context_messages_must_be_greater_than_zero():
     with pytest.raises(ValidationError):
-        AgentConfig(consolidation_threshold=100, keep_recent_ratio=0.0)
+        AgentConfig(history_context_messages=0)
     with pytest.raises(ValidationError):
-        AgentConfig(consolidation_threshold=100, keep_recent_ratio=1.0)
-    with pytest.raises(ValidationError):
-        AgentConfig(consolidation_threshold=100, keep_recent_ratio=1.5)
+        AgentConfig(history_context_messages=-1)
 
 
-def test_keep_recent_ratio_valid():
-    cfg = AgentConfig(consolidation_threshold=100, keep_recent_ratio=0.3)
-    assert cfg.keep_recent_ratio == 0.3
-
-
-def test_keep_recent_ratio_low_threshold_is_valid():
-    """threshold * ratio < 1 is allowed — MemoryManager clamps to minimum 1."""
-    cfg = AgentConfig(consolidation_threshold=3, keep_recent_ratio=0.2)  # int(0.6) = 0 → clamped
-    assert cfg.consolidation_threshold == 3
-    assert cfg.keep_recent_ratio == 0.2
+def test_history_context_messages_valid():
+    cfg = AgentConfig(history_context_messages=42)
+    assert cfg.history_context_messages == 42
