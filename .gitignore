@@ -43,3 +43,7 @@ Thumbs.db
 # squidbot runtime data (never commit user workspace or secrets)
 squidbot.yaml
 .squidbot/
+
+
+# Sisyphus agent working data
+.sisyphus/
