@@ -1,4 +1,3 @@
-
 import pytest
 
 from squidbot.adapters.tools.files import ListFilesTool, ReadFileTool, WriteFileTool

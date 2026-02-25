@@ -176,15 +176,15 @@ class TestReSubject:
 
 
 class TestExtractAttachments:
-    def test_no_attachments(self, tmp_path: Path) -> None:
+    async def test_no_attachments(self, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import _extract_attachments
 
         raw = _make_plain("body")
         msg = email_lib.message_from_bytes(raw)
-        lines = _extract_attachments(msg, tmp_path)
+        lines = await _extract_attachments(msg, tmp_path)
         assert lines == []
 
-    def test_attachment_saved_to_tmp(self, tmp_path: Path) -> None:
+    async def test_attachment_saved_to_tmp(self, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import _extract_attachments
 
         outer = MIMEMultipart("mixed")
@@ -200,10 +200,24 @@ class TestExtractAttachments:
         outer.attach(part)
 
         msg = email_lib.message_from_bytes(outer.as_bytes())
-        lines = _extract_attachments(msg, tmp_path)
+        to_thread_calls: list[str] = []
+
+        async def fake_to_thread(func: object, *args: object, **kwargs: object) -> object:
+            method = func
+            method_name = getattr(method, "__name__", repr(method))
+            to_thread_calls.append(method_name)
+            return method(*args, **kwargs)  # type: ignore[misc]
+
+        with patch(
+            "squidbot.adapters.channels.email.asyncio.to_thread",
+            new=AsyncMock(side_effect=fake_to_thread),
+        ):
+            lines = await _extract_attachments(msg, tmp_path)
+
         assert len(lines) == 1
         assert "report.pdf" in lines[0]
         assert "application/pdf" in lines[0]
+        assert "write_bytes" in to_thread_calls
         # file actually exists
         saved = [f for f in tmp_path.iterdir()]
         assert len(saved) == 1
@@ -407,8 +421,13 @@ class TestEmailChannelSend:
         ch = EmailChannel(config=config, tmp_dir=tmp_path)
         outbound = self._make_outbound(text="**bold**")
 
-        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+        with (
+            patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp),
+            patch("squidbot.adapters.channels.email.MarkdownIt") as markdown_it_cls,
+        ):
             await ch.send(outbound)  # type: ignore[arg-type]
+
+        markdown_it_cls.assert_not_called()
 
         sent = fake_smtp.send_message.call_args[0][0]
         content_type = sent.get_content_type()
@@ -428,7 +447,21 @@ class TestEmailChannelSend:
         ch = EmailChannel(config=config, tmp_dir=tmp_path)
         outbound = self._make_outbound(attachment=att)
 
-        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+        to_thread_calls: list[str] = []
+
+        async def fake_to_thread(func: object, *args: object, **kwargs: object) -> object:
+            method = func
+            method_name = getattr(method, "__name__", repr(method))
+            to_thread_calls.append(method_name)
+            return method(*args, **kwargs)  # type: ignore[misc]
+
+        with (
+            patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp),
+            patch(
+                "squidbot.adapters.channels.email.asyncio.to_thread",
+                new=AsyncMock(side_effect=fake_to_thread),
+            ),
+        ):
             await ch.send(outbound)  # type: ignore[arg-type]
 
         sent = fake_smtp.send_message.call_args[0][0]
@@ -436,6 +469,7 @@ class TestEmailChannelSend:
         parts = sent.get_payload()
         assert isinstance(parts, list)
         assert len(parts) == 2  # multipart/alternative + attachment
+        assert "read_bytes" in to_thread_calls
 
     async def test_send_references_header(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import EmailChannel

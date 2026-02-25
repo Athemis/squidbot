@@ -1,0 +1,6 @@
+squidbot.cli.main:app
+
+Smoke test commands:
+  uv run python -m squidbot.cli.main --help
+  uv run python -m squidbot.cli.main cron --help
+  uv run python -m squidbot.cli.main skills --help

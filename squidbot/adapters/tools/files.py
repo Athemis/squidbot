@@ -7,6 +7,7 @@ the workspace directory and path traversal outside it is blocked.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -56,12 +57,13 @@ class ReadFileTool:
             return ToolResult(
                 tool_call_id="", content="Error: path is outside workspace", is_error=True
             )
-        if not resolved.exists():
+        if not await asyncio.to_thread(resolved.exists):
             return ToolResult(
                 tool_call_id="", content=f"Error: {path} does not exist", is_error=True
             )
         try:
-            return ToolResult(tool_call_id="", content=resolved.read_text(encoding="utf-8"))
+            content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
+            return ToolResult(tool_call_id="", content=content)
         except Exception as e:
             return ToolResult(tool_call_id="", content=str(e), is_error=True)
 
@@ -106,8 +108,8 @@ class WriteFileTool:
                 tool_call_id="", content="Error: path is outside workspace", is_error=True
             )
         try:
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-            resolved.write_text(content, encoding="utf-8")
+            await asyncio.to_thread(resolved.parent.mkdir, parents=True, exist_ok=True)
+            await asyncio.to_thread(resolved.write_text, content, encoding="utf-8")
             return ToolResult(tool_call_id="", content=f"Written {len(content)} bytes to {path}")
         except Exception as e:
             return ToolResult(tool_call_id="", content=str(e), is_error=True)
@@ -147,10 +149,15 @@ class ListFilesTool:
             return ToolResult(
                 tool_call_id="", content="Error: path is outside workspace", is_error=True
             )
-        if not resolved.is_dir():
+        if not await asyncio.to_thread(resolved.is_dir):
             return ToolResult(
                 tool_call_id="", content=f"Error: {path} is not a directory", is_error=True
             )
-        entries = sorted(resolved.iterdir(), key=lambda p: (p.is_file(), p.name))
-        lines = [f"{'d' if e.is_dir() else 'f'}  {e.name}" for e in entries]
-        return ToolResult(tool_call_id="", content="\n".join(lines) if lines else "(empty)")
+
+        def _list_dir(p: Path) -> str:
+            entries = sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name))
+            lines = [f"{'d' if e.is_dir() else 'f'}  {e.name}" for e in entries]
+            return "\n".join(lines) if lines else "(empty)"
+
+        content = await asyncio.to_thread(_list_dir, resolved)
+        return ToolResult(tool_call_id="", content=content)

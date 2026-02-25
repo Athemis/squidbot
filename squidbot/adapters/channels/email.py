@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 import aioimaplib
 import aiosmtplib
 from loguru import logger
+from markdown_it import MarkdownIt
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
 _NO_TEXT: str = "[Keine Textinhalte]"
 
 _SKIP_TAGS: frozenset[str] = frozenset({"script", "style", "head"})
+
+_md = MarkdownIt()
 
 
 def _normalize_address(addr: str) -> str:
@@ -221,7 +224,7 @@ def _re_subject(subject: str) -> str:
     return f"Re: {subject}"
 
 
-def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
+async def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
     """
     Extract all attachment parts and save them to tmp_dir.
 
@@ -245,7 +248,7 @@ def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
         ext = mimetypes.guess_extension(mime) or Path(filename).suffix or ""
         sha = hashlib.sha256(payload).hexdigest()[:8]
         dest = tmp_dir / f"squidbot-{sha}{ext}"
-        dest.write_bytes(payload)
+        await asyncio.to_thread(dest.write_bytes, payload)
         lines.append(f"[Anhang: {filename} ({mime})] → {dest}")
     return lines
 
@@ -323,8 +326,6 @@ class EmailChannel:
         from email.mime.multipart import MIMEMultipart  # noqa: PLC0415
         from email.mime.text import MIMEText  # noqa: PLC0415
 
-        from markdown_it import MarkdownIt  # noqa: PLC0415
-
         meta = message.metadata
         to_addr: str = str(meta.get("email_from", message.session.sender_id))
         subject: str = _re_subject(str(meta.get("email_subject", "")))
@@ -334,7 +335,7 @@ class EmailChannel:
 
         # Build multipart/alternative (plain + HTML)
         plain_part = MIMEText(message.text, "plain", "utf-8")
-        html_body = MarkdownIt().render(message.text)
+        html_body = _md.render(message.text)
         html_part = MIMEText(html_body, "html", "utf-8")
         alt = MIMEMultipart("alternative")
         alt.attach(plain_part)
@@ -343,7 +344,7 @@ class EmailChannel:
         if message.attachment and message.attachment.exists():
             outer = MIMEMultipart("mixed")
             outer.attach(alt)
-            att_data = message.attachment.read_bytes()
+            att_data = await asyncio.to_thread(message.attachment.read_bytes)
             att_mime, _ = mimetypes.guess_type(message.attachment.name)
             att_part = MIMEBase(*(att_mime or "application/octet-stream").split("/", 1))
             att_part.set_payload(att_data)
@@ -481,7 +482,7 @@ class EmailChannel:
             return
 
         text = _extract_text(msg)
-        attachment_lines = _extract_attachments(msg, self._tmp_dir)
+        attachment_lines = await _extract_attachments(msg, self._tmp_dir)
         if attachment_lines:
             text = text + "\n" + "\n".join(attachment_lines)
 

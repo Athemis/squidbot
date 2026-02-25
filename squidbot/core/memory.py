@@ -51,6 +51,15 @@ class MemoryManager:
         self._storage = storage
         self._skills = skills
         self._owner_aliases: list[OwnerAliasEntry] = owner_aliases or []
+        self._scoped_aliases: set[tuple[str, str]] = set()
+        self._unscoped_aliases: set[str] = set()
+        for entry in self._owner_aliases:
+            channel = entry.channel
+            if channel:
+                self._scoped_aliases.add((entry.address, channel))
+            else:
+                self._unscoped_aliases.add(entry.address)
+
         if history_context_messages <= 0:
             raise ValueError("history_context_messages must be > 0")
         self._history_context_messages = history_context_messages
@@ -70,16 +79,9 @@ class MemoryManager:
         Returns:
             True if any alias matches, False otherwise.
         """
-        has_unscoped_match = False
-        for entry in self._owner_aliases:
-            if entry.address != sender_id:
-                continue
-            if entry.channel == channel:
-                return True
-            if entry.channel is None:
-                has_unscoped_match = True
-        return has_unscoped_match
-
+        if (sender_id, channel) in self._scoped_aliases:
+            return True
+        return sender_id in self._unscoped_aliases
     def _label_message(self, msg: Message) -> Message:
         """
         Return a copy of msg with a channel/sender label prepended to content.

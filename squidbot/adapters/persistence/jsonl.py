@@ -25,7 +25,6 @@ import fcntl
 import json
 import os
 import tempfile
-from collections import deque
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -208,9 +207,10 @@ class JsonlMemory:
             first_skipped_preview: str | None = None
 
             if last_n is not None and last_n > 0:
-                recent_messages: deque[Message] = deque(maxlen=last_n)
+                block_size = 64 * 1024
+                reverse_chrono_messages: list[Message] = []
 
-                with path.open("r", encoding="utf-8", errors="replace") as f:
+                with path.open("rb") as f:
                     has_lock = False
                     try:
                         try:
@@ -223,28 +223,51 @@ class JsonlMemory:
                         except Exception:
                             has_lock = False
 
-                        for raw_line in f:
-                            line = raw_line.strip()
-                            if not line:
-                                continue
+                        f.seek(0, os.SEEK_END)
+                        position = f.tell()
+                        carry = b""
 
-                            message = deserialize_message_safe(line)
-                            if message is None:
-                                skipped_lines += 1
-                                if first_skipped_preview is None:
-                                    # Keep a short preview for debugging. Note: this may
-                                    # include user content; it is truncated and logged
-                                    # only once per load_history() call.
-                                    first_skipped_preview = line[:120]
-                                continue
+                        while position > 0 and len(reverse_chrono_messages) < last_n:
+                            read_size = min(block_size, position)
+                            position -= read_size
+                            f.seek(position)
+                            block = f.read(read_size)
 
-                            recent_messages.append(message)
+                            data = block + carry
+                            lines = data.split(b"\n")
+
+                            if position > 0:
+                                carry = lines[0]
+                                complete_lines = lines[1:]
+                            else:
+                                carry = b""
+                                complete_lines = lines
+
+                            for raw_line in reversed(complete_lines):
+                                line = raw_line.decode("utf-8", errors="replace").strip()
+                                if not line:
+                                    continue
+
+                                message = deserialize_message_safe(line)
+                                if message is None:
+                                    skipped_lines += 1
+                                    if first_skipped_preview is None:
+                                        # Keep a short preview for debugging. Note: this may
+                                        # include user content; it is truncated and logged
+                                        # only once per load_history() call.
+                                        first_skipped_preview = line[:120]
+                                    continue
+
+                                reverse_chrono_messages.append(message)
+                                if len(reverse_chrono_messages) >= last_n:
+                                    break
                     finally:
                         if has_lock:
                             with suppress(OSError):
                                 fcntl.flock(f, fcntl.LOCK_UN)
 
-                return list(recent_messages), skipped_lines, first_skipped_preview
+                reverse_chrono_messages.reverse()
+                return reverse_chrono_messages, skipped_lines, first_skipped_preview
 
             all_messages: list[Message] = []
             with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -257,8 +280,8 @@ class JsonlMemory:
                     except Exception:
                         has_lock = False
 
-                    for raw_line in f:
-                        line = raw_line.strip()
+                    for text_line in f:
+                        line = text_line.strip()
                         if not line:
                             continue
 

@@ -174,6 +174,49 @@ class SubAgentFactory:
         self._profiles = profiles
         self._default_pool = default_pool
         self._resolve_llm = resolve_llm
+        self._bootstrap_cache: dict[tuple[str, ...], tuple[dict[Path, float], str]] = {}
+        self._system_prompt_file_cache: dict[tuple[Path, float], str] = {}
+
+    def _collect_existing_mtimes(self, filenames: tuple[str, ...]) -> dict[Path, float]:
+        mtimes: dict[Path, float] = {}
+        for name in filenames:
+            file_path = self._workspace / name
+            if file_path.exists():
+                mtimes[file_path] = file_path.stat().st_mtime
+        return mtimes
+
+    def _get_bootstrap_prompt(self, filenames: list[str]) -> str:
+        file_names_key = tuple(filenames)
+        mtimes = self._collect_existing_mtimes(file_names_key)
+        cached = self._bootstrap_cache.get(file_names_key)
+        if cached is not None:
+            cached_mtimes, cached_prompt = cached
+            if cached_mtimes == mtimes:
+                return cached_prompt
+
+        prompt = _load_bootstrap_prompt(self._workspace, list(file_names_key))
+        self._bootstrap_cache[file_names_key] = (mtimes, prompt)
+        return prompt
+
+    def _get_profile_system_prompt_file(self, relative_path: str) -> str:
+        file_path = self._workspace / relative_path
+        if not file_path.exists():
+            return ""
+
+        mtime = file_path.stat().st_mtime
+        cache_key = (file_path, mtime)
+        cached = self._system_prompt_file_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        content = file_path.read_text(encoding="utf-8")
+        self._system_prompt_file_cache = {
+            key: value
+            for key, value in self._system_prompt_file_cache.items()
+            if key[0] != file_path
+        }
+        self._system_prompt_file_cache[cache_key] = content
+        return content
 
     def build(
         self,
@@ -206,13 +249,15 @@ class SubAgentFactory:
         )
         prompt_parts: list[str] = []
         if bootstrap_files:
-            base = _load_bootstrap_prompt(self._workspace, bootstrap_files)
+            base = self._get_bootstrap_prompt(bootstrap_files)
             prompt_parts.append(base)
 
         if profile and profile.system_prompt_file:
-            file_path = self._workspace / profile.system_prompt_file
-            if file_path.exists():
-                prompt_parts.append(file_path.read_text(encoding="utf-8"))
+            profile_prompt_file_content = self._get_profile_system_prompt_file(
+                profile.system_prompt_file
+            )
+            if profile_prompt_file_content:
+                prompt_parts.append(profile_prompt_file_content)
 
         # system_prompt_override (from LLM tool call) takes precedence over profile.system_prompt
         inline = system_prompt_override or (profile.system_prompt if profile else "")

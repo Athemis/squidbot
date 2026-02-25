@@ -1,0 +1,24 @@
+- Added a deterministic perf runner that uses TemporaryDirectory fixtures for JSONL history and skills trees, avoiding ~/.squidbot state.
+- Metrics are emitted as stable key=value lines and mirrored to .sisyphus/evidence/task-1-baseline.txt for diffable baselines.
+- Matrix media metadata extraction now uses asyncio.create_subprocess_exec with await proc.communicate() and a 10s timeout to avoid blocking the event loop.
+- Matrix attachment upload/download paths now offload Path.read_bytes and Path.write_bytes via asyncio.to_thread in async methods.
+- Matrix tests now mock asyncio.create_subprocess_exec for ffprobe success/failure and assert matrix.py contains no subprocess.run call site.
+- Offloaded synchronous filesystem I/O in ReadFileTool, WriteFileTool, and ListFilesTool to asyncio.to_thread() to prevent event-loop blocking.
+- Verified offloading using monkeypatch in tests to assert asyncio.to_thread() is called with expected functions (exists, read_text, mkdir, write_text, is_dir, _list_dir).
+- Grouped complex listing logic in ListFilesTool into a helper function to run it entirely in a thread, avoiding multiple thread hops for each entry's stat calls.
+- EmailChannel now reuses module-level  () to avoid per-send renderer allocations.
+- Attachment I/O in email channel is now offloaded with  for both receive extraction () and send ().
+- Deterministic unit tests can validate offloading by patching  with an  side effect that executes the provided callable.
+- EmailChannel now reuses a module-level MarkdownIt instance (_md) to avoid per-send renderer allocations.
+- Attachment I/O in email channel is now offloaded with asyncio.to_thread for both receive extraction (write_bytes) and send (read_bytes).
+- Deterministic unit tests can validate offloading by patching asyncio.to_thread with an AsyncMock side effect that executes the provided callable.
+- FsSkillsLoader now keeps a 2-second list cache keyed by monotonic timestamps, eliminating repeated directory scans during hot prompt loops while preserving fast hot-reload after TTL expiry.
+- Skill body reads are cached by (SKILL.md path, st_mtime), so repeated load_skill_body() calls avoid read_text unless the file mtime changes.
+- Cache invalidation tests are stable when monotonic is monkeypatched and file mtimes are forced forward via os.utime after rewriting SKILL.md.
+- ToolRegistry.get_definitions() now uses an internal tuple cache to avoid rebuilding the list on every call.
+- The cache is invalidated (set to None) whenever a new tool is registered.
+- get_definitions() returns a list copy of the cached tuple to prevent external mutation from affecting the cache.
+- SubAgentFactory prompt assembly can avoid repeated file reads by caching bootstrap prompts per filenames tuple and existing-file mtimes dict, and caching profile prompt files by (path, mtime) with per-path stale-entry eviction.
+- Missing bootstrap/profile prompt files should stay silent and uncached; this preserves current behavior while keeping cache keys stable for existing files only.
+- Async blocking audits are more accurate when they parse AST and only flag filesystem calls inside async defs, instead of plain regex over all modules.
+- To avoid false positives, the audit should treat helper functions passed to asyncio.to_thread as offloaded even when the blocking call appears on a different line.

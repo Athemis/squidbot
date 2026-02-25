@@ -1,0 +1,4 @@
+6	OPEN	fix(memory): clean up unused build_messages parameters		2026-02-24T09:46:41Z
+5	OPEN	chore(memory): align terminology with global summary model		2026-02-24T09:46:41Z
+4	OPEN	refactor(memory): simplify owner alias resolution (DRY)		2026-02-24T09:46:41Z
+2	OPEN	Consider token-based instead of message-count-based context window		2026-02-24T11:22:46Z
