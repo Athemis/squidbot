@@ -28,7 +28,6 @@ import aioimaplib
 import aiosmtplib
 import mistune
 from loguru import logger
-from markdown_it import MarkdownIt
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 
