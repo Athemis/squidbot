@@ -19,11 +19,11 @@ import subprocess
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+import mistune
 import nio
 from loguru import logger
-from markdown_it import MarkdownIt
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 
@@ -36,12 +36,12 @@ _TYPING_TIMEOUT_MS: int = 30_000
 _TYPING_KEEPALIVE_S: float = 25.0
 _TYPING_RETRY_DEFAULT_S: float = 5.0
 
-_md = MarkdownIt()
+_md = mistune.create_markdown(escape=True)
 
 
 def _render_markdown(text: str) -> str:
     """Render Markdown to HTML for Matrix formatted_body."""
-    rendered: str = _md.render(text)
+    rendered = cast(str, _md(text))
     return rendered.strip()
 
 

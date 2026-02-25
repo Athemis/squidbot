@@ -22,10 +22,11 @@ from collections.abc import AsyncIterator
 from email.message import Message as EmailMessage
 from email.utils import parseaddr
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import aioimaplib
 import aiosmtplib
+import mistune
 from loguru import logger
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
 _NO_TEXT: str = "[Keine Textinhalte]"
 
 _SKIP_TAGS: frozenset[str] = frozenset({"script", "style", "head"})
+
+_md = mistune.create_markdown(escape=True)
 
 
 def _normalize_address(addr: str) -> str:
@@ -323,8 +326,6 @@ class EmailChannel:
         from email.mime.multipart import MIMEMultipart  # noqa: PLC0415
         from email.mime.text import MIMEText  # noqa: PLC0415
 
-        from markdown_it import MarkdownIt  # noqa: PLC0415
-
         meta = message.metadata
         to_addr: str = str(meta.get("email_from", message.session.sender_id))
         subject: str = _re_subject(str(meta.get("email_subject", "")))
@@ -334,7 +335,7 @@ class EmailChannel:
 
         # Build multipart/alternative (plain + HTML)
         plain_part = MIMEText(message.text, "plain", "utf-8")
-        html_body = MarkdownIt().render(message.text)
+        html_body = cast(str, _md(message.text))
         html_part = MIMEText(html_body, "html", "utf-8")
         alt = MIMEMultipart("alternative")
         alt.attach(plain_part)
