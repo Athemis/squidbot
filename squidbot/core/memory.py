@@ -82,6 +82,7 @@ class MemoryManager:
         if (sender_id, channel) in self._scoped_aliases:
             return True
         return sender_id in self._unscoped_aliases
+
     def _label_message(self, msg: Message) -> Message:
         """
         Return a copy of msg with a channel/sender label prepended to content.
