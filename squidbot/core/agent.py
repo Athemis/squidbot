@@ -55,6 +55,9 @@ class AgentLoop:
     3. If the LLM returns tool calls, executes them and loops back
     4. If the LLM returns text, delivers it to the channel and persists the exchange
 
+    Memory failures (building history context or persisting the exchange) are treated
+    as degraded mode: the agent still replies, but skips memory enrichment/persistence.
+
     Streaming behaviour is determined by channel.streaming:
     - True (e.g. CLI): each text chunk is sent immediately via channel.send()
     - False (e.g. Matrix, Email): chunks are accumulated, sent once at the end
@@ -165,6 +168,10 @@ class AgentLoop:
         """
         Process a single user message and deliver the reply to the channel.
 
+        This method is intentionally resilient at the memory boundary:
+        - If building the full message context fails, it falls back to system+user only.
+        - If persisting the exchange fails, the user-visible reply is still delivered.
+
         Args:
             session: The conversation session (carries channel + sender identity).
             user_message: The user's input text.
@@ -177,10 +184,16 @@ class AgentLoop:
         """
         selected_llm = llm if llm is not None else self._llm
 
-        messages = await self._memory.build_messages(
-            user_message=user_message,
-            system_prompt=self._system_prompt,
-        )
+        try:
+            messages = await self._memory.build_messages(
+                user_message=user_message,
+                system_prompt=self._system_prompt,
+            )
+        except Exception:
+            messages = [
+                Message(role="system", content=self._system_prompt),
+                Message(role="user", content=user_message),
+            ]
         tool_definitions, extra_tool_map = self._build_tool_definitions(extra_tools)
 
         final_text = ""
@@ -224,9 +237,12 @@ class AgentLoop:
         await self._deliver_final_text(channel, session, final_text)
 
         # Persist the exchange
-        await self._memory.persist_exchange(
-            channel=session.channel,
-            sender_id=session.sender_id,
-            user_message=user_message,
-            assistant_reply=final_text,
-        )
+        try:
+            await self._memory.persist_exchange(
+                channel=session.channel,
+                sender_id=session.sender_id,
+                user_message=user_message,
+                assistant_reply=final_text,
+            )
+        except Exception:
+            return
