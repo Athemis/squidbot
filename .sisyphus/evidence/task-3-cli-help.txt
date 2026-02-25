@@ -1,0 +1,14 @@
+Usage: squidbot COMMAND
+
+A lightweight personal AI assistant.
+
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│ agent        Chat with the assistant.                                        │
+│ cron         Manage scheduled jobs.                                          │
+│ gateway      Start the gateway (all enabled channels run concurrently).      │
+│ onboard      Run the interactive setup wizard.                               │
+│ skills       Manage squidbot skills.                                         │
+│ status       Show the current configuration and channel status.              │
+│ --help (-h)  Display this message and exit.                                  │
+│ --version    Display application version.                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯

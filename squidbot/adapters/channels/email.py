@@ -28,6 +28,7 @@ import aioimaplib
 import aiosmtplib
 import mistune
 from loguru import logger
+from markdown_it import MarkdownIt
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 
@@ -224,7 +225,7 @@ def _re_subject(subject: str) -> str:
     return f"Re: {subject}"
 
 
-def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
+async def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
     """
     Extract all attachment parts and save them to tmp_dir.
 
@@ -248,7 +249,7 @@ def _extract_attachments(msg: EmailMessage, tmp_dir: Path) -> list[str]:
         ext = mimetypes.guess_extension(mime) or Path(filename).suffix or ""
         sha = hashlib.sha256(payload).hexdigest()[:8]
         dest = tmp_dir / f"squidbot-{sha}{ext}"
-        dest.write_bytes(payload)
+        await asyncio.to_thread(dest.write_bytes, payload)
         lines.append(f"[Anhang: {filename} ({mime})] → {dest}")
     return lines
 
@@ -344,7 +345,7 @@ class EmailChannel:
         if message.attachment and message.attachment.exists():
             outer = MIMEMultipart("mixed")
             outer.attach(alt)
-            att_data = message.attachment.read_bytes()
+            att_data = await asyncio.to_thread(message.attachment.read_bytes)
             att_mime, _ = mimetypes.guess_type(message.attachment.name)
             att_part = MIMEBase(*(att_mime or "application/octet-stream").split("/", 1))
             att_part.set_payload(att_data)
@@ -482,7 +483,7 @@ class EmailChannel:
             return
 
         text = _extract_text(msg)
-        attachment_lines = _extract_attachments(msg, self._tmp_dir)
+        attachment_lines = await _extract_attachments(msg, self._tmp_dir)
         if attachment_lines:
             text = text + "\n" + "\n".join(attachment_lines)
 

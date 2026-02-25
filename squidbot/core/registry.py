@@ -1,10 +1,3 @@
-"""
-Tool registry for the agent loop.
-
-Adapters register their tools here; the agent loop queries the registry
-for available tool definitions and delegates execution to the correct tool.
-"""
-
 from __future__ import annotations
 
 from squidbot.core.models import ToolDefinition, ToolResult
@@ -16,23 +9,27 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolPort] = {}
+        self._cached_definitions: tuple[ToolDefinition, ...] | None = None
 
     def register(self, tool: ToolPort) -> None:
         """Register a tool. Raises ValueError on duplicate names."""
         if tool.name in self._tools:
             raise ValueError(f"Tool '{tool.name}' is already registered")
         self._tools[tool.name] = tool
+        self._cached_definitions = None
 
     def get_definitions(self) -> list[ToolDefinition]:
         """Return OpenAI-format tool definitions for all registered tools."""
-        return [
-            ToolDefinition(
-                name=t.name,
-                description=t.description,
-                parameters=t.parameters,
+        if self._cached_definitions is None:
+            self._cached_definitions = tuple(
+                ToolDefinition(
+                    name=t.name,
+                    description=t.description,
+                    parameters=t.parameters,
+                )
+                for t in self._tools.values()
             )
-            for t in self._tools.values()
-        ]
+        return list(self._cached_definitions)
 
     async def execute(self, tool_name: str, tool_call_id: str, **kwargs: object) -> ToolResult:
         """

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -545,6 +546,100 @@ def test_subagent_profile_system_prompt_file(tmp_path):
     loop = factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
     assert "agents" in loop._system_prompt
     assert "researcher instructions" in loop._system_prompt
+
+
+def test_subagent_prompt_files_cached_when_unchanged(tmp_path, monkeypatch):
+    agents_file = tmp_path / "AGENTS.md"
+    profile_file = tmp_path / "RESEARCHER.md"
+    agents_file.write_text("agents")
+    profile_file.write_text("researcher instructions")
+
+    profile = SpawnProfile(system_prompt_file="RESEARCHER.md")
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md"],
+        profiles={"researcher": profile},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+
+    read_counts: dict[Path, int] = {agents_file: 0, profile_file: 0}
+    original_read_text = Path.read_text
+
+    def counted_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self in read_counts:
+            read_counts[self] += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+
+    factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
+    factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
+
+    assert read_counts[agents_file] == 1
+    assert read_counts[profile_file] == 1
+
+
+def test_subagent_prompt_cache_invalidates_when_file_changes(tmp_path, monkeypatch):
+    agents_file = tmp_path / "AGENTS.md"
+    profile_file = tmp_path / "RESEARCHER.md"
+    agents_file.write_text("agents")
+    profile_file.write_text("researcher instructions")
+
+    profile = SpawnProfile(system_prompt_file="RESEARCHER.md")
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["AGENTS.md"],
+        profiles={"researcher": profile},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+
+    read_counts: dict[Path, int] = {agents_file: 0, profile_file: 0}
+    original_read_text = Path.read_text
+
+    def counted_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self in read_counts:
+            read_counts[self] += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+
+    factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
+    os.utime(
+        agents_file,
+        ns=(agents_file.stat().st_atime_ns, agents_file.stat().st_mtime_ns + 1_000_000_000),
+    )
+    os.utime(
+        profile_file,
+        ns=(profile_file.stat().st_atime_ns, profile_file.stat().st_mtime_ns + 1_000_000_000),
+    )
+    factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
+
+    assert read_counts[agents_file] == 2
+    assert read_counts[profile_file] == 2
+
+
+def test_subagent_missing_prompt_files_do_not_error_and_not_cached(tmp_path):
+    profile = SpawnProfile(system_prompt_file="MISSING.md")
+    factory = SubAgentFactory(
+        memory=MagicMock(),
+        registry=MagicMock(_tools={}),
+        workspace=tmp_path,
+        default_bootstrap_files=["ALSO_MISSING.md"],
+        profiles={"researcher": profile},
+        default_pool="default",
+        resolve_llm=MagicMock(return_value=MagicMock()),
+    )
+
+    loop = factory.build(system_prompt_override=None, tools_filter=None, profile_name="researcher")
+
+    assert loop._system_prompt == "You are a helpful personal AI assistant."
+    assert factory._system_prompt_file_cache == {}
 
 
 def test_subagent_profile_all_combined(tmp_path):

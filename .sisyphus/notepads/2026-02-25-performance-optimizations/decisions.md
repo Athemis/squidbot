@@ -1,0 +1,4 @@
+- Used median of repeated perf_counter samples (with warmup calls) to reduce noise while keeping output lightweight and parseable.
+- Chose synthetic history sizes 1k/10k/50k with load_history(last_n=80) to match Task 1 acceptance needs.
+- Implemented Task 9 audit as AST-based static analysis so violations are emitted with exact file:line and robust async-context detection.
+- Kept subprocess rule global under squidbot/ (excluding tests) and filesystem rule scoped to adapters/tools, adapters/channels, and adapters/persistence, matching plan boundaries.

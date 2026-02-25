@@ -15,7 +15,6 @@ import asyncio
 import contextlib
 import hashlib
 import mimetypes
-import subprocess
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
@@ -85,7 +84,7 @@ def _image_dimensions(path: Path) -> dict[str, int]:
         return {}
 
 
-def _media_metadata(path: Path, mime: str) -> dict[str, Any]:
+async def _media_metadata(path: Path, mime: str) -> dict[str, Any]:
     """
     Extract media metadata using ffprobe (video/audio) or Pillow (images).
 
@@ -99,24 +98,27 @@ def _media_metadata(path: Path, mime: str) -> dict[str, Any]:
         info.update(_image_dimensions(path))
     elif mime.startswith(("video/", "audio/")):
         try:
-            result = subprocess.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "quiet",
-                    "-print_format",
-                    "json",
-                    "-show_streams",
-                    "-show_format",
-                    str(path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
+            proc = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-show_format",
+                str(path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            except TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                return info
             import json  # noqa: PLC0415
 
-            data = json.loads(result.stdout)
+            data = json.loads(stdout.decode("utf-8"))
             fmt = data.get("format", {})
             duration_s = float(fmt.get("duration", 0))
             if duration_s:
@@ -357,9 +359,9 @@ class MatrixChannel:
         assert self._client is not None
         mime: str = _detect_mime(path)
         msgtype = _mime_to_msgtype(mime)
-        info = _media_metadata(path, mime)
+        info = await _media_metadata(path, mime)
 
-        data = path.read_bytes()
+        data = await asyncio.to_thread(path.read_bytes)
         resp = await self._client.upload(
             data_provider=lambda *_: data,
             content_type=mime,
@@ -422,7 +424,7 @@ class MatrixChannel:
         if isinstance(resp, nio.DownloadError):
             return f"[Anhang nicht verfügbar: {resp.message}]"
 
-        body: bytes = resp.body
+        body = cast(bytes, resp.body)
 
         # Decrypt if E2EE
         if enc_file is not None:
@@ -441,7 +443,8 @@ class MatrixChannel:
                 "hashes": enc_file.hashes,
                 "v": enc_file.v,
             }
-            body = decrypt_attachment(body, key_info)
+            decrypt_attachment_fn: Any = decrypt_attachment
+            body = decrypt_attachment_fn(body, key_info)
 
         # Determine extension
         info = getattr(event, "info", None)
@@ -451,7 +454,7 @@ class MatrixChannel:
         # Save to temp file
         sha = hashlib.sha256(body).hexdigest()[:8]
         tmp_path = Path(f"/tmp/squidbot-{sha}{ext}")
-        tmp_path.write_bytes(body)
+        await asyncio.to_thread(tmp_path.write_bytes, body)
 
         filename: str = getattr(event, "body", "attachment")
         return f"[Anhang: {filename} ({mimetype})] → {tmp_path}"

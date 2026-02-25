@@ -1,0 +1,6 @@
+CLI help smoke tests:
+  uv run python -m squidbot.cli.main --help: PASSED
+  uv run python -m squidbot.cli.main cron --help: PASSED
+  uv run python -m squidbot.cli.main skills --help: PASSED
+
+main.py line count: 189 (< 800)

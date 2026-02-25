@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,10 @@ class FsSkillsLoader:
         self._search_dirs = search_dirs
         # Cache: path → (mtime, SkillMetadata)
         self._cache: dict[Path, tuple[float, SkillMetadata]] = {}
+        self._body_cache: dict[tuple[Path, float], str] = {}
+        self._list_cache_ttl_seconds = 2.0
+        self._list_cache_timestamp: float | None = None
+        self._list_cache: tuple[SkillMetadata, ...] | None = None
 
     def list_skills(self) -> list[SkillMetadata]:
         """
@@ -78,7 +83,16 @@ class FsSkillsLoader:
 
         Skills are re-read from disk only if their mtime has changed.
         """
+        now = time.monotonic()
+        if (
+            self._list_cache is not None
+            and self._list_cache_timestamp is not None
+            and now - self._list_cache_timestamp < self._list_cache_ttl_seconds
+        ):
+            return list(self._list_cache)
+
         seen: dict[str, SkillMetadata] = {}  # name → metadata (first-wins = highest priority)
+        discovered_paths: set[Path] = set()
 
         for search_dir in self._search_dirs:
             if not search_dir.is_dir():
@@ -87,6 +101,7 @@ class FsSkillsLoader:
                 skill_file = skill_dir / "SKILL.md"
                 if not skill_dir.is_dir() or not skill_file.exists():
                     continue
+                discovered_paths.add(skill_file)
                 name = skill_dir.name
                 if name in seen:
                     continue  # already shadowed by higher-priority dir
@@ -94,14 +109,30 @@ class FsSkillsLoader:
                 if metadata:
                     seen[name] = metadata
 
-        return list(seen.values())
+        stale_paths = [path for path in self._cache if path not in discovered_paths]
+        for stale_path in stale_paths:
+            del self._cache[stale_path]
+            self._clear_body_cache_for_path(stale_path)
+
+        self._list_cache = tuple(seen.values())
+        self._list_cache_timestamp = now
+
+        return list(self._list_cache)
 
     def load_skill_body(self, name: str) -> str:
         """Return the full SKILL.md text for a named skill."""
         for search_dir in self._search_dirs:
             skill_file = search_dir / name / "SKILL.md"
             if skill_file.exists():
-                return skill_file.read_text(encoding="utf-8")
+                mtime = skill_file.stat().st_mtime
+                cache_key = (skill_file, mtime)
+                if cache_key in self._body_cache:
+                    return self._body_cache[cache_key]
+
+                self._clear_body_cache_for_path(skill_file)
+                body = skill_file.read_text(encoding="utf-8")
+                self._body_cache[cache_key] = body
+                return body
         raise FileNotFoundError(f"Skill '{name}' not found")
 
     def _load_cached(self, path: Path, name: str) -> SkillMetadata | None:
@@ -137,3 +168,8 @@ class FsSkillsLoader:
         )
         self._cache[path] = (mtime, skill)
         return skill
+
+    def _clear_body_cache_for_path(self, path: Path) -> None:
+        stale_keys = [key for key in self._body_cache if key[0] == path]
+        for stale_key in stale_keys:
+            del self._body_cache[stale_key]
