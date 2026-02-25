@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from squidbot.adapters.persistence.jsonl import JsonlMemory
+from squidbot.adapters.persistence.jsonl import JsonlMemory, _history_file
 from squidbot.adapters.tools.search_history import SearchHistoryTool
 from squidbot.core.models import Message
 
@@ -184,3 +184,27 @@ async def test_search_respects_days_filter(tmp_path: Path) -> None:
     assert "old topic recent" in result.content
     # The old message (10 days ago) must NOT appear
     assert result.content.count("old topic") == result.content.count("old topic recent")
+
+
+@pytest.mark.asyncio
+async def test_search_skips_malformed_jsonl_lines(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    await storage.append_message(
+        Message(role="user", content="Find malformed data safely", channel="cli", sender_id="alex")
+    )
+
+    history_path = _history_file(tmp_path)
+    with history_path.open("a", encoding="utf-8") as history_file:
+        history_file.write("{this-is-not-json}\n")
+
+    await storage.append_message(
+        Message(
+            role="assistant", content="Still searchable response", channel="cli", sender_id="bot"
+        )
+    )
+
+    tool = SearchHistoryTool(base_dir=tmp_path)
+    result = await tool.execute(query="malformed data")
+    assert not result.is_error
+    assert "Find malformed data safely" in result.content
+    assert "Still searchable response" in result.content
