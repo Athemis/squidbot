@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -464,3 +465,58 @@ class TestMatrixChannelSend:
         assert len(media_events) == 1
         assert media_events[0]["url"] == "mxc://example.org/TestMediaId"
         assert media_events[0]["filename"] == "test.jpg"
+
+
+class TestMatrixMediaMetadata:
+    @pytest.mark.asyncio
+    async def test_media_metadata_uses_async_ffprobe(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels import matrix as matrix_mod
+
+        media_file = tmp_path / "clip.mp4"
+        media_file.write_bytes(b"video-bytes")
+
+        ffprobe_json = {
+            "format": {"duration": "1.25"},
+            "streams": [{"codec_type": "video", "width": 640, "height": 360}],
+        }
+
+        class FakeProcess:
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return json.dumps(ffprobe_json).encode("utf-8"), b""
+
+            def kill(self) -> None:
+                return
+
+        create_proc = AsyncMock(return_value=FakeProcess())
+        with patch(
+            "squidbot.adapters.channels.matrix.asyncio.create_subprocess_exec",
+            create_proc,
+        ):
+            info = await matrix_mod._media_metadata(media_file, "video/mp4")
+
+        create_proc.assert_awaited_once()
+        assert info["mimetype"] == "video/mp4"
+        assert info["duration"] == 1250
+        assert info["w"] == 640
+        assert info["h"] == 360
+
+    @pytest.mark.asyncio
+    async def test_media_metadata_ffprobe_failure_returns_base_info(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels import matrix as matrix_mod
+
+        media_file = tmp_path / "clip.mp4"
+        media_file.write_bytes(b"video-bytes")
+
+        with patch(
+            "squidbot.adapters.channels.matrix.asyncio.create_subprocess_exec",
+            AsyncMock(side_effect=FileNotFoundError),
+        ):
+            info = await matrix_mod._media_metadata(media_file, "video/mp4")
+
+        assert info == {"mimetype": "video/mp4", "size": media_file.stat().st_size}
+
+    def test_matrix_module_has_no_subprocess_run_calls(self) -> None:
+        from squidbot.adapters.channels import matrix as matrix_mod
+
+        source = Path(matrix_mod.__file__).read_text(encoding="utf-8")
+        assert "subprocess.run(" not in source

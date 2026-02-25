@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -122,6 +124,7 @@ async def test_load_cron_jobs_invalid_json_returns_empty(tmp_path: Path) -> None
 
     assert await storage.load_cron_jobs() == []
 
+
 @pytest.mark.asyncio
 async def test_load_history_last_n_zero(tmp_path: Path) -> None:
     storage = JsonlMemory(base_dir=tmp_path)
@@ -130,3 +133,82 @@ async def test_load_history_last_n_zero(tmp_path: Path) -> None:
     assert history == []
     history = await storage.load_history(last_n=-1)
     assert history == []
+
+
+class _CountingBinaryFile:
+    def __init__(self, wrapped: Any, counter: dict[str, int]) -> None:
+        self._wrapped = wrapped
+        self._counter = counter
+
+    def __enter__(self) -> _CountingBinaryFile:
+        self._wrapped.__enter__()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None:
+        return self._wrapped.__exit__(exc_type, exc, tb)
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._wrapped.read(size)
+        self._counter["bytes"] += len(data)
+        return data
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+
+def _write_history_fixture(path: Path, total_messages: int) -> None:
+    with path.open("wb") as f:
+        for i in range(total_messages):
+            payload = {
+                "role": "user",
+                "content": f"m{i:06d}",
+                "timestamp": "2026-01-01T00:00:00",
+            }
+            f.write(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
+
+
+@pytest.mark.asyncio
+async def test_load_history_last_n_reads_bounded_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    history_path = tmp_path / "history.jsonl"
+
+    _write_history_fixture(history_path, total_messages=180_000)
+    assert history_path.stat().st_size >= 8 * 1024 * 1024
+
+    bytes_counter = {"bytes": 0}
+    original_open = Path.open
+
+    def counting_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        mode = args[0] if args else kwargs.get("mode", "r")
+        opened = original_open(self, *args, **kwargs)
+        if self == history_path and mode == "rb":
+            return _CountingBinaryFile(opened, bytes_counter)
+        return opened
+
+    monkeypatch.setattr(Path, "open", counting_open)
+
+    history = await storage.load_history(last_n=80)
+
+    assert len(history) == 80
+    assert history[0].content == "m179920"
+    assert history[-1].content == "m179999"
+    assert bytes_counter["bytes"] <= 1_048_576
+
+
+@pytest.mark.asyncio
+async def test_load_history_last_n_skips_malformed_trailing_lines(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    history_path = tmp_path / "history.jsonl"
+
+    _write_history_fixture(history_path, total_messages=200)
+    with history_path.open("ab") as f:
+        f.write(b"{ this is malformed json }\n")
+        f.write(b"\xff\xfe\xfa\n")
+
+    history = await storage.load_history(last_n=80)
+
+    assert len(history) == 80
+    assert history[0].content == "m000120"
+    assert history[-1].content == "m000199"

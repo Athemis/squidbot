@@ -1,0 +1,3 @@
+ruff check: All checks passed!
+
+pytest: 354 passed in 3.07s

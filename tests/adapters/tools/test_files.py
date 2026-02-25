@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+
+import pytest
 
 from squidbot.adapters.tools.files import ListFilesTool, ReadFileTool, WriteFileTool
 
@@ -151,3 +154,66 @@ class TestListFilesToolLists:
         result = await tool.execute(path=str(ws))
         assert not result.is_error
         assert "(empty)" in result.content
+
+
+# ── Async Offloading ──────────────────────────────────────────────────────────
+
+
+class TestFileToolsAsyncOffloading:
+    async def test_read_file_uses_to_thread(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = _workspace(tmp_path)
+        (ws / "test.txt").write_text("content", encoding="utf-8")
+        tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
+
+        called_funcs = []
+        orig_to_thread = asyncio.to_thread
+
+        async def mock_to_thread(func, *args, **kwargs):
+            called_funcs.append(func.__name__ if hasattr(func, "__name__") else str(func))
+            return await orig_to_thread(func, *args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
+        await tool.execute(path="test.txt")
+
+        assert "exists" in called_funcs
+        assert "read_text" in called_funcs
+
+    async def test_write_file_uses_to_thread(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = _workspace(tmp_path)
+        tool = WriteFileTool(workspace=ws, restrict_to_workspace=False)
+
+        called_funcs = []
+        orig_to_thread = asyncio.to_thread
+
+        async def mock_to_thread(func, *args, **kwargs):
+            called_funcs.append(func.__name__ if hasattr(func, "__name__") else str(func))
+            return await orig_to_thread(func, *args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
+        await tool.execute(path="new.txt", content="data")
+
+        assert "mkdir" in called_funcs
+        assert "write_text" in called_funcs
+
+    async def test_list_files_uses_to_thread(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = _workspace(tmp_path)
+        tool = ListFilesTool(workspace=ws, restrict_to_workspace=False)
+
+        called_funcs = []
+        orig_to_thread = asyncio.to_thread
+
+        async def mock_to_thread(func, *args, **kwargs):
+            called_funcs.append(func.__name__ if hasattr(func, "__name__") else str(func))
+            return await orig_to_thread(func, *args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
+        await tool.execute(path=".")
+
+        assert "is_dir" in called_funcs
+        assert "_list_dir" in called_funcs

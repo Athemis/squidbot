@@ -1,0 +1,1 @@
+docs/plans/2026-02-24-global-history-design.md:81:system: [soul/identity/config] + [## Your Memory\n<MEMORY.md>] + [## Session Summary\n<summary.md>] + [<skills>]

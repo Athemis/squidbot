@@ -1,0 +1,45 @@
+All checks passed!
+Success: no issues found in 35 source files
+============================= test session starts ==============================
+platform linux -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/opencode/projects/squidbot
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 354 items
+
+tests/adapters/channels/test_email.py ..............................     [  8%]
+tests/adapters/channels/test_matrix.py ...............                   [ 12%]
+tests/adapters/channels/test_rich_cli.py ........                        [ 14%]
+tests/adapters/llm/test_pool.py ........                                 [ 17%]
+tests/adapters/persistence/test_jsonl.py .......                         [ 19%]
+tests/adapters/persistence/test_jsonl_global_memory.py ...               [ 20%]
+tests/adapters/test_bootstrap_wiring.py ........                         [ 22%]
+tests/adapters/test_channel_loops.py ..                                  [ 22%]
+tests/adapters/test_gateway_status.py .......                            [ 24%]
+tests/adapters/test_llm_wiring.py .......                                [ 26%]
+tests/adapters/test_onboard.py ..............                            [ 30%]
+tests/adapters/test_search_history_wiring.py ..                          [ 31%]
+tests/adapters/test_spawn_wiring.py ....                                 [ 32%]
+tests/adapters/tools/test_files.py ................                      [ 37%]
+tests/adapters/tools/test_mcp.py .............                           [ 40%]
+tests/adapters/tools/test_memory_write.py ....                           [ 41%]
+tests/adapters/tools/test_search_history.py ............                 [ 45%]
+tests/adapters/tools/test_shell.py .....                                 [ 46%]
+tests/adapters/tools/test_spawn.py ...................................   [ 56%]
+tests/adapters/tools/test_web_search.py .................                [ 61%]
+tests/config/test_schema.py .........                                    [ 63%]
+tests/core/test_agent.py .......                                         [ 65%]
+tests/core/test_config.py ...............................                [ 74%]
+tests/core/test_heartbeat.py ................................            [ 83%]
+tests/core/test_memory.py ............                                   [ 87%]
+tests/core/test_models.py ..............                                 [ 90%]
+tests/core/test_persistence.py .......                                   [ 92%]
+tests/core/test_ports.py ......                                          [ 94%]
+tests/core/test_registry.py ...                                          [ 95%]
+tests/core/test_scheduler.py ....                                        [ 96%]
+tests/core/test_skills.py ......                                         [ 98%]
+tests/core/test_tools.py ......                                          [100%]
+
+============================= 354 passed in 3.04s ==============================

@@ -1,0 +1,7 @@
+2026-02-25 Task 10 evidence
+- Command: uv run pytest tests/adapters/persistence/test_jsonl.py -v
+- Result: 13 passed in 1.29s
+- Command: uv run python scripts/perf/perf_baseline.py
+- Metrics: history_load_1k_ms=1.346, history_load_10k_ms=1.296, history_load_50k_ms=0.662, skills_list_ms=0.007, skill_body_load_ms=0.023
+- Added deterministic bounded-read assertion: bytes_read <= 1_048_576 for last_n=80
+
