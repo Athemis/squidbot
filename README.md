@@ -2,6 +2,8 @@
 
 A lightweight personal AI assistant. Hexagonal architecture, multi-channel, multi-model.
 
+[![Codecov](https://codecov.io/gh/Athemis/squidbot/branch/main/graph/badge.svg)](https://codecov.io/gh/Athemis/squidbot)
+
 ## Features
 
 - **Multi-channel** — interactive CLI, Matrix/Element, IMAP/SMTP email
