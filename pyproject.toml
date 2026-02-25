@@ -17,7 +17,7 @@ dependencies = [
     "rich>=13.0",
     "loguru>=0.7",
     "Pillow>=10.0",
-    "markdown-it-py>=3.0",
+    "mistune>=3.0",
     "aioimaplib>=1.0",
     "aiosmtplib>=3.0",
 ]
@@ -33,6 +33,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
     "ruff>=0.9",
     "mypy>=1.13",
 ]
