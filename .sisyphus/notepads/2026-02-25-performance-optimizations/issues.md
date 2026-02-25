@@ -1,4 +1,0 @@
-- Pre-commit docstring hook flagged function-level docstrings in the new script; resolved by removing unnecessary function docstrings and keeping only module-level context.
-- Fixed IndentationError in squidbot/core/memory.py caused by duplicate code blocks in __init__ and _is_owner.
-- Optimized owner alias initialization to access entry.channel only once, satisfying test_build_messages_checks_scoped_alias_before_returning_unscoped_match.
-- Initial audit implementation flagged already-offloaded calls in nested helper functions; fixed by tracing helper names passed into asyncio.to_thread inside the enclosing async function.

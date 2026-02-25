@@ -1,5 +1,0 @@
-history_load_1k_ms=0.856
-history_load_10k_ms=1.300
-history_load_50k_ms=1.325
-skills_list_ms=0.006
-skill_body_load_ms=0.028
