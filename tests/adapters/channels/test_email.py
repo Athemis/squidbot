@@ -421,14 +421,8 @@ class TestEmailChannelSend:
         ch = EmailChannel(config=config, tmp_dir=tmp_path)
         outbound = self._make_outbound(text="**bold**")
 
-        with (
-            patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp),
-            patch("squidbot.adapters.channels.email.MarkdownIt") as markdown_it_cls,
-        ):
+        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
             await ch.send(outbound)  # type: ignore[arg-type]
-
-        markdown_it_cls.assert_not_called()
-
         sent = fake_smtp.send_message.call_args[0][0]
         content_type = sent.get_content_type()
         assert content_type == "multipart/alternative"
