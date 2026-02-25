@@ -1,2 +1,0 @@
-80
-(self, user_message: 'str', system_prompt: 'str') -> 'list[Message]'

@@ -1,6 +1,0 @@
-Import verification: SUCCESS
-
-Commands tested:
-  import squidbot.cli.main
-  import squidbot.cli.gateway
-  import squidbot.cli.onboard

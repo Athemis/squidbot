@@ -1,4 +1,0 @@
-tests/adapters/test_llm_wiring.py:12:from squidbot.cli.main import _resolve_llm
-tests/adapters/test_channel_loops.py:7:from squidbot.cli.main import GatewayState, _channel_loop, _channel_loop_with_state
-tests/adapters/test_bootstrap_wiring.py:5:from squidbot.cli.main import (
-tests/adapters/test_onboard.py:8:from squidbot.cli.main import BOOTSTRAP_FILES_MAIN, _run_onboard
