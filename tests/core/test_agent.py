@@ -14,6 +14,7 @@ import pytest
 from squidbot.core.agent import AgentLoop
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
+    InboundMessage,
     Message,
     OutboundMessage,
     Session,
@@ -72,6 +73,14 @@ class CollectingChannel:
     def __init__(self):
         self.sent: list[str] = []
 
+    def receive(self) -> AsyncIterator[InboundMessage]:
+        async def _empty() -> AsyncIterator[InboundMessage]:
+            empty: tuple[InboundMessage, ...] = ()
+            for message in empty:
+                yield message
+
+        return _empty()
+
     async def send(self, message: OutboundMessage) -> None:
         self.sent.append(message.text)
 
@@ -96,6 +105,22 @@ class EchoTool:
 
     async def execute(self, text: str, **_) -> ToolResult:
         return ToolResult(tool_call_id="", content=f"echoed: {text}")
+
+
+class BuildMessagesFailingMemory(MemoryManager):
+    async def build_messages(self, user_message: str, system_prompt: str) -> list[Message]:
+        raise RuntimeError("build failed")
+
+
+class PersistExchangeFailingMemory(MemoryManager):
+    async def persist_exchange(
+        self,
+        channel: str,
+        sender_id: str,
+        user_message: str,
+        assistant_reply: str,
+    ) -> None:
+        raise RuntimeError("persist failed")
 
 
 SESSION = Session(channel="cli", sender_id="local")
@@ -207,3 +232,33 @@ async def test_extra_tool_does_not_pollute_registry(storage, memory):
     # Second run without extra_tools: registry still empty
     definitions = loop._registry.get_definitions()
     assert not any(d.name == "echo" for d in definitions)
+
+
+async def test_run_degrades_when_build_messages_fails(storage) -> None:
+    llm = ScriptedLLM(["fallback response"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=BuildMessagesFailingMemory(storage=storage),
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "Hello!", channel)
+
+    assert channel.sent == ["fallback response"]
+
+
+async def test_run_degrades_when_persist_exchange_fails(storage) -> None:
+    llm = ScriptedLLM(["still replies"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=PersistExchangeFailingMemory(storage=storage),
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "Hello!", channel)
+
+    assert channel.sent == ["still replies"]

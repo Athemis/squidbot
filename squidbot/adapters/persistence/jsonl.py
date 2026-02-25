@@ -1,17 +1,21 @@
-"""
-JSONL-based persistence adapter.
+"""Filesystem persistence for squidbot memory.
 
-Stores conversation history as a single global JSONL file (one message per line)
-and memory documents as plain markdown files. Cron jobs are stored in a single
-JSON file. Concurrent writes to history.jsonl are safe via fcntl.flock.
+This adapter persists global conversation history as JSONL (one Message per line), the
+global cross-session memory document as Markdown, and cron jobs as JSON.
+
+Design goals:
+- Keep the agent responsive: all filesystem IO is run in ``asyncio.to_thread``.
+- Be resilient: malformed/partial JSONL lines are skipped instead of crashing.
+- Avoid corruption: whole-file writes (MEMORY.md, cron/jobs.json) are written atomically.
+- Support concurrent access: history.jsonl appends use ``fcntl.flock``.
 
 Directory layout:
     <base_dir>/
     ├── history.jsonl          # all channels, append-only
     ├── workspace/
-    │   └── MEMORY.md          # global cross-session memory (unchanged)
+    │   └── MEMORY.md          # global cross-session memory
     └── cron/
-        └── jobs.json           # scheduled task list (unchanged)
+        └── jobs.json          # scheduled task list
 """
 
 from __future__ import annotations
@@ -19,15 +23,28 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import json
+import os
+import tempfile
+from collections import deque
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from squidbot.core.models import CronJob, Message, ToolCall
 
 
 def _serialize_message(message: Message) -> str:
-    """Serialize a Message to a JSON line."""
+    """Serialize a Message to a JSONL line.
+
+    Args:
+        message: Message to serialize.
+
+    Returns:
+        A single JSON object encoded as a string (no trailing newline).
+    """
     d: dict[str, Any] = {
         "role": message.role,
         "content": message.content,
@@ -47,7 +64,14 @@ def _serialize_message(message: Message) -> str:
 
 
 def deserialize_message(line: str) -> Message:
-    """Deserialize a JSON line to a Message."""
+    """Deserialize a JSONL line to a Message.
+
+    Args:
+        line: A single JSON object encoded as a string.
+
+    Returns:
+        The parsed Message.
+    """
     d = json.loads(line)
     tool_calls = None
     if "tool_calls" in d:
@@ -66,8 +90,29 @@ def deserialize_message(line: str) -> Message:
     )
 
 
+def deserialize_message_safe(line: str) -> Message | None:
+    """Best-effort JSONL message parser.
+
+    This is used when scanning history.jsonl where lines may be partially written,
+    corrupted, or from older versions. Failures are represented as ``None`` so the
+    caller can skip the line and continue.
+
+    Args:
+        line: A single JSON object encoded as a string.
+
+    Returns:
+        A Message if parsing succeeds, otherwise ``None``.
+    """
+    try:
+        return deserialize_message(line)
+    except json.JSONDecodeError, KeyError, TypeError, ValueError:
+        return None
+
+
 def _history_file(base_dir: Path) -> Path:
     """Return the global history JSONL path, creating parent directories."""
+    # This helper is used by both readers and writers. Creating the base directory is
+    # cheap and simplifies callers by ensuring a stable path.
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / "history.jsonl"
 
@@ -92,6 +137,40 @@ def _cron_file(base_dir: Path) -> Path:
     return path
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write text to a file atomically.
+
+    We write to a temporary file in the same directory and then replace the target
+    path via ``os.replace``. On POSIX filesystems this makes the final update appear
+    atomically (readers either see the old file or the new file, never a truncated
+    intermediate).
+
+    Args:
+        path: Target file path.
+        content: Full file contents to write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create the temp file in the target directory so os.replace() is a same-filesystem
+    # rename (required for atomicity).
+    fd, temp_path_str = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    temp_path = Path(temp_path_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
+            temp_file.write(content)
+            temp_file.flush()
+            # Ensure file content is pushed to disk before replace. (We intentionally
+            # do not fsync the directory: this is a lightweight local tool and we
+            # prefer minimal IO over full crash-consistency semantics.)
+            os.fsync(temp_file.fileno())
+
+        # os.replace() is atomic on POSIX when source/target are on the same filesystem.
+        os.replace(temp_path, path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
 class JsonlMemory:
     """
     Filesystem-based memory adapter using JSONL for history and JSON for jobs.
@@ -113,16 +192,103 @@ class JsonlMemory:
         Returns:
             List of messages in chronological order.
         """
-        path = _history_file(self._base)
-        if not path.exists():
+        # Treat <=0 as "no history". This is useful for callers that want to disable
+        # history without branching. It also prevents accidentally loading the full
+        # file via Python slicing semantics (e.g. all_messages[-0:] == all_messages).
+        if last_n is not None and last_n <= 0:
             return []
-        messages = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                messages.append(deserialize_message(line))
-        if last_n is not None:
-            messages = messages[-last_n:]
+
+        path = _history_file(self._base)
+
+        def _read() -> tuple[list[Message], int, str | None]:
+            if not path.exists():
+                return [], 0, None
+
+            skipped_lines = 0
+            first_skipped_preview: str | None = None
+
+            if last_n is not None and last_n > 0:
+                recent_messages: deque[Message] = deque(maxlen=last_n)
+
+                with path.open("r", encoding="utf-8", errors="replace") as f:
+                    has_lock = False
+                    try:
+                        try:
+                            # Best-effort shared lock: reduces the chance we read a
+                            # partially-written line while another process appends.
+                            # If locking is unavailable, we still proceed safely by
+                            # skipping malformed lines.
+                            fcntl.flock(f, fcntl.LOCK_SH)
+                            has_lock = True
+                        except Exception:
+                            has_lock = False
+
+                        for raw_line in f:
+                            line = raw_line.strip()
+                            if not line:
+                                continue
+
+                            message = deserialize_message_safe(line)
+                            if message is None:
+                                skipped_lines += 1
+                                if first_skipped_preview is None:
+                                    # Keep a short preview for debugging. Note: this may
+                                    # include user content; it is truncated and logged
+                                    # only once per load_history() call.
+                                    first_skipped_preview = line[:120]
+                                continue
+
+                            recent_messages.append(message)
+                    finally:
+                        if has_lock:
+                            with suppress(OSError):
+                                fcntl.flock(f, fcntl.LOCK_UN)
+
+                return list(recent_messages), skipped_lines, first_skipped_preview
+
+            all_messages: list[Message] = []
+            with path.open("r", encoding="utf-8", errors="replace") as f:
+                has_lock = False
+                try:
+                    try:
+                        # Same best-effort shared lock rationale as the last_n>0 path.
+                        fcntl.flock(f, fcntl.LOCK_SH)
+                        has_lock = True
+                    except Exception:
+                        has_lock = False
+
+                    for raw_line in f:
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+
+                        message = deserialize_message_safe(line)
+                        if message is None:
+                            skipped_lines += 1
+                            if first_skipped_preview is None:
+                                first_skipped_preview = line[:120]
+                            continue
+
+                        all_messages.append(message)
+                finally:
+                    if has_lock:
+                        with suppress(OSError):
+                            fcntl.flock(f, fcntl.LOCK_UN)
+
+            if last_n is None:
+                return all_messages, skipped_lines, first_skipped_preview
+
+            return all_messages[-last_n:], skipped_lines, first_skipped_preview
+
+        # Offload file IO so channels/LLM streaming isn't blocked by filesystem reads.
+        messages, skipped_lines, preview = await asyncio.to_thread(_read)
+        if skipped_lines:
+            logger.warning(
+                "Skipped {} malformed history line(s) in {}. First error preview: {!r}",
+                skipped_lines,
+                path,
+                preview,
+            )
         return messages
 
     async def append_message(self, message: Message) -> None:
@@ -137,6 +303,8 @@ class JsonlMemory:
 
         def _write() -> None:
             with path.open("a", encoding="utf-8") as f:
+                # Exclusive lock prevents multiple writers interleaving JSON fragments
+                # on the same line.
                 fcntl.flock(f, fcntl.LOCK_EX)
                 try:
                     f.write(_serialize_message(message) + "\n")
@@ -148,37 +316,50 @@ class JsonlMemory:
     async def load_global_memory(self) -> str:
         """Load the global cross-session memory document."""
         path = _global_memory_file(self._base)
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
+
+        def _read() -> str:
+            if not path.exists():
+                return ""
+            return path.read_text(encoding="utf-8")
+
+        return await asyncio.to_thread(_read)
 
     async def save_global_memory(self, content: str) -> None:
         """Overwrite the global memory document."""
         path = _global_memory_file(self._base, write=True)
-        path.write_text(content, encoding="utf-8")
+        await asyncio.to_thread(_atomic_write_text, path, content)
 
     async def load_cron_jobs(self) -> list[CronJob]:
         """Load all scheduled jobs from the JSON file."""
         path = _cron_file(self._base)
-        if not path.exists():
-            return []
-        data = json.loads(path.read_text(encoding="utf-8"))
-        jobs = []
-        for d in data:
-            last_run = datetime.fromisoformat(d["last_run"]) if d.get("last_run") else None
-            jobs.append(
-                CronJob(
-                    id=d["id"],
-                    name=d["name"],
-                    message=d["message"],
-                    schedule=d["schedule"],
-                    channel=d.get("channel", "cli:local"),
-                    enabled=d.get("enabled", True),
-                    timezone=d.get("timezone", "UTC"),
-                    last_run=last_run,
-                )
-            )
-        return jobs
+
+        def _read() -> list[CronJob]:
+            if not path.exists():
+                return []
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                jobs = []
+                for d in data:
+                    last_run = datetime.fromisoformat(d["last_run"]) if d.get("last_run") else None
+                    jobs.append(
+                        CronJob(
+                            id=d["id"],
+                            name=d["name"],
+                            message=d["message"],
+                            schedule=d["schedule"],
+                            channel=d.get("channel", "cli:local"),
+                            enabled=d.get("enabled", True),
+                            timezone=d.get("timezone", "UTC"),
+                            last_run=last_run,
+                        )
+                    )
+            except json.JSONDecodeError, TypeError, ValueError, KeyError:
+                logger.warning("Failed to load cron jobs from {}; returning empty list", path)
+                return []
+
+            return jobs
+
+        return await asyncio.to_thread(_read)
 
     async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
         """Persist the full job list.
@@ -200,4 +381,4 @@ class JsonlMemory:
             }
             for j in jobs
         ]
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        await asyncio.to_thread(_atomic_write_text, path, json.dumps(data, indent=2))

@@ -1,18 +1,20 @@
-"""
-Search history tool — allows the agent to search past conversations.
+"""Search tool for the global conversation history.
 
-Reads from the global history.jsonl via JsonlMemory. Only user and assistant
-messages are searchable; tool calls and system messages are excluded from both
-search and output.
+This tool scans the global ``history.jsonl`` file in one pass (streaming) so it can
+work on large histories without loading the full file into memory.
+
+Only user and assistant messages are searchable and shown in output; tool and system
+messages are excluded.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from squidbot.adapters.persistence.jsonl import JsonlMemory
+from squidbot.adapters.persistence.jsonl import _history_file, deserialize_message_safe
 from squidbot.core.models import Message, ToolDefinition, ToolResult
 
 SEARCHABLE_ROLES = ("user", "assistant")
@@ -42,28 +44,48 @@ def _parse_max_results(kwargs: dict[str, Any]) -> int:
     return 10
 
 
-def _filter_by_cutoff(messages: list[Message], cutoff: datetime | None) -> list[Message]:
-    if cutoff is None:
-        return messages
-    return [message for message in messages if message.timestamp >= cutoff]
+def _scan_history(
+    base_dir: Path, normalized_query: str, cutoff: datetime | None, max_results: int
+) -> list[tuple[Message | None, Message, Message | None]]:
+    path = _history_file(base_dir)
+    if not path.exists():
+        return []
 
+    contexts: list[tuple[Message | None, Message, Message | None]] = []
+    previous_message: Message | None = None
+    pending_after_index: int | None = None
 
-def _find_matches(
-    messages: list[Message], normalized_query: str, max_results: int
-) -> list[tuple[Message, int]]:
-    matches: list[tuple[Message, int]] = []
-    for index, message in enumerate(messages):
-        if (
-            message.role in SEARCHABLE_ROLES
-            and message.content
-            and normalized_query in message.content.lower()
-        ):
-            matches.append((message, index))
+    with path.open("r", encoding="utf-8", errors="replace") as history_file:
+        for raw_line in history_file:
+            line = raw_line.strip()
+            if not line:
+                continue
 
-        if len(matches) >= max_results:
-            break
+            message = deserialize_message_safe(line)
+            if message is None:
+                continue
 
-    return matches
+            if cutoff is not None and message.timestamp < cutoff:
+                continue
+
+            if pending_after_index is not None:
+                before, hit, _ = contexts[pending_after_index]
+                contexts[pending_after_index] = (before, hit, message)
+                pending_after_index = None
+                if len(contexts) >= max_results:
+                    break
+
+            if (
+                message.role in SEARCHABLE_ROLES
+                and message.content
+                and normalized_query in message.content.lower()
+            ):
+                contexts.append((previous_message, message, None))
+                pending_after_index = len(contexts) - 1
+
+            previous_message = message
+
+    return contexts
 
 
 def _truncate_content(content: str) -> str:
@@ -72,27 +94,24 @@ def _truncate_content(content: str) -> str:
     return content[:MAX_CONTEXT_CHARS] + "..."
 
 
-def _format_matches(messages: list[Message], matches: list[tuple[Message, int]]) -> str:
+def _format_matches(matches: list[tuple[Message | None, Message, Message | None]]) -> str:
     lines: list[str] = []
-    for match_number, (message, index) in enumerate(matches, 1):
-        timestamp = message.timestamp.strftime("%Y-%m-%d %H:%M")
-        channel = message.channel or "unknown"
-        sender = message.sender_id or "unknown"
+    for match_number, (before, hit, after) in enumerate(matches, 1):
+        timestamp = hit.timestamp.strftime("%Y-%m-%d %H:%M")
+        channel = hit.channel or "unknown"
+        sender = hit.sender_id or "unknown"
         lines.append(f"## Match {match_number} — [{channel} / {sender}] | {timestamp}")
         lines.append("")
 
-        for offset in (-1, 0, 1):
-            context_index = index + offset
-            if not 0 <= context_index < len(messages):
+        for context_message in (before, hit, after):
+            if context_message is None:
                 continue
-
-            context_message = messages[context_index]
             if context_message.role not in SEARCHABLE_ROLES or not context_message.content:
                 continue
 
             role_label = context_message.role.upper()
             context_text = _truncate_content(context_message.content)
-            if offset == 0:
+            if context_message is hit:
                 lines.append(f"**{role_label}: {context_text}**")
                 continue
 
@@ -175,9 +194,13 @@ class SearchHistoryTool:
         max_results = _parse_max_results(kwargs)
         cutoff: datetime | None = datetime.now() - timedelta(days=days) if days > 0 else None
 
-        # Load all messages from global history
-        all_messages = _filter_by_cutoff(await JsonlMemory(self._base_dir).load_history(), cutoff)
-        matches = _find_matches(all_messages, normalized_query, max_results)
+        matches = await asyncio.to_thread(
+            _scan_history,
+            self._base_dir,
+            normalized_query,
+            cutoff,
+            max_results,
+        )
 
         if not matches:
             return ToolResult(
@@ -186,6 +209,4 @@ class SearchHistoryTool:
                 is_error=False,
             )
 
-        return ToolResult(
-            tool_call_id="", content=_format_matches(all_messages, matches), is_error=False
-        )
+        return ToolResult(tool_call_id="", content=_format_matches(matches), is_error=False)
