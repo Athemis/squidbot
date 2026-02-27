@@ -422,7 +422,7 @@ class EmailChannel:
     async def _fetch_unseen(self) -> None:
         """Fetch all unseen messages and enqueue them as InboundMessages."""
         assert self._imap is not None
-        status, data = await self._imap.uid("search", "", "UNSEEN")
+        status, data = await self._imap.uid("search", None, "UNSEEN")
         if status != "OK" or not data or not data[0]:
             return
         uid_list = data[0].decode().split() if isinstance(data[0], bytes) else []

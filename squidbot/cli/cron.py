@@ -44,7 +44,7 @@ def add(
 
     async def _add() -> None:
         storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
-        from squidbot.core.cron_ops import add_job, generate_job_id, validate_job  # noqa: PLC0415
+        from squidbot.core.cron_ops import add_job, generate_job_id  # noqa: PLC0415
 
         jobs = await storage.load_cron_jobs()
         job = CronJob(
@@ -54,12 +54,11 @@ def add(
             schedule=schedule,
             channel=channel,
         )
-        error = validate_job(job)
-        if error is not None:
-            print(f"Error: {error}")
-            raise SystemExit(2)
-
-        updated = add_job(jobs, job)
+        try:
+            updated = add_job(jobs, job)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            raise SystemExit(2) from exc
         await storage.save_cron_jobs(updated)
         print(f"Added cron job '{name}' (id={job.id})")
 

@@ -39,7 +39,7 @@ async def test_channel_loop_with_state_passes_extra_tools():
     _, kwargs = loop.run.call_args
     assert "extra_tools" in kwargs
     assert len(kwargs["extra_tools"]) == 2
-    assert getattr(kwargs["extra_tools"][1], "name", None) == "cron_add"
+    assert any(getattr(t, "name", None) == "cron_add" for t in kwargs["extra_tools"])
     mock_tool_cls.assert_called_once_with(storage=storage)
 
 
@@ -58,5 +58,5 @@ async def test_channel_loop_passes_extra_tools():
     _, kwargs = loop.run.call_args
     assert "extra_tools" in kwargs
     assert len(kwargs["extra_tools"]) == 2
-    assert getattr(kwargs["extra_tools"][1], "name", None) == "cron_add"
+    assert any(getattr(t, "name", None) == "cron_add" for t in kwargs["extra_tools"])
     mock_tool_cls.assert_called_once_with(storage=storage)

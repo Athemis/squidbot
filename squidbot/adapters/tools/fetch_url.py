@@ -181,6 +181,7 @@ class FetchUrlTool:
                 client=client,
                 url=current_url,
                 max_bytes=max_bytes,
+                timeout_seconds=timeout_seconds,
             )
 
         async with httpx.AsyncClient(
@@ -190,6 +191,7 @@ class FetchUrlTool:
                 client=transient_client,
                 url=current_url,
                 max_bytes=max_bytes,
+                timeout_seconds=timeout_seconds,
             )
 
     async def _fetch_with_client(
@@ -198,13 +200,14 @@ class FetchUrlTool:
         client: httpx.AsyncClient,
         url: str,
         max_bytes: int,
+        timeout_seconds: int,
     ) -> tuple[httpx.Response, bytes]:
         current_url = url
         for _ in range(_MAX_REDIRECTS + 1):
             parsed = _parse_and_validate_url(current_url)
             await self._assert_safe_host(parsed.host)
 
-            async with client.stream("GET", str(parsed)) as response:
+            async with client.stream("GET", str(parsed), timeout=timeout_seconds) as response:
                 if _is_redirect(response.status_code):
                     location = response.headers.get("location")
                     if not location:
@@ -253,7 +256,13 @@ def _is_redirect(status_code: int) -> bool:
 
 
 def _assert_public_ip(address: _IpAddress) -> None:
-    if address.is_loopback or address.is_private or address.is_link_local:
+    if (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_multicast
+    ):
         raise ValueError("target host is blocked by SSRF policy")
 
 
