@@ -71,7 +71,7 @@ class CollectingChannel:
     streaming = False
 
     def __init__(self):
-        self.sent: list[str] = []
+        self.sent: list[OutboundMessage] = []
 
     def receive(self) -> AsyncIterator[InboundMessage]:
         async def _empty() -> AsyncIterator[InboundMessage]:
@@ -82,7 +82,7 @@ class CollectingChannel:
         return _empty()
 
     async def send(self, message: OutboundMessage) -> None:
-        self.sent.append(message.text)
+        self.sent.append(message)
 
     async def send_typing(self, session_id: str) -> None:
         pass
@@ -146,7 +146,7 @@ async def test_simple_text_response(storage, memory):
         system_prompt="You are a bot.",
     )
     await loop.run(SESSION, "Hello!", channel)
-    assert channel.sent == ["Hello from the bot!"]
+    assert [message.text for message in channel.sent] == ["Hello from the bot!"]
 
 
 async def test_streaming_channel_receives_chunks(storage, memory):
@@ -168,7 +168,7 @@ async def test_tool_call_then_text(storage, memory):
     channel = CollectingChannel()
     loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="You are a bot.")
     await loop.run(SESSION, "Please echo world", channel)
-    assert any("Result received!" in s for s in channel.sent)
+    assert any("Result received!" in message.text for message in channel.sent)
 
 
 async def test_history_persisted_after_run(storage, memory):
@@ -198,7 +198,7 @@ async def test_run_with_llm_override(storage, memory):
     channel = CollectingChannel()
     session = Session(channel="cli", sender_id="u1")
     await loop.run(session, "hello", channel, llm=override_llm)
-    assert channel.sent == ["from override"]
+    assert [message.text for message in channel.sent] == ["from override"]
     # default_llm should NOT have been called (its iterator is still fresh)
     assert list(default_llm._responses) == ["from default"]
 
@@ -216,7 +216,27 @@ async def test_extra_tool_callable_via_run(storage, memory):
         system_prompt="test",
     )
     await loop.run(SESSION, "go", channel, extra_tools=[EchoTool()])
-    assert any("done" in s for s in channel.sent)
+    assert any("done" in message.text for message in channel.sent)
+
+
+async def test_outbound_metadata_propagated_to_channel(storage, memory):
+    llm = ScriptedLLM(["metadata response"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(
+        SESSION,
+        "Hello!",
+        channel,
+        outbound_metadata={"k": "v"},
+    )
+
+    assert channel.sent[0].metadata.get("k") == "v"
 
 
 async def test_extra_tool_does_not_pollute_registry(storage, memory):
@@ -246,7 +266,7 @@ async def test_run_degrades_when_build_messages_fails(storage) -> None:
 
     await loop.run(SESSION, "Hello!", channel)
 
-    assert channel.sent == ["fallback response"]
+    assert [message.text for message in channel.sent] == ["fallback response"]
 
 
 async def test_run_degrades_when_persist_exchange_fails(storage) -> None:
@@ -261,4 +281,4 @@ async def test_run_degrades_when_persist_exchange_fails(storage) -> None:
 
     await loop.run(SESSION, "Hello!", channel)
 
-    assert channel.sent == ["still replies"]
+    assert [message.text for message in channel.sent] == ["still replies"]

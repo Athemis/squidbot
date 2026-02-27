@@ -30,6 +30,7 @@ import mistune
 from loguru import logger
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
+from squidbot.core.text_extract import html_to_text
 
 if TYPE_CHECKING:
     from squidbot.config.schema import EmailChannelConfig
@@ -39,8 +40,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _NO_TEXT: str = "[Keine Textinhalte]"
-
-_SKIP_TAGS: frozenset[str] = frozenset({"script", "style", "head"})
 
 _md = mistune.create_markdown(escape=True)
 
@@ -60,37 +59,6 @@ def _normalize_address(addr: str) -> str:
     """
     _, address = parseaddr(addr)
     return address.strip("<> ").lower()
-
-
-def _html_to_text(html_body: str) -> str:
-    """Strip HTML tags and decode entities to produce plain text."""
-    import html as _html_mod  # noqa: PLC0415
-    import html.parser as _html_parser  # noqa: PLC0415
-
-    class _Stripper(_html_parser.HTMLParser):
-        def __init__(self) -> None:
-            super().__init__()
-            self._parts: list[str] = []
-            self._skip: int = 0
-
-        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-            if tag.lower() in _SKIP_TAGS:
-                self._skip += 1
-
-        def handle_endtag(self, tag: str) -> None:
-            if tag.lower() in _SKIP_TAGS and self._skip > 0:
-                self._skip -= 1
-
-        def handle_data(self, data: str) -> None:
-            if self._skip == 0:
-                self._parts.append(data)
-
-        def get_text(self) -> str:
-            return " ".join(self._parts).strip()
-
-    stripper = _Stripper()
-    stripper.feed(html_body)
-    return _html_mod.unescape(stripper.get_text())
 
 
 def _decode_part(part: EmailMessage) -> str:
@@ -139,7 +107,7 @@ def _extract_text(msg: EmailMessage) -> str:
 
     # Leaf part — text/html (strip tags)
     if msg.get_content_type() == "text/html":
-        return _html_to_text(_decode_part(msg)).strip()
+        return html_to_text(_decode_part(msg)).strip()
 
     # Non-multipart, non-text leaf (e.g. application/octet-stream)
     if not msg.is_multipart():
@@ -157,7 +125,7 @@ def _extract_text(msg: EmailMessage) -> str:
             if ct == "text/plain" and plain_text is None:
                 plain_text = _decode_part(part).strip()
             elif ct == "text/html" and html_text is None:
-                html_text = _html_to_text(_decode_part(part)).strip()
+                html_text = html_to_text(_decode_part(part)).strip()
         if plain_text is not None:
             return plain_text
         if html_text is not None:
@@ -328,8 +296,9 @@ class EmailChannel:
 
         meta = message.metadata
         to_addr: str = str(meta.get("email_from", message.session.sender_id))
-        subject: str = _re_subject(str(meta.get("email_subject", "")))
         in_reply_to: str = str(meta.get("email_message_id", ""))
+        base_subject = str(meta.get("email_subject", ""))
+        subject = _re_subject(base_subject) if in_reply_to else base_subject
         old_refs: str = str(meta.get("email_references", ""))
         references: str = (old_refs + " " + in_reply_to).strip()
 
@@ -437,12 +406,13 @@ class EmailChannel:
         elif cfg.imap_starttls:
             imap = aioimaplib.IMAP4(host=cfg.imap_host, port=cfg.imap_port)
         else:
+            assert ssl_ctx is not None
             imap = aioimaplib.IMAP4_SSL(host=cfg.imap_host, port=cfg.imap_port, ssl_context=ssl_ctx)
 
         await imap.wait_hello_from_server()
 
         if cfg.tls and cfg.imap_starttls and ssl_ctx is not None:
-            await imap.starttls(ssl_ctx)
+            await cast(Any, imap).starttls(ssl_ctx)
 
         await imap.login(cfg.username, cfg.password)
         await imap.select("INBOX")

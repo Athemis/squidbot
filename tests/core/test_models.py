@@ -39,7 +39,7 @@ def test_cron_job_defaults():
     )
     assert job.enabled is True
     assert job.last_run is None
-    assert job.timezone == "UTC"
+    assert job.timezone == "local"
     assert job.channel == "cli:local"
 
 

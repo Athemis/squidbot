@@ -40,7 +40,7 @@ from squidbot.cli.skills import skills_app
 from squidbot.config.schema import DEFAULT_CONFIG_PATH, Settings
 
 if TYPE_CHECKING:
-    from squidbot.core.ports import ChannelPort
+    from squidbot.core.ports import ChannelPort, ToolPort
 
 app = cyclopts.App(name="squidbot", help="A lightweight personal AI assistant.")
 
@@ -109,20 +109,34 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     settings = Settings.load(config_path)
     agent_loop, mcp_connections, storage = await _make_agent_loop(settings)
 
+    from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
+    from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+
+    def _make_extra(default_channel: str, default_metadata: dict[str, object]) -> list[ToolPort]:
+        return [
+            MemoryWriteTool(storage=storage),
+            *build_context_cron_tools(
+                storage=storage,
+                default_channel=default_channel,
+                default_metadata=default_metadata,
+            ),
+        ]
+
     channel: ChannelPort
     if message:
-        # Single-shot mode: use plain CliChannel (streaming, no banner)
         channel = CliChannel()
-        from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
-
-        extra = [MemoryWriteTool(storage=storage)]
-        await agent_loop.run(CliChannel.SESSION, message, channel, extra_tools=extra)
-        print()  # newline after streamed output
+        await agent_loop.run(
+            CliChannel.SESSION,
+            message,
+            channel,
+            extra_tools=_make_extra(CliChannel.SESSION.id, {}),
+            outbound_metadata={},
+        )
+        print()
         for conn in mcp_connections:
             await conn.close()
         return
 
-    # Interactive REPL mode: Rich interface
     console = Console()
     console.print(
         f"🦑 [bold]squidbot[/bold] 0.1.0  •  pool: [cyan]{settings.llm.default_pool}[/cyan]"
@@ -133,29 +147,28 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     channel = RichCliChannel()
     workspace = Path(settings.agents.workspace).expanduser()
     try:
-        # If BOOTSTRAP.md exists, trigger the bootstrap interview before the user speaks
         if (workspace / "BOOTSTRAP.md").exists():
             console.print("[dim]first run — starting bootstrap interview…[/dim]")
             console.print(Rule(style="dim"))
             session = CliChannel.SESSION
-            from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
-
-            extra = [MemoryWriteTool(storage=storage)]
             await agent_loop.run(
                 session,
                 "BOOTSTRAP.md exists. Follow it now.",
                 channel,
-                extra_tools=extra,
+                extra_tools=_make_extra(session.id, {}),
+                outbound_metadata={},
             )
         async for inbound in channel.receive():
-            from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
-
-            extra = [MemoryWriteTool(storage=storage)]
-            await agent_loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
+            await agent_loop.run(
+                inbound.session,
+                inbound.text,
+                channel,
+                extra_tools=_make_extra(inbound.session.id, inbound.metadata),
+                outbound_metadata=inbound.metadata,
+            )
     finally:
         for conn in mcp_connections:
             await conn.close()
-
 
 async def _run_onboard(config_path: Path) -> None:
     """Interactive setup wizard. Idempotent — existing values shown as defaults."""

@@ -124,12 +124,19 @@ class SearchHistoryConfig(BaseModel):
     enabled: bool = True
 
 
+class FetchUrlToolConfig(BaseModel):
+    """Configuration for the fetch_url tool."""
+
+    enabled: bool = True
+
+
 class ToolsConfig(BaseModel):
     """Root configuration for built-in tools and optional tool adapters."""
 
     shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
     files: ShellToolConfig = Field(default_factory=ShellToolConfig)  # reuse enabled flag
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch_url: FetchUrlToolConfig = Field(default_factory=FetchUrlToolConfig)
     search_history: SearchHistoryConfig = Field(default_factory=SearchHistoryConfig)
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     spawn: SpawnSettings = Field(default_factory=SpawnSettings)
