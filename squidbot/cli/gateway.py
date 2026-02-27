@@ -90,7 +90,7 @@ async def _channel_loop_with_state(
         storage: Persistence adapter used to construct MemoryWriteTool per message.
         tracker: Optional tracker receiving the latest channel/session/metadata.
     """
-    from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
+    from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
@@ -110,7 +110,7 @@ async def _channel_loop_with_state(
             )
         extra = [
             MemoryWriteTool(storage=storage),
-            *build_cron_tools(
+            *build_context_cron_tools(
                 storage=storage,
                 default_channel=inbound.session.id,
                 default_metadata=inbound.metadata,
@@ -140,7 +140,7 @@ async def _channel_loop(
         storage: Persistence adapter used to construct MemoryWriteTool per message.
         tracker: Optional tracker receiving the latest channel/session/metadata.
     """
-    from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
+    from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
     async for inbound in channel.receive():
@@ -148,7 +148,7 @@ async def _channel_loop(
             tracker.update(channel, inbound.session, inbound.metadata)
         extra = [
             MemoryWriteTool(storage=storage),
-            *build_cron_tools(
+            *build_context_cron_tools(
                 storage=storage,
                 default_channel=inbound.session.id,
                 default_metadata=inbound.metadata,
@@ -314,6 +314,11 @@ async def _make_agent_loop(
         from squidbot.adapters.tools.fetch_url import FetchUrlTool  # noqa: PLC0415
 
         registry.register(FetchUrlTool())
+
+    from squidbot.adapters.tools.cron import build_global_cron_tools  # noqa: PLC0415
+
+    for cron_tool in build_global_cron_tools(storage=storage):
+        registry.register(cron_tool)
 
     if settings.tools.search_history.enabled:
         from squidbot.adapters.tools.search_history import SearchHistoryTool  # noqa: PLC0415

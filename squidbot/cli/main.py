@@ -113,12 +113,12 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     if message:
         # Single-shot mode: use plain CliChannel (streaming, no banner)
         channel = CliChannel()
-        from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
+        from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
         extra = [
             MemoryWriteTool(storage=storage),
-            *build_cron_tools(
+            *build_context_cron_tools(
                 storage=storage,
                 default_channel=CliChannel.SESSION.id,
                 default_metadata={},
@@ -147,7 +147,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     channel = RichCliChannel()
     workspace = Path(settings.agents.workspace).expanduser()
     try:
-        from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
+        from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
 
         # If BOOTSTRAP.md exists, trigger the bootstrap interview before the user speaks
         if (workspace / "BOOTSTRAP.md").exists():
@@ -158,7 +158,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
 
             extra = [
                 MemoryWriteTool(storage=storage),
-                *build_cron_tools(
+                *build_context_cron_tools(
                     storage=storage,
                     default_channel=session.id,
                     default_metadata={},
@@ -176,7 +176,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
 
             extra = [
                 MemoryWriteTool(storage=storage),
-                *build_cron_tools(
+                *build_context_cron_tools(
                     storage=storage,
                     default_channel=inbound.session.id,
                     default_metadata=inbound.metadata,

@@ -222,20 +222,27 @@ def _build_cron_metadata(
     return {}, None
 
 
-def build_cron_tools(
+def build_global_cron_tools(
+    *,
+    storage: MemoryPort,
+) -> list[ToolPort]:
+    return [
+        CronListTool(storage=storage),
+        CronRemoveTool(storage=storage),
+        CronSetEnabledTool(storage=storage),
+    ]
+
+
+def build_context_cron_tools(
     *,
     storage: MemoryPort,
     default_channel: str,
     default_metadata: dict[str, Any],
 ) -> list[ToolPort]:
-    """Construct all cron tool instances for one inbound context."""
     return [
-        CronListTool(storage=storage),
         CronAddTool(
             storage=storage,
             default_channel=default_channel,
             default_metadata=default_metadata,
         ),
-        CronRemoveTool(storage=storage),
-        CronSetEnabledTool(storage=storage),
     ]
