@@ -171,6 +171,41 @@ async def test_tool_call_then_text(storage, memory):
     assert any("Result received!" in message.text for message in channel.sent)
 
 
+async def test_tool_call_round_preserves_reasoning_content(storage, memory):
+    tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "world"})
+
+    class ReasoningLLM:
+        def __init__(self) -> None:
+            self.calls: list[list[Message]] = []
+            self._turn = 0
+
+        async def chat(self, messages, tools, *, stream=True) -> AsyncIterator:
+            self.calls.append(list(messages))
+            self._turn += 1
+
+            async def _gen():
+                if self._turn == 1:
+                    yield ([tool_call], "selected tool after reasoning")
+                    return
+                yield "Done"
+
+            return _gen()
+
+    llm = ReasoningLLM()
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="You are a bot.")
+
+    await loop.run(SESSION, "Please echo world", channel)
+
+    second_call_messages = llm.calls[1]
+    assistant_tool_message = next(
+        msg for msg in second_call_messages if msg.role == "assistant" and msg.tool_calls
+    )
+    assert assistant_tool_message.reasoning_content == "selected tool after reasoning"
+
+
 async def test_history_persisted_after_run(storage, memory):
     llm = ScriptedLLM(["I remember you."])
     channel = CollectingChannel()
