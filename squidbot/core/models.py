@@ -123,7 +123,7 @@ class CronJob:
     schedule: str  # cron expression ("0 9 * * *") or interval ("every 3600")
     channel: str  # target session ID, e.g. "cli:local" or "matrix:@user:matrix.org"
     enabled: bool = True
-    timezone: str = "UTC"
+    timezone: str = "local"
     last_run: datetime | None = None
 
 

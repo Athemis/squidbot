@@ -9,6 +9,7 @@ interactions happen through the injected port implementations.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
@@ -103,6 +104,7 @@ class AgentLoop:
         tool_definitions: list[ToolDefinition],
         channel: ChannelPort,
         session: Session,
+        outbound_metadata: dict[str, Any] | None,
     ) -> tuple[str, list[ToolCall]]:
         tool_calls: list[ToolCall] = []
         text_chunks: list[str] = []
@@ -112,7 +114,13 @@ class AgentLoop:
             if isinstance(chunk, str):
                 text_chunks.append(chunk)
                 if channel.streaming:
-                    await channel.send(OutboundMessage(session=session, text=chunk))
+                    await channel.send(
+                        OutboundMessage(
+                            session=session,
+                            text=chunk,
+                            metadata=dict(outbound_metadata or {}),
+                        )
+                    )
                 continue
 
             if isinstance(chunk, list):
@@ -151,10 +159,20 @@ class AgentLoop:
             )
 
     async def _deliver_final_text(
-        self, channel: ChannelPort, session: Session, final_text: str
+        self,
+        channel: ChannelPort,
+        session: Session,
+        final_text: str,
+        outbound_metadata: dict[str, Any] | None,
     ) -> None:
         if not channel.streaming and final_text:
-            await channel.send(OutboundMessage(session=session, text=final_text))
+            await channel.send(
+                OutboundMessage(
+                    session=session,
+                    text=final_text,
+                    metadata=dict(outbound_metadata or {}),
+                )
+            )
 
     async def run(
         self,
@@ -164,6 +182,7 @@ class AgentLoop:
         *,
         llm: LLMPort | None = None,
         extra_tools: Sequence[ToolPort] | None = None,
+        outbound_metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Process a single user message and deliver the reply to the channel.
@@ -181,6 +200,8 @@ class AgentLoop:
             extra_tools: Optional list of additional tools available for this run only.
                          These are merged with the registry for this call and do not
                          mutate self._registry.
+            outbound_metadata: Optional channel-routing metadata to attach to outbound
+                               messages emitted during this run.
         """
         selected_llm = llm if llm is not None else self._llm
 
@@ -207,10 +228,17 @@ class AgentLoop:
                     tool_definitions=tool_definitions,
                     channel=channel,
                     session=session,
+                    outbound_metadata=outbound_metadata,
                 )
             except Exception as e:
                 error_msg = _format_llm_error(e)
-                await channel.send(OutboundMessage(session=session, text=error_msg))
+                await channel.send(
+                    OutboundMessage(
+                        session=session,
+                        text=error_msg,
+                        metadata=dict(outbound_metadata or {}),
+                    )
+                )
                 return
 
             if text_response:
@@ -234,7 +262,7 @@ class AgentLoop:
         else:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 
-        await self._deliver_final_text(channel, session, final_text)
+        await self._deliver_final_text(channel, session, final_text, outbound_metadata)
 
         # Persist the exchange
         try:

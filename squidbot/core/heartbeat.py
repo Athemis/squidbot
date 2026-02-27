@@ -12,7 +12,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
@@ -83,17 +83,25 @@ class LastChannelTracker:
     def __init__(self) -> None:
         self.channel: ChannelPort | None = None
         self.session: Session | None = None
+        self.metadata: dict[str, Any] = {}
 
-    def update(self, channel: ChannelPort, session: Session) -> None:
+    def update(
+        self,
+        channel: ChannelPort,
+        session: Session,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """
         Record the channel and session of the most recent inbound message.
 
         Args:
             channel: The channel the message arrived on.
             session: The session (channel type + sender ID) of the message.
+            metadata: Optional inbound routing metadata to reuse for outbound delivery.
         """
         self.channel = channel
         self.session = session
+        self.metadata = dict(metadata or {})
 
 
 class _SinkChannel:
@@ -280,7 +288,13 @@ class HeartbeatService:
         channel = self._tracker.channel
         session = self._tracker.session
         try:
-            await channel.send(OutboundMessage(session=session, text=response))
+            await channel.send(
+                OutboundMessage(
+                    session=session,
+                    text=response,
+                    metadata=dict(self._tracker.metadata),
+                )
+            )
         except Exception as e:
             logger.error("heartbeat: delivery error: {}", e)
 

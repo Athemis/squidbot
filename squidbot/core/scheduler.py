@@ -9,9 +9,11 @@ for each due job.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable, Coroutine
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cronsim import CronSim
 
@@ -20,6 +22,42 @@ from squidbot.core.ports import MemoryPort
 
 # Poll interval: check for due jobs every minute
 POLL_INTERVAL_SECONDS = 60
+
+_FIXED_OFFSET_PATTERN = re.compile(r"^([+-])(\d{2}):(\d{2})$")
+
+
+def _resolve_timezone(timezone_name: str, now: datetime) -> tzinfo:
+    if timezone_name == "UTC":
+        return UTC
+
+    if timezone_name == "local":
+        local_tz = now.astimezone().tzinfo
+        if local_tz is not None:
+            return local_tz
+        return UTC
+
+    fixed_offset = _FIXED_OFFSET_PATTERN.match(timezone_name)
+    if fixed_offset is not None:
+        sign, hour_text, minute_text = fixed_offset.groups()
+        hours = int(hour_text)
+        minutes = int(minute_text)
+        if hours <= 23 and minutes <= 59:
+            delta = timedelta(hours=hours, minutes=minutes)
+            if sign == "-":
+                delta = -delta
+            return timezone(delta)
+        return UTC
+
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return UTC
+
+
+def _as_job_time(instant: datetime, job_tz: tzinfo) -> datetime:
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=UTC)
+    return instant.astimezone(job_tz)
 
 
 def parse_schedule(job: CronJob, now: datetime | None = None) -> datetime | None:
@@ -42,7 +80,9 @@ def parse_schedule(job: CronJob, now: datetime | None = None) -> datetime | None
             return None
 
     try:
-        cron = CronSim(schedule, now)
+        job_tz = _resolve_timezone(job.timezone, now)
+        now_local = _as_job_time(now, job_tz)
+        cron = CronSim(schedule, now_local)
         return next(iter(cron))
     except Exception:
         return None
@@ -76,13 +116,14 @@ def is_due(job: CronJob, now: datetime | None = None) -> bool:
     # When last_run is None, use (now - 1 minute) as baseline so we find
     # the next occurrence from just before now. This avoids firing jobs that
     # haven't been scheduled yet (their next fire time is in the future).
-    from datetime import timedelta
-
-    baseline = job.last_run if job.last_run is not None else (now - timedelta(minutes=1))
+    job_tz = _resolve_timezone(job.timezone, now)
+    now_local = _as_job_time(now, job_tz)
+    baseline_source = job.last_run if job.last_run is not None else (now - timedelta(minutes=1))
+    baseline = _as_job_time(baseline_source, job_tz)
     try:
         cron = CronSim(schedule, baseline)
         next_run = next(iter(cron))
-        return next_run <= now
+        return next_run <= now_local
     except Exception:
         return False
 

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
     from squidbot.config.schema import Settings
     from squidbot.core.agent import AgentLoop
+    from squidbot.core.heartbeat import LastChannelTracker
     from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
     from squidbot.core.ports import ChannelPort, LLMPort
     from squidbot.core.skills import SkillMetadata
@@ -74,6 +75,7 @@ async def _channel_loop_with_state(
     loop: Any,
     state: GatewayState,
     storage: JsonlMemory,
+    tracker: LastChannelTracker | None = None,
 ) -> None:
     """
     Drive a single channel and update GatewayState on each message.
@@ -86,11 +88,14 @@ async def _channel_loop_with_state(
         loop: The agent loop to handle each message.
         state: Live gateway state — updated in-place.
         storage: Persistence adapter used to construct MemoryWriteTool per message.
+        tracker: Optional tracker receiving the latest channel/session/metadata.
     """
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
     async for inbound in channel.receive():
+        if tracker is not None:
+            tracker.update(channel, inbound.session, inbound.metadata)
         sid = inbound.session.id
         if sid in state.active_sessions:
             state.active_sessions[sid].message_count += 1
@@ -103,10 +108,21 @@ async def _channel_loop_with_state(
                 message_count=1,
             )
         extra = [MemoryWriteTool(storage=storage)]
-        await loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
+        await loop.run(
+            inbound.session,
+            inbound.text,
+            channel,
+            extra_tools=extra,
+            outbound_metadata=inbound.metadata,
+        )
 
 
-async def _channel_loop(channel: ChannelPort, loop: Any, storage: JsonlMemory) -> None:
+async def _channel_loop(
+    channel: ChannelPort,
+    loop: Any,
+    storage: JsonlMemory,
+    tracker: LastChannelTracker | None = None,
+) -> None:
     """
     Drive a single channel without state tracking (used by agent command).
 
@@ -114,12 +130,21 @@ async def _channel_loop(channel: ChannelPort, loop: Any, storage: JsonlMemory) -
         channel: The channel adapter to drive.
         loop: The agent loop to handle each message.
         storage: Persistence adapter used to construct MemoryWriteTool per message.
+        tracker: Optional tracker receiving the latest channel/session/metadata.
     """
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
     async for inbound in channel.receive():
+        if tracker is not None:
+            tracker.update(channel, inbound.session, inbound.metadata)
         extra = [MemoryWriteTool(storage=storage)]
-        await loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
+        await loop.run(
+            inbound.session,
+            inbound.text,
+            channel,
+            extra_tools=extra,
+            outbound_metadata=inbound.metadata,
+        )
 
 
 def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
@@ -498,7 +523,9 @@ async def _run_gateway(config_path: Path) -> None:
                     ChannelStatus(name="matrix", enabled=True, connected=True)
                 )
                 logger.info("matrix channel: starting")
-                tg.create_task(_channel_loop_with_state(matrix_ch, agent_loop, state, storage))
+                tg.create_task(
+                    _channel_loop_with_state(matrix_ch, agent_loop, state, storage, tracker=tracker)
+                )
             else:
                 state.channel_status.append(
                     ChannelStatus(name="matrix", enabled=False, connected=False)
@@ -513,7 +540,9 @@ async def _run_gateway(config_path: Path) -> None:
                     ChannelStatus(name="email", enabled=True, connected=True)
                 )
                 logger.info("email channel: starting")
-                tg.create_task(_channel_loop_with_state(email_ch, agent_loop, state, storage))
+                tg.create_task(
+                    _channel_loop_with_state(email_ch, agent_loop, state, storage, tracker=tracker)
+                )
             else:
                 state.channel_status.append(
                     ChannelStatus(name="email", enabled=False, connected=False)

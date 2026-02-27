@@ -116,7 +116,13 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
         extra = [MemoryWriteTool(storage=storage)]
-        await agent_loop.run(CliChannel.SESSION, message, channel, extra_tools=extra)
+        await agent_loop.run(
+            CliChannel.SESSION,
+            message,
+            channel,
+            extra_tools=extra,
+            outbound_metadata={},
+        )
         print()  # newline after streamed output
         for conn in mcp_connections:
             await conn.close()
@@ -146,12 +152,19 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
                 "BOOTSTRAP.md exists. Follow it now.",
                 channel,
                 extra_tools=extra,
+                outbound_metadata={},
             )
         async for inbound in channel.receive():
             from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
             extra = [MemoryWriteTool(storage=storage)]
-            await agent_loop.run(inbound.session, inbound.text, channel, extra_tools=extra)
+            await agent_loop.run(
+                inbound.session,
+                inbound.text,
+                channel,
+                extra_tools=extra,
+                outbound_metadata=inbound.metadata,
+            )
     finally:
         for conn in mcp_connections:
             await conn.close()

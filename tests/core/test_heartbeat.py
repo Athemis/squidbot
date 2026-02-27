@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -62,9 +63,11 @@ class _FakeChannel:
 
     streaming = False
     sent: list[str]
+    sent_messages: list[OutboundMessage]
 
     def __init__(self) -> None:
         self.sent = []
+        self.sent_messages = []
 
     async def receive(self):  # type: ignore[override]
         return
@@ -72,6 +75,7 @@ class _FakeChannel:
 
     async def send(self, message: OutboundMessage) -> None:
         self.sent.append(message.text)
+        self.sent_messages.append(message)
 
     async def send_typing(self, session_id: str) -> None:
         pass
@@ -81,15 +85,17 @@ def test_tracker_initial_state():
     tracker = LastChannelTracker()
     assert tracker.channel is None
     assert tracker.session is None
+    assert tracker.metadata == {}
 
 
 def test_tracker_update():
     tracker = LastChannelTracker()
     ch = _FakeChannel()
     session = Session(channel="matrix", sender_id="@alice:example.com")
-    tracker.update(ch, session)
+    tracker.update(ch, session, {"matrix_room_id": "!room:example.com"})
     assert tracker.channel is ch
     assert tracker.session is session
+    assert tracker.metadata == {"matrix_room_id": "!room:example.com"}
 
 
 def test_tracker_last_update_wins():
@@ -98,10 +104,11 @@ def test_tracker_last_update_wins():
     ch2 = _FakeChannel()
     s1 = Session(channel="matrix", sender_id="@alice:example.com")
     s2 = Session(channel="email", sender_id="bob@example.com")
-    tracker.update(ch1, s1)
-    tracker.update(ch2, s2)
+    tracker.update(ch1, s1, {"matrix_room_id": "!room:example.com"})
+    tracker.update(ch2, s2, {"email_subject": "subject"})
     assert tracker.channel is ch2
     assert tracker.session is s2
+    assert tracker.metadata == {"email_subject": "subject"}
 
 
 def _make_service(cfg: HeartbeatConfig) -> HeartbeatService:
@@ -203,7 +210,7 @@ async def test_tick_skips_when_tracker_empty(tmp_path):
     agent = _FakeAgentLoop("HEARTBEAT_OK")
     tracker = LastChannelTracker()
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert agent.calls == []
@@ -216,7 +223,12 @@ async def test_tick_skips_outside_active_hours(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     cfg = HeartbeatConfig(active_hours_start="08:00", active_hours_end="09:00", timezone="UTC")
-    svc = HeartbeatService(agent_loop=agent, tracker=tracker, workspace=tmp_path, config=cfg)  # type: ignore[arg-type]
+    svc = HeartbeatService(
+        agent_loop=cast(Any, agent),
+        tracker=tracker,
+        workspace=tmp_path,
+        config=cfg,
+    )
     dt = datetime(2026, 2, 22, 3, 0, tzinfo=UTC)
     await svc._tick(now=dt)
     assert agent.calls == []
@@ -230,7 +242,7 @@ async def test_tick_skips_empty_heartbeat_file(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert agent.calls == []
@@ -243,7 +255,7 @@ async def test_tick_runs_agent_when_file_absent(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert len(agent.calls) == 1
@@ -256,7 +268,7 @@ async def test_tick_heartbeat_ok_not_delivered(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert ch.sent == []
@@ -270,10 +282,32 @@ async def test_tick_alert_delivered(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert ch.sent == ["You have 3 unread messages."]
+
+
+async def test_tick_alert_delivery_carries_tracker_metadata(tmp_path):
+    (tmp_path / "HEARTBEAT.md").write_text("- Check inbox\n")
+    agent = _FakeAgentLoop("You have 3 unread messages.")
+    tracker = LastChannelTracker()
+    ch = _FakeChannel()
+    session = Session(channel="matrix", sender_id="@alice:example.com")
+    tracker.update(ch, session, {"matrix_room_id": "!room:example.com", "matrix_thread_root": "$t"})
+    svc = HeartbeatService(
+        agent_loop=cast(Any, agent),
+        tracker=tracker,
+        workspace=tmp_path,
+        config=HeartbeatConfig(),
+    )  # type: ignore[arg-type]
+
+    await svc._tick()
+
+    assert ch.sent_messages[0].metadata == {
+        "matrix_room_id": "!room:example.com",
+        "matrix_thread_root": "$t",
+    }
 
 
 async def test_tick_heartbeat_ok_at_start_not_delivered(tmp_path):
@@ -283,7 +317,7 @@ async def test_tick_heartbeat_ok_at_start_not_delivered(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert ch.sent == []
@@ -296,7 +330,7 @@ async def test_tick_heartbeat_ok_in_middle_is_delivered(tmp_path):
     session = Session(channel="cli", sender_id="local")
     tracker.update(ch, session)  # type: ignore[arg-type]
     svc = HeartbeatService(
-        agent_loop=agent, tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
+        agent_loop=cast(Any, agent), tracker=tracker, workspace=tmp_path, config=HeartbeatConfig()
     )  # type: ignore[arg-type]
     await svc._tick()
     assert ch.sent == ["Some text HEARTBEAT_OK more text"]
@@ -324,7 +358,7 @@ async def test_heartbeat_uses_llm_override(tmp_path):
             received_llm.append(llm)
             await channel.send(OutboundMessage(session=session, text="HEARTBEAT_OK"))  # type: ignore[union-attr]
 
-    override = object()  # sentinel
+    override: Any = object()  # sentinel
     tracker = LastChannelTracker()
     ch = _FakeChannel()
     tracker.update(ch, Session(channel="matrix", sender_id="u1"))  # type: ignore[arg-type]

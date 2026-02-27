@@ -113,6 +113,7 @@ async def test_cron_jobs_roundtrip(tmp_path: Path) -> None:
     assert len(loaded) == 1
     assert loaded[0].id == "job-1"
     assert loaded[0].message == "ping"
+    assert loaded[0].timezone == "local"
 
 
 @pytest.mark.asyncio

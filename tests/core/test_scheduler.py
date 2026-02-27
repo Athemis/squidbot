@@ -38,3 +38,17 @@ def test_is_not_due_before_time():
     job = CronJob(id="1", name="test", message="hi", schedule="0 9 * * *", channel="cli:local")
     now = datetime(2026, 2, 21, 8, 59, tzinfo=UTC)
     assert not is_due(job, now=now)
+
+
+def test_is_due_for_fixed_offset_timezone():
+    job = CronJob(
+        id="1",
+        name="test",
+        message="hi",
+        schedule="0 9 * * *",
+        channel="cli:local",
+        timezone="+01:00",
+    )
+
+    assert not is_due(job, now=datetime(2026, 2, 21, 7, 59, tzinfo=UTC))
+    assert is_due(job, now=datetime(2026, 2, 21, 8, 0, tzinfo=UTC))
