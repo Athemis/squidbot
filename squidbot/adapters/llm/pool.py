@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from squidbot.core.models import Message, ToolDefinition
+from squidbot.core.models import Message, ToolCall, ToolDefinition
 
 
 def _is_auth_error(exc: Exception) -> bool:
@@ -26,7 +26,7 @@ async def _pool_gen(
     messages: list[Message],
     tools: list[ToolDefinition],
     stream: bool,
-) -> AsyncIterator[str | list[Any]]:
+) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
     """
     Async generator that tries each adapter in order, falling back on error.
 
@@ -92,7 +92,7 @@ class PooledLLMAdapter:
         tools: list[ToolDefinition],
         *,
         stream: bool = True,
-    ) -> AsyncIterator[str | list[Any]]:
+    ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
         """
         Try each adapter in order, falling back to the next on any exception.
 
@@ -105,7 +105,8 @@ class PooledLLMAdapter:
             stream: Whether to stream the response.
 
         Returns:
-            AsyncIterator yielding str chunks or list[ToolCall] events.
+            AsyncIterator yielding str chunks, list[ToolCall] events, or
+            tuple[list[ToolCall], str | None] events for optional reasoning.
 
         Raises:
             Exception: The last exception if all adapters fail.

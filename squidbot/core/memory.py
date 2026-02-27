@@ -112,6 +112,7 @@ class MemoryManager:
             content=new_content,
             tool_calls=msg.tool_calls,
             tool_call_id=msg.tool_call_id,
+            reasoning_content=msg.reasoning_content,
             timestamp=msg.timestamp,
             channel=msg.channel,
             sender_id=msg.sender_id,

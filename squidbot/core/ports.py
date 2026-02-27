@@ -20,6 +20,7 @@ from squidbot.core.models import (
     Message,
     OutboundMessage,
     SessionInfo,
+    ToolCall,
     ToolDefinition,
     ToolResult,
 )
@@ -41,13 +42,14 @@ class LLMPort(Protocol):
         tools: list[ToolDefinition],
         *,
         stream: bool = True,
-    ) -> AsyncIterator[str | list[Any]]:
+    ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
         """
         Send messages to the LLM and receive a response stream.
 
         Yields either:
         - str: a text chunk to be forwarded to the channel
         - list[ToolCall]: a complete set of tool calls (end of response)
+        - tuple[list[ToolCall], str | None]: tool calls with optional reasoning content
 
         Args:
             messages: The full conversation history including system prompt.

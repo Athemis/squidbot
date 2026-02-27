@@ -1,5 +1,4 @@
-"""
-OpenAI-compatible LLM adapter.
+"""OpenAI-compatible LLM adapter.
 
 Works with any provider that exposes an OpenAI-compatible API:
 OpenAI, Anthropic (via OpenRouter), local vLLM, LM Studio, etc.
@@ -25,15 +24,23 @@ class OpenAIAdapter:
     Implements LLMPort via structural subtyping (no explicit inheritance).
     """
 
-    def __init__(self, api_base: str, api_key: str, model: str) -> None:
+    def __init__(
+        self,
+        api_base: str,
+        api_key: str,
+        model: str,
+        supports_reasoning_content: bool = False,
+    ) -> None:
         """
         Args:
             api_base: Base URL for the API (e.g., "https://openrouter.ai/api/v1").
             api_key: API key for authentication.
             model: Model identifier (e.g., "anthropic/claude-opus-4-5").
+            supports_reasoning_content: Whether provider supports reasoning content fields.
         """
         self._client = AsyncOpenAI(base_url=api_base, api_key=api_key)
         self._model = model
+        self._supports_reasoning_content = supports_reasoning_content
 
     async def chat(
         self,
@@ -41,15 +48,19 @@ class OpenAIAdapter:
         tools: list[ToolDefinition],
         *,
         stream: bool = True,
-    ) -> AsyncIterator[str | list[ToolCall]]:
+    ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
         """
         Send messages to the LLM and stream the response.
 
         Yields:
         - str chunks for text content (suitable for streaming to the user)
-        - list[ToolCall] when the model requests tool execution (end of turn)
+        - list[ToolCall] when the model requests tool execution (end of turn) without reasoning
+        - tuple of (list[ToolCall], reasoning_content | None) when model provides reasoning
         """
-        openai_messages = [m.to_openai_dict() for m in messages]
+        openai_messages = [
+            m.to_openai_dict(include_reasoning_content=self._supports_reasoning_content)
+            for m in messages
+        ]
         openai_tools = [t.to_openai_dict() for t in tools] if tools else None
 
         if stream:
@@ -61,9 +72,10 @@ class OpenAIAdapter:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
-    ) -> AsyncIterator[str | list[ToolCall]]:
+    ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
         """Stream response chunks and accumulate tool calls."""
         accumulated_tool_calls: dict[int, dict[str, Any]] = {}
+        accumulated_reasoning: list[str] = []
 
         kwargs: dict[str, Any] = {"model": self._model, "messages": messages, "stream": True}
         if tools:
@@ -78,6 +90,10 @@ class OpenAIAdapter:
                 # Accumulate text
                 if delta.content:
                     yield delta.content
+
+                # Accumulate reasoning content (for thinking models like Kimi K2.5)
+                if getattr(delta, "reasoning_content", None) is not None:
+                    accumulated_reasoning.append(delta.reasoning_content)
 
                 # Accumulate tool call fragments
                 if delta.tool_calls:
@@ -107,13 +123,17 @@ class OpenAIAdapter:
                 )
                 for tc in accumulated_tool_calls.values()
             ]
-            yield tool_calls
+            reasoning = "".join(accumulated_reasoning) if accumulated_reasoning else None
+            if reasoning is not None:
+                yield (tool_calls, reasoning)
+            else:
+                yield tool_calls
 
     async def _complete(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
-    ) -> AsyncIterator[str | list[ToolCall]]:
+    ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
         """Non-streaming completion."""
         kwargs: dict[str, Any] = {"model": self._model, "messages": messages}
         if tools:
@@ -125,6 +145,11 @@ class OpenAIAdapter:
         if choice.message.content:
             yield choice.message.content
 
+        # Capture reasoning content for thinking models (e.g., Kimi K2.5)
+        reasoning: str | None = None
+        if getattr(choice.message, "reasoning_content", None) is not None:
+            reasoning = choice.message.reasoning_content
+
         if choice.message.tool_calls:
             tool_calls = [
                 ToolCall(
@@ -134,4 +159,7 @@ class OpenAIAdapter:
                 )
                 for tc in choice.message.tool_calls
             ]
-            yield tool_calls
+            if reasoning is not None:
+                yield (tool_calls, reasoning)
+            else:
+                yield tool_calls

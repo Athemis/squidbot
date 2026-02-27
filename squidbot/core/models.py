@@ -39,13 +39,16 @@ class Message:
     content: str
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None  # set when role == "tool"
+    reasoning_content: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
     channel: str | None = None
     sender_id: str | None = None
 
-    def to_openai_dict(self) -> dict[str, Any]:
+    def to_openai_dict(self, *, include_reasoning_content: bool = False) -> dict[str, Any]:
         """Serialize to OpenAI API message format."""
         d: dict[str, Any] = {"role": self.role, "content": self.content}
+        if include_reasoning_content and self.reasoning_content is not None:
+            d["reasoning_content"] = self.reasoning_content
         if self.tool_calls:
             d["tool_calls"] = [
                 {
