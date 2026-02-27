@@ -432,6 +432,30 @@ class TestEmailChannelSend:
         assert "text/plain" in types
         assert "text/html" in types
 
+    async def test_send_new_mail_keeps_subject_without_re_prefix(
+        self, fake_smtp: MagicMock, tmp_path: Path
+    ) -> None:
+        from squidbot.adapters.channels.email import EmailChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        config = _make_config()
+        ch = EmailChannel(config=config, tmp_dir=tmp_path)
+        outbound = OutboundMessage(
+            session=Session(channel="email", sender_id="user@example.com"),
+            text="Fresh message",
+            metadata={
+                "email_from": "user@example.com",
+                "email_subject": "[squidbot] Daily reminder",
+            },
+        )
+
+        with patch("squidbot.adapters.channels.email.aiosmtplib.SMTP", return_value=fake_smtp):
+            await ch.send(outbound)
+
+        sent = fake_smtp.send_message.call_args[0][0]
+        assert sent["Subject"] == "[squidbot] Daily reminder"
+        assert sent.get("In-Reply-To") is None
+
     async def test_send_with_attachment(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import EmailChannel
 

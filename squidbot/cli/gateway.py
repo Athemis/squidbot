@@ -90,6 +90,7 @@ async def _channel_loop_with_state(
         storage: Persistence adapter used to construct MemoryWriteTool per message.
         tracker: Optional tracker receiving the latest channel/session/metadata.
     """
+    from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
@@ -107,7 +108,14 @@ async def _channel_loop_with_state(
                 started_at=datetime.now(),
                 message_count=1,
             )
-        extra = [MemoryWriteTool(storage=storage)]
+        extra = [
+            MemoryWriteTool(storage=storage),
+            *build_cron_tools(
+                storage=storage,
+                default_channel=inbound.session.id,
+                default_metadata=inbound.metadata,
+            ),
+        ]
         await loop.run(
             inbound.session,
             inbound.text,
@@ -132,12 +140,20 @@ async def _channel_loop(
         storage: Persistence adapter used to construct MemoryWriteTool per message.
         tracker: Optional tracker receiving the latest channel/session/metadata.
     """
+    from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
     async for inbound in channel.receive():
         if tracker is not None:
             tracker.update(channel, inbound.session, inbound.metadata)
-        extra = [MemoryWriteTool(storage=storage)]
+        extra = [
+            MemoryWriteTool(storage=storage),
+            *build_cron_tools(
+                storage=storage,
+                default_channel=inbound.session.id,
+                default_metadata=inbound.metadata,
+            ),
+        ]
         await loop.run(
             inbound.session,
             inbound.text,
@@ -293,6 +309,11 @@ async def _make_agent_loop(
         from squidbot.adapters.tools.web_search import WebSearchTool  # noqa: PLC0415
 
         registry.register(WebSearchTool(config=settings.tools.web_search))
+
+    if settings.tools.fetch_url.enabled:
+        from squidbot.adapters.tools.fetch_url import FetchUrlTool  # noqa: PLC0415
+
+        registry.register(FetchUrlTool())
 
     if settings.tools.search_history.enabled:
         from squidbot.adapters.tools.search_history import SearchHistoryTool  # noqa: PLC0415
@@ -491,7 +512,13 @@ async def _run_gateway(config_path: Path) -> None:
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
         extra = [MemoryWriteTool(storage=storage)]
-        await agent_loop.run(session, job.message, ch, extra_tools=extra)
+        await agent_loop.run(
+            session,
+            job.message,
+            ch,
+            extra_tools=extra,
+            outbound_metadata=job.metadata,
+        )
 
     scheduler = CronScheduler(storage=storage)
     hb_pool = settings.agents.heartbeat.pool or settings.llm.default_pool

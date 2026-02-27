@@ -38,7 +38,7 @@ async def test_channel_loop_with_state_passes_extra_tools():
     loop.run.assert_awaited_once()
     _, kwargs = loop.run.call_args
     assert "extra_tools" in kwargs
-    assert len(kwargs["extra_tools"]) == 1
+    assert len(kwargs["extra_tools"]) == 5  # MemoryWriteTool + 4 cron tools
     mock_tool_cls.assert_called_once_with(storage=storage)
 
 
@@ -56,5 +56,5 @@ async def test_channel_loop_passes_extra_tools():
     loop.run.assert_awaited_once()
     _, kwargs = loop.run.call_args
     assert "extra_tools" in kwargs
-    assert len(kwargs["extra_tools"]) == 1
+    assert len(kwargs["extra_tools"]) == 5  # MemoryWriteTool + 4 cron tools
     mock_tool_cls.assert_called_once_with(storage=storage)

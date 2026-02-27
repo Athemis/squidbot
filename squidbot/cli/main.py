@@ -113,9 +113,17 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     if message:
         # Single-shot mode: use plain CliChannel (streaming, no banner)
         channel = CliChannel()
+        from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-        extra = [MemoryWriteTool(storage=storage)]
+        extra = [
+            MemoryWriteTool(storage=storage),
+            *build_cron_tools(
+                storage=storage,
+                default_channel=CliChannel.SESSION.id,
+                default_metadata={},
+            ),
+        ]
         await agent_loop.run(
             CliChannel.SESSION,
             message,
@@ -139,6 +147,8 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
     channel = RichCliChannel()
     workspace = Path(settings.agents.workspace).expanduser()
     try:
+        from squidbot.adapters.tools.cron import build_cron_tools  # noqa: PLC0415
+
         # If BOOTSTRAP.md exists, trigger the bootstrap interview before the user speaks
         if (workspace / "BOOTSTRAP.md").exists():
             console.print("[dim]first run — starting bootstrap interview…[/dim]")
@@ -146,7 +156,14 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
             session = CliChannel.SESSION
             from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-            extra = [MemoryWriteTool(storage=storage)]
+            extra = [
+                MemoryWriteTool(storage=storage),
+                *build_cron_tools(
+                    storage=storage,
+                    default_channel=session.id,
+                    default_metadata={},
+                ),
+            ]
             await agent_loop.run(
                 session,
                 "BOOTSTRAP.md exists. Follow it now.",
@@ -157,7 +174,14 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         async for inbound in channel.receive():
             from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
-            extra = [MemoryWriteTool(storage=storage)]
+            extra = [
+                MemoryWriteTool(storage=storage),
+                *build_cron_tools(
+                    storage=storage,
+                    default_channel=inbound.session.id,
+                    default_metadata=inbound.metadata,
+                ),
+            ]
             await agent_loop.run(
                 inbound.session,
                 inbound.text,

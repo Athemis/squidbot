@@ -6,7 +6,6 @@ Provides commands to list, add, and remove scheduled jobs.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from pathlib import Path
 
 import cyclopts
@@ -24,14 +23,9 @@ def list_jobs(config: Path = DEFAULT_CONFIG_PATH) -> None:
     async def _list() -> None:
         storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
         jobs = await storage.load_cron_jobs()
-        if not jobs:
-            print("No cron jobs configured.")
-            return
-        for job in jobs:
-            state = "on" if job.enabled else "off"
-            print(f"  [{state}] {job.id}  {job.name}")
-            print(f"       schedule: {job.schedule}  channel: {job.channel}")
-            print(f"       message:  {job.message}")
+        from squidbot.core.cron_ops import format_jobs  # noqa: PLC0415
+
+        print(format_jobs(jobs))
 
     asyncio.run(_list())
 
@@ -50,16 +44,23 @@ def add(
 
     async def _add() -> None:
         storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+        from squidbot.core.cron_ops import add_job, generate_job_id, validate_job  # noqa: PLC0415
+
         jobs = await storage.load_cron_jobs()
         job = CronJob(
-            id=str(uuid.uuid4())[:8],
+            id=generate_job_id(),
             name=name,
             message=message,
             schedule=schedule,
             channel=channel,
         )
-        jobs.append(job)
-        await storage.save_cron_jobs(jobs)
+        error = validate_job(job)
+        if error is not None:
+            print(f"Error: {error}")
+            raise SystemExit(2)
+
+        updated = add_job(jobs, job)
+        await storage.save_cron_jobs(updated)
         print(f"Added cron job '{name}' (id={job.id})")
 
     asyncio.run(_add())
@@ -72,13 +73,14 @@ def remove(job_id: str, config: Path = DEFAULT_CONFIG_PATH) -> None:
 
     async def _remove() -> None:
         storage = JsonlMemory(base_dir=Path.home() / ".squidbot")
+        from squidbot.core.cron_ops import remove_job  # noqa: PLC0415
+
         jobs = await storage.load_cron_jobs()
-        before = len(jobs)
-        jobs = [j for j in jobs if j.id != job_id]
-        if len(jobs) == before:
+        updated, removed = remove_job(jobs, job_id)
+        if not removed:
             print(f"No job found with id '{job_id}'")
             return
-        await storage.save_cron_jobs(jobs)
+        await storage.save_cron_jobs(updated)
         print(f"Removed job '{job_id}'")
 
     asyncio.run(_remove())

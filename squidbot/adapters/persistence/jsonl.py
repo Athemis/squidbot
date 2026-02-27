@@ -364,6 +364,8 @@ class JsonlMemory:
                 jobs = []
                 for d in data:
                     last_run = datetime.fromisoformat(d["last_run"]) if d.get("last_run") else None
+                    metadata_raw = d.get("metadata", {})
+                    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
                     jobs.append(
                         CronJob(
                             id=d["id"],
@@ -372,8 +374,9 @@ class JsonlMemory:
                             schedule=d["schedule"],
                             channel=d.get("channel", "cli:local"),
                             enabled=d.get("enabled", True),
-                            timezone=d.get("timezone", "UTC"),
+                            timezone=d.get("timezone", "local"),
                             last_run=last_run,
+                            metadata=metadata,
                         )
                     )
             except json.JSONDecodeError, TypeError, ValueError, KeyError:
@@ -401,6 +404,7 @@ class JsonlMemory:
                 "enabled": j.enabled,
                 "timezone": j.timezone,
                 "last_run": j.last_run.isoformat() if j.last_run else None,
+                "metadata": j.metadata,
             }
             for j in jobs
         ]
