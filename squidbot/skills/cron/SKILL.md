@@ -7,8 +7,16 @@ requires: {}
 
 # Cron Skill
 
-Use `squidbot cron add` to schedule recurring tasks. Supports standard cron expressions (for
-example `0 9 * * 1-5`) and interval syntax (`every 3600`).
+Use cron tools to manage recurring tasks. Supports standard cron expressions (for example
+`0 9 * * 1-5`) and interval syntax (`every 3600`).
+
+## Tools
+
+- `cron_add`: create a job (`name`, `message`, `schedule`, optional `timezone`, `channel`,
+  `enabled`)
+- `cron_list`: list configured jobs
+- `cron_remove`: remove a job by `job_id`
+- `cron_set_enabled`: enable/disable a job by `job_id`
 
 ## When to Use
 
@@ -19,16 +27,22 @@ example `0 9 * * 1-5`) and interval syntax (`every 3600`).
 ## Quick Workflow
 
 1. Convert the request into cron syntax or `every N` interval syntax.
-2. Add the job with `squidbot cron add --schedule "..." --prompt "..."`.
-3. Confirm the job with `squidbot cron list`.
-4. Edit or remove the job with `squidbot cron remove <id>` when requested.
+2. Create the job with `cron_add`.
+3. Confirm creation with `cron_list`.
+4. If needed, disable with `cron_set_enabled` or delete with `cron_remove`.
 
 ## Examples
 
-```bash
+```text
 # Weekdays at 09:00
-squidbot cron add --schedule "0 9 * * 1-5" --prompt "Send daily standup reminder"
+cron_add(name="daily-standup", message="Send daily standup reminder", schedule="0 9 * * 1-5")
 
 # Every hour
-squidbot cron add --schedule "every 3600" --prompt "Check inbox backlog"
+cron_add(name="inbox-backlog", message="Check inbox backlog", schedule="every 3600")
+
+# Disable a job
+cron_set_enabled(job_id="<job-id>", enabled=false)
+
+# Remove a job
+cron_remove(job_id="<job-id>")
 ```
