@@ -211,13 +211,6 @@ class AgentLoop:
                                messages emitted during this run.
         """
         selected_llm = llm if llm is not None else self._llm
-        logger.debug(
-            "agent.run: start session={} channel={} sender={} text_len={}",
-            session.id,
-            session.channel,
-            session.sender_id,
-            len(user_message),
-        )
 
         try:
             messages = await self._memory.build_messages(
@@ -236,7 +229,6 @@ class AgentLoop:
         tool_round = 0
 
         while tool_round < MAX_TOOL_ROUNDS:
-            logger.debug("agent.run: llm round={} session={}", tool_round + 1, session.id)
             try:
                 text_response, tool_calls, reasoning_content = await self._run_llm_stream(
                     llm=selected_llm,
@@ -265,8 +257,6 @@ class AgentLoop:
                 # No tool calls — the agent is done
                 break
 
-            logger.debug("agent.run: executing {} tool call(s)", len(tool_calls))
-
             messages.append(
                 Message(
                     role="assistant",
@@ -283,11 +273,6 @@ class AgentLoop:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 
         await self._deliver_final_text(channel, session, final_text, outbound_metadata)
-        logger.debug(
-            "agent.run: delivered response session={} response_len={}",
-            session.id,
-            len(final_text),
-        )
 
         # Persist the exchange
         try:

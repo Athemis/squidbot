@@ -168,17 +168,9 @@ class MatrixChannel:
         """Yield inbound messages as they arrive from Matrix."""
         await self._connect()
         assert self._client is not None
-        logger.debug("MatrixChannel: receive loop started")
         asyncio.create_task(self._sync_loop())
         while True:
             msg = await self._queue.get()
-            logger.debug(
-                "MatrixChannel: dequeued message session={} room={} event={} len={}",
-                msg.session.id,
-                msg.metadata.get("matrix_room_id", ""),
-                msg.metadata.get("matrix_event_id", ""),
-                len(msg.text),
-            )
             yield msg
 
     async def send(self, message: OutboundMessage) -> None:
@@ -239,17 +231,10 @@ class MatrixChannel:
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
         logger.info("MatrixChannel: connected as {}", cfg.user_id)
-        logger.debug(
-            "MatrixChannel: policy={} allowed_rooms={} sync_start_ms={}",
-            cfg.group_policy,
-            len(cfg.room_ids),
-            self._sync_start_ms,
-        )
 
     async def _sync_loop(self) -> None:
         """Run nio sync_forever in the background."""
         assert self._client is not None
-        logger.debug("MatrixChannel: starting sync_forever")
         try:
             snapshot = await self._client.sync(timeout=30_000, full_state=True)
             if isinstance(snapshot, nio.SyncError):
@@ -272,13 +257,6 @@ class MatrixChannel:
         session = Session(channel="matrix", sender_id=event.sender)
         room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
         self._session_rooms[session.id] = room_id
-        logger.debug(
-            "MatrixChannel: accepted text from {} in {} event={} len={}",
-            event.sender,
-            room_id,
-            metadata.get("matrix_event_id", ""),
-            len(text),
-        )
         self._queue.put_nowait(InboundMessage(session=session, text=text, metadata=metadata))
 
     async def _handle_media(self, room: Any, event: Any) -> None:
@@ -294,12 +272,6 @@ class MatrixChannel:
         session = Session(channel="matrix", sender_id=event.sender)
         room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
         self._session_rooms[session.id] = room_id
-        logger.debug(
-            "MatrixChannel: accepted media from {} in {} event={}",
-            event.sender,
-            room_id,
-            metadata.get("matrix_event_id", ""),
-        )
         self._queue.put_nowait(InboundMessage(session=session, text=text, metadata=metadata))
 
     async def _handle_reaction(self, room: Any, event: Any) -> None:
@@ -320,13 +292,6 @@ class MatrixChannel:
             }
             session = Session(channel="matrix", sender_id=sender)
             self._session_rooms[session.id] = room_id
-            logger.debug(
-                "MatrixChannel: accepted reaction from {} in {} event={} key={}",
-                sender,
-                room_id,
-                metadata["matrix_event_id"],
-                key,
-            )
             self._queue.put_nowait(
                 InboundMessage(session=session, text=f"[Reaktion: {key}]", metadata=metadata)
             )
@@ -411,9 +376,6 @@ class MatrixChannel:
                 "MatrixChannel: not joined to configured room(s): {}",
                 ", ".join(missing),
             )
-            return
-
-        logger.debug("MatrixChannel: joined all configured room(s) ({})", len(configured))
 
     # ── Sending helpers ──────────────────────────────────────────────────────
 

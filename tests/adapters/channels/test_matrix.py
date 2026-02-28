@@ -558,11 +558,60 @@ class TestMatrixRoomMembershipLogging:
         ch._client = MagicMock()
         ch._client.rooms = {"!room1:example.org": MagicMock()}
 
-        with (
-            patch("squidbot.adapters.channels.matrix.logger.debug") as debug_log,
-            patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log,
-        ):
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
             ch._log_room_membership_snapshot()
 
         warn_log.assert_not_called()
-        debug_log.assert_any_call("MatrixChannel: joined all configured room(s) ({})", 1)
+
+
+class TestMatrixChannelE2ee:
+    """MatrixChannel E2EE initialization and encrypted-event diagnostics."""
+
+    @pytest.mark.asyncio
+    async def test_connect_enables_e2ee_with_persistent_store_path(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_client = MagicMock()
+        fake_client.add_event_callback = MagicMock()
+
+        with patch(
+            "squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client
+        ) as ctor:
+            await ch._connect()
+
+        kwargs = ctor.call_args.kwargs
+        assert "/.squidbot/crypto/matrix/" in kwargs["store_path"]
+        assert kwargs["config"].encryption_enabled is True
+        assert kwargs["config"].store_sync_tokens is True
+
+    @pytest.mark.asyncio
+    async def test_logs_encrypted_unknown_event_details(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+
+        room = MagicMock()
+        room.room_id = "!room1:example.org"
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.event_id = "$enc1"
+        event.source = {
+            "type": "m.room.encrypted",
+            "content": {
+                "algorithm": "m.megolm.v1.aes-sha2",
+            },
+        }
+
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
+            await ch._handle_reaction(room, event)
+
+        warn_log.assert_any_call(
+            "MatrixChannel: encrypted event received room={} sender={} event={} algorithm={}",
+            "!room1:example.org",
+            "@alice:example.org",
+            "$enc1",
+            "m.megolm.v1.aes-sha2",
+        )
