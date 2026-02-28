@@ -96,6 +96,7 @@ Both documents must be committed before implementation begins. Bug fixes do not 
 ## Skill Authoring Reference
 
 - Claude skill best practices: <https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices.md>
+- Agent Skills specification: <https://agentskills.io/specification.md>
 
 ---
 
