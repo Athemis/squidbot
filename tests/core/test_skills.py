@@ -88,6 +88,78 @@ def test_unavailable_skill_shows_requires(tmp_path):
     assert 'available="false"' in xml
 
 
+def test_openclaw_requires_fallback_marks_skill_unavailable(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: [__definitely_missing_tmux_bin__]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills[0].available is False
+    assert "__definitely_missing_tmux_bin__" in skills[0].requires_bins
+
+
+def test_top_level_requires_precedence_over_openclaw(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "requires:\n"
+        "  bins: []\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: [__definitely_missing_tmux_bin__]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills[0].available is True
+    assert skills[0].requires_bins == []
+
+
+def test_invalid_requires_shapes_do_not_crash(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "requires: definitely-not-a-dict\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: definitely-not-a-list\n"
+        "      env: {NOT: A_LIST}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].available is True
+    assert skills[0].requires_bins == []
+    assert skills[0].requires_env == []
+
+
 def test_list_skills_ttl_cache_hit_skips_scan_work(skill_dir, monkeypatch):
     loader = FsSkillsLoader(search_dirs=[skill_dir])
     root_iterdir_calls = 0
