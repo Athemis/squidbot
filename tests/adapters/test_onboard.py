@@ -394,3 +394,35 @@ async def test_onboard_no_overwrite_prompt_when_no_existing_files(tmp_path: Path
         await _run_onboard(config_path)
 
     assert not any("overwrite" in p.lower() for p in prompts)
+
+
+def test_bundled_bootstrap_template_has_language_preflight_and_step3_single_questions() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    bootstrap_path = repo_root / "squidbot" / "workspace" / "BOOTSTRAP.md"
+    content = bootstrap_path.read_text(encoding="utf-8")
+    lower = content.lower()
+
+    assert "## Step 1: Introduce Yourself" in content
+    assert "one question" in lower and "at a time" in lower
+    assert "Introduce Yourself and Determine Language" not in content
+    assert "Language preflight" in content
+    assert "Which language should we use" in content
+    assert "Should we continue in <LANG>" in content
+
+    assert content.index("Language preflight") < content.index("1. **Name**")
+    assert "preferred language" in lower
+
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("- Ask:"):
+            assert stripped.count("?") == 1
+        if stripped.startswith("**Question "):
+            assert stripped.count("?") == 1
+
+
+def test_bundled_user_template_has_preferred_language_field() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    user_path = repo_root / "squidbot" / "workspace" / "USER.md"
+    content = user_path.read_text(encoding="utf-8")
+
+    assert "- **Preferred language:**" in content
