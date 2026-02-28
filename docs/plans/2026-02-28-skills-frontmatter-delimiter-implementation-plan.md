@@ -335,8 +335,11 @@ def test_frontmatter_preserves_block_scalar_boundary_blank_lines(tmp_path):
 
     assert len(skills) == 1
     assert skills[0].name == "boundary"
-    assert "line" in skills[0].description
+    assert skills[0].description == "\nline\n"
 ```
+
+Expected boundary behavior:
+- `description` preserves the leading and trailing blank line from the block scalar fixture.
 
 Expected behavior for all strict-fence tests:
 - `_parse_frontmatter()` returns `{}` path.
