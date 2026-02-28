@@ -93,6 +93,10 @@ Use these Context7 IDs whenever you ask for documentation or snippets involving 
 
 Both documents must be committed before implementation begins. Bug fixes do not require design documents unless the fix involves significant structural changes.
 
+## Skill Authoring Reference
+
+- Claude skill best practices: <https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices.md>
+
 ---
 
 ## Architecture — Hexagonal (Ports & Adapters)
