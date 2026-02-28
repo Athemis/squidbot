@@ -26,9 +26,10 @@ delimiter detection before parsing.
 
 ### A. Line-based delimiter extraction + ruamel parsing (selected)
 
-Detect frontmatter delimiters as standalone lines:
-- file must start with a delimiter line (`---`)
-- closing delimiter is the next standalone delimiter line
+Detect frontmatter delimiters as root-level fence lines:
+- file must start with an exact fence line (`---`)
+- closing delimiter is the next exact root-level fence line (`---`)
+- indented `---` lines inside YAML content are never treated as delimiters
 
 Then parse only the extracted YAML block with `ruamel.yaml`.
 
@@ -68,15 +69,15 @@ Implement Approach A.
 ### Architecture
 
 - Keep `ruamel.yaml` as the YAML parser.
-- Replace substring-based closing-delimiter detection with line-based delimiter detection in
-  `_parse_frontmatter()`.
+- Replace substring-based closing-delimiter detection with exact root-level line detection in
+  `_parse_frontmatter()` (`line.rstrip("\r") == "---"`, no `.strip()`).
 - Leave loader behavior unchanged outside frontmatter extraction.
 
 ### Data Flow
 
 1. Read file text from `SKILL.md`.
-2. Verify file begins with a standalone frontmatter delimiter line.
-3. Scan forward line-by-line for the next standalone delimiter line.
+2. Verify file begins with an exact root-level frontmatter fence line.
+3. Scan forward line-by-line for the next exact root-level fence line.
 4. Join intervening lines as YAML block and parse with `ruamel.yaml`.
 5. Return parsed metadata dict or `{}` when no valid frontmatter block exists.
 
@@ -95,13 +96,21 @@ Add focused regression coverage in `tests/core/test_skills.py`:
    - Frontmatter with `description: "contains --- inside"` and valid closing delimiter line.
    - Expect skill metadata to load correctly.
 
-2. **Defensive case (optional but preferred)**
-   - File that starts frontmatter but lacks a closing standalone delimiter line.
-   - Expect no crash and graceful fallback behavior.
+2. **Block scalar regression**
+   - Frontmatter with YAML block scalar containing an indented `---` line.
+   - Expect indented `---` to remain content, not delimiter.
+
+3. **Defensive malformed-frontmatter cases (required)**
+   - Missing closing delimiter line.
+   - Missing opening delimiter line.
+   - Malformed YAML between delimiters.
+   - Expect no crash and documented fallback behavior.
 
 Success criteria:
 - New regression test fails on old logic and passes on new logic.
 - Existing skill tests remain green.
+- `_parse_frontmatter()` branch behavior is covered for opener missing, closer missing, valid block,
+  and malformed YAML.
 
 ## Scope
 
@@ -119,3 +128,4 @@ Out of scope:
 - `uv run ruff check .`
 - `uv run ruff format . --check`
 - `uv run pytest`
+- `uv run mypy squidbot/`
