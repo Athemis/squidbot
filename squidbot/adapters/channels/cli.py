@@ -10,9 +10,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.prompt import Prompt
 from rich.rule import Rule
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
@@ -71,27 +74,31 @@ class RichCliChannel:
     SESSION = Session(channel="cli", sender_id="local")
     streaming = False  # collect all chunks before calling send()
 
+    def __init__(self) -> None:
+        """Initialize Rich CLI state."""
+        self._session: PromptSession[str] | None = None
+
+    def _get_session(self) -> PromptSession[str]:
+        """Create and cache the prompt-toolkit session."""
+        if self._session is None:
+            self._session = PromptSession(
+                message=FormattedText([("class:prompt", "\nYou: ")]),
+                style=Style.from_dict({"prompt": "bold ansigreen"}),
+            )
+        return self._session
+
     async def receive(self) -> AsyncIterator[InboundMessage]:
-        """Yield messages from stdin using a Rich prompt."""
+        """Yield messages from stdin using prompt-toolkit input."""
         while True:
             try:
-                result = await asyncio.to_thread(self._prompt)
-                if result is None:
-                    break
-                text = result.strip()
+                with patch_stdout():
+                    text = (await self._get_session().prompt_async()).strip()
                 if text.lower() in ("exit", "quit", "/exit", "/quit", ":q"):
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
             except EOFError, KeyboardInterrupt:
                 break
-
-    def _prompt(self) -> str | None:
-        """Blocking prompt — runs in a thread executor."""
-        try:
-            return Prompt.ask("[bold green]You[/bold green]")
-        except EOFError, KeyboardInterrupt:
-            return None
 
     async def send(self, message: OutboundMessage) -> None:
         """Print the response as Markdown via Rich Console."""
