@@ -43,7 +43,7 @@ Next steps, decisions, or follow-ups.
 
 **Output:**
 
-```
+```markdown
 ## Key Points
 - Microservices improve scalability but add complexity
 - Start with monolith, extract services when needed

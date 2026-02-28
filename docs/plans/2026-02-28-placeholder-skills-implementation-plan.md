@@ -64,7 +64,7 @@ Example: `feat/add-email-channel`, `fix/memory-leak`
 
 Format: `type(scope): description`
 
-````
+````text
 feat(email): add IMAP connection pooling
 fix(agent): handle empty tool responses
 docs(readme): update installation steps
