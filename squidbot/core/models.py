@@ -45,7 +45,14 @@ class Message:
     sender_id: str | None = None
 
     def to_openai_dict(self, *, include_reasoning_content: bool = False) -> dict[str, Any]:
-        """Serialize to OpenAI API message format."""
+        """Serialize to OpenAI API message format.
+
+        Args:
+            include_reasoning_content: When True, include reasoning_content if present.
+
+        Returns:
+            OpenAI-compatible message payload.
+        """
         d: dict[str, Any] = {"role": self.role, "content": self.content}
         if include_reasoning_content and self.reasoning_content is not None:
             d["reasoning_content"] = self.reasoning_content
