@@ -44,15 +44,41 @@ def _check_availability(meta: dict[str, Any]) -> tuple[bool, list[str], list[str
 
     Returns (available, missing_bins, missing_env).
     """
-    requires = meta.get("requires", {}) or {}
-    bins = requires.get("bins", []) or []
-    envs = requires.get("env", []) or []
+    bins, envs = _extract_requires(meta)
 
     missing_bins = [b for b in bins if shutil.which(b) is None]
     missing_env = [e for e in envs if not os.environ.get(e)]
 
     available = not missing_bins and not missing_env
     return available, missing_bins, missing_env
+
+
+def _extract_requires(meta: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Extract normalized requires.bins/env values from skill frontmatter."""
+    requires_raw = meta.get("requires")
+    requires: dict[str, Any] = {}
+    if isinstance(requires_raw, dict):
+        requires = requires_raw
+    else:
+        metadata_raw = meta.get("metadata")
+        if isinstance(metadata_raw, dict):
+            openclaw_raw = metadata_raw.get("openclaw")
+            if isinstance(openclaw_raw, dict):
+                openclaw_requires_raw = openclaw_raw.get("requires")
+                if isinstance(openclaw_requires_raw, dict):
+                    requires = openclaw_requires_raw
+
+    bins_raw = requires.get("bins", [])
+    env_raw = requires.get("env", [])
+    bins = (
+        [value for value in bins_raw if isinstance(value, str)]
+        if isinstance(bins_raw, list)
+        else []
+    )
+    envs = (
+        [value for value in env_raw if isinstance(value, str)] if isinstance(env_raw, list) else []
+    )
+    return bins, envs
 
 
 class FsSkillsLoader:
