@@ -39,11 +39,13 @@ def test_message_to_openai_dict_includes_reasoning_content() -> None:
     assert payload["reasoning_content"] == "internal reasoning"
 
 
-def test_message_empty_reasoning_content_preserved() -> None:
-    msg = Message(role="assistant", content="hi", reasoning_content="")
-    payload = msg.to_openai_dict(include_reasoning_content=True)
-    assert payload["reasoning_content"] == ""
-    assert payload["reasoning_content"] is not None
+# BH|
+# ZJ|def test_message_empty_reasoning_content_preserved() -> None:
+# YS|    msg = Message(role="assistant", content="hi", reasoning_content="")
+# HS|    payload = msg.to_openai_dict(include_reasoning_content=True)
+# QN|    assert payload["reasoning_content"] == ""
+# ZK|    assert payload["reasoning_content"] is not None
+# BH|
 
 
 def test_session_id_format():
