@@ -81,7 +81,7 @@ def test_frontmatter_parsing_ignores_indented_triple_dash_in_block_scalar(tmp_pa
 **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/core/test_skills.py::test_frontmatter_parsing_ignores_triple_dash_inside_yaml_string tests/core/test_skills.py::test_frontmatter_parsing_ignores_indented_triple_dash_in_block_scalar -v`
-Expected: FAIL with old parser behavior.
+Expected: at least one new regression test FAILS with old parser behavior.
 
 **Step 3: Optional checkpoint commit**
 
@@ -293,6 +293,26 @@ def test_frontmatter_with_bom_prefixed_opening_fence_is_not_treated_as_delimiter
     assert len(skills) == 1
     assert skills[0].name == "bom-open"
     assert skills[0].description == ""
+
+
+def test_frontmatter_with_crlf_fences_parses_metadata(tmp_path):
+    skill = tmp_path / "crlf"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\r\n"
+        "name: crlf\r\n"
+        'description: "crlf delimiters"\r\n'
+        "---\r\n"
+        "# CRLF Skill\r\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "crlf"
+    assert "crlf delimiters" in skills[0].description
 ```
 
 Expected behavior for all strict-fence tests:
@@ -340,7 +360,7 @@ Expected: PASS.
 **Step 5: Final commit only if verification changed files**
 
 ```bash
-git add -A
+git add squidbot/adapters/skills/fs.py tests/core/test_skills.py
 git commit -m "chore(skills): finalize frontmatter parser hardening"
 ```
 

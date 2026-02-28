@@ -118,11 +118,24 @@ Add focused regression coverage in `tests/core/test_skills.py`:
    - Malformed YAML between delimiters.
    - Expect no crash and documented fallback behavior.
 
+### Traceability Matrix
+
+| Behavior contract requirement | Planned test(s) | Plan task |
+|---|---|---|
+| Quoted string contains `---` | `test_frontmatter_parsing_ignores_triple_dash_inside_yaml_string` | Task 1 |
+| Indented `---` in block scalar remains content | `test_frontmatter_parsing_ignores_indented_triple_dash_in_block_scalar` | Task 1 |
+| Missing opening delimiter => fallback defaults | `test_frontmatter_without_opening_delimiter_uses_fallback_defaults` | Task 3 |
+| Missing closing delimiter => fallback defaults | `test_frontmatter_without_closing_delimiter_returns_no_metadata` | Task 3 |
+| Malformed YAML => fail-safe skip | `test_malformed_frontmatter_yaml_is_skipped_without_crash` | Task 3 |
+| Strict fence: leading/trailing whitespace, BOM not delimiters | strict-fence tests in Task 3 Step 4 | Task 3 |
+| CRLF fence compatibility | CRLF-specific strict-fence test in Task 3 Step 4 | Task 3 |
+
 Success criteria:
 - New regression test fails on old logic and passes on new logic.
 - Existing skill tests remain green.
 - `_parse_frontmatter()` branch behavior is covered for opener missing, closer missing, valid block,
   and malformed YAML.
+- CRLF frontmatter delimiters are covered by explicit regression tests.
 
 ## Scope
 
