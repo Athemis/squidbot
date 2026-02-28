@@ -74,7 +74,9 @@ def parse_schedule(job: CronJob, now: datetime | None = None) -> datetime | None
     schedule = job.schedule.strip()
     if schedule.startswith("every "):
         try:
-            int(schedule.split()[1])
+            seconds = int(schedule.split()[1])
+            if seconds <= 0:
+                return None
             return now.replace(microsecond=0)
         except IndexError, ValueError:
             return None
@@ -105,6 +107,8 @@ def is_due(job: CronJob, now: datetime | None = None) -> bool:
     if schedule.startswith("every "):
         try:
             seconds = int(schedule.split()[1])
+            if seconds <= 0:
+                return False
             if job.last_run is None:
                 return True
             elapsed = (now - job.last_run).total_seconds()

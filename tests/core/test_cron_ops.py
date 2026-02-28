@@ -50,6 +50,20 @@ def test_validate_job_returns_error_for_invalid_schedule() -> None:
     assert "Invalid schedule" in error
 
 
+def test_validate_job_returns_error_for_zero_interval() -> None:
+    now = datetime(2026, 2, 27, 9, 0, tzinfo=UTC)
+    error = validate_job(_job(schedule="every 0"), now=now)
+    assert error is not None
+    assert "Invalid schedule" in error
+
+
+def test_validate_job_returns_error_for_negative_interval() -> None:
+    now = datetime(2026, 2, 27, 9, 0, tzinfo=UTC)
+    error = validate_job(_job(schedule="every -1"), now=now)
+    assert error is not None
+    assert "Invalid schedule" in error
+
+
 def test_add_job_appends_valid_job() -> None:
     existing = [_job(id="existing")]
     new_job = _job(id="new", schedule="every 60")
