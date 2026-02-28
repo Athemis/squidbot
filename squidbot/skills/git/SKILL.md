@@ -1,6 +1,6 @@
 ---
 name: git
-description: "Local git workflows: commits, branches, merges, conflict resolution."
+description: "Handles local git workflows for branches, commits, merges, and conflict resolution. Use when the task involves local repository history, staging, or commit creation."
 always: false
 requires:
   bins:

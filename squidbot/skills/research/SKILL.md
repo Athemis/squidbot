@@ -1,6 +1,6 @@
 ---
 name: research
-description: "Structured research workflow using web_search and fetch_url tools."
+description: "Performs structured research with source evaluation and citations using `web_search` and `fetch_url`. Use when the user asks for fact-finding, comparisons, or referenced summaries."
 always: false
 requires: {}
 ---

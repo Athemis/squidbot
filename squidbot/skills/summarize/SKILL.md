@@ -1,6 +1,6 @@
 ---
 name: summarize
-description: "Summarize documents, conversations, or content into key points."
+description: "Produces structured summaries with key points and action items from long content. Use when the user asks to condense documents, transcripts, or message threads."
 always: false
 requires: {}
 ---

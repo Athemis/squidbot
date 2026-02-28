@@ -1,10 +1,37 @@
 ---
 name: skill-creator
-description: "Create new skills by writing SKILL.md files to the workspace."
+description: "Creates new skills by writing `SKILL.md` files with valid frontmatter and concise instructions. Use when adding or updating reusable agent skills."
 always: false
 requires: {}
 ---
 
 # Skill Creator
 
-To create a new skill, write a `SKILL.md` file to `workspace/skills/<name>/SKILL.md` using the `write_file` tool. The frontmatter must include `name`, `description`, and optionally `always` and `requires`.
+## When to Use
+
+- A new reusable capability should be packaged as a skill.
+- An existing skill needs a clear, maintainable rewrite.
+
+## Workflow
+
+1. Create the directory: `workspace/skills/<name>/`.
+2. Write `workspace/skills/<name>/SKILL.md`.
+3. Add frontmatter and concise, actionable instructions.
+4. Verify naming and description quality before saving.
+
+## Canonical Frontmatter
+
+```yaml
+---
+name: example-skill
+description: "Performs X. Use when Y."
+always: false
+requires: {}
+---
+```
+
+## Validation Checklist
+
+- `name` uses lowercase letters, numbers, or hyphens only.
+- `description` explains what the skill does and when to use it.
+- Instructions are concise and avoid unnecessary background text.

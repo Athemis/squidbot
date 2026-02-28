@@ -1,6 +1,6 @@
 ---
 name: github
-description: "GitHub via `gh` CLI: issues, PRs, CI runs, reviews. Requires `gh auth login`."
+description: "Handles GitHub workflows via the `gh` CLI, including pull requests, issues, and CI runs. Use when the task involves GitHub repositories, PRs, issues, or Actions."
 always: false
 requires:
   bins:
