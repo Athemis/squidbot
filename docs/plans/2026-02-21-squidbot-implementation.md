@@ -96,7 +96,7 @@ mkdir -p squidbot/core squidbot/adapters/llm squidbot/adapters/channels \
          squidbot/adapters/dashboard \
          squidbot/config squidbot/cli \
          squidbot/skills/memory squidbot/skills/cron squidbot/skills/github \
-         squidbot/skills/git squidbot/skills/python squidbot/skills/web-search \
+         squidbot/skills/git \
          squidbot/skills/summarize squidbot/skills/research squidbot/skills/skill-creator \
          tests/core tests/integration \
          workspace
