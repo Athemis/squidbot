@@ -13,6 +13,9 @@ Approved
 Enable reliable handling of end-to-end encrypted Matrix direct messages so inbound DM text reaches
 `AgentLoop` and receives replies in the existing Matrix channel flow.
 
+Also allow automatic room join on invitation events, but only when the invitation sender is the
+configured owner identity.
+
 ## Context
 
 Current logs confirm the Matrix adapter connects, syncs, and is joined to rooms, but encrypted DM
@@ -73,6 +76,8 @@ Implement Approach A.
   - user leaf: sanitized `user_id`
 - Perform an initial sync before `sync_forever()` and log E2EE readiness state.
 - Add explicit observability for encrypted inbound events and decryption failures.
+- Register an invite handler that auto-joins invited rooms only if the inviter is in the owner
+  allowlist derived from `settings.owner.aliases` for Matrix.
 
 ### Data Flow
 
@@ -82,12 +87,17 @@ Implement Approach A.
 4. Incoming encrypted DM is decrypted by nio client path and delivered through normal
    message callbacks.
 5. Accepted inbound messages are queued and processed by gateway loop and `AgentLoop` as today.
+6. Invitation membership events are evaluated:
+   - inviter in owner allowlist -> `join(room_id)` and log success/failure
+   - inviter not allowlisted -> log and ignore invitation
 
 ### Error Handling
 
 - If E2EE dependencies are unavailable at startup, emit a clear warning with remediation text and
   keep channel alive for unencrypted rooms.
 - If encrypted events arrive but are not decryptable, log event type, room, sender, and reason.
+- If invite auto-join is attempted and join fails, log room id, inviter, and server error.
+- If invite sender is unknown or not owner, log drop reason and do not join.
 - Keep existing non-fatal adapter behavior (log errors, do not crash gateway loop).
 
 ### Security and Persistence
@@ -112,6 +122,7 @@ In scope:
 - `MatrixChannel` E2EE setup and startup diagnostics
 - Persistent crypto-store path derivation under `~/.squidbot/crypto`
 - Encrypted-event logging for investigation
+- Owner-only invitation auto-join handling
 - Adapter tests for above behavior
 
 Out of scope:
