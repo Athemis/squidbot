@@ -19,7 +19,7 @@ requires: {}
 - `wins`: completed outcomes
 - `unfinished`: open items with carry-over reason
 - `lessons`: what to keep, stop, or change
-- `next week priorities`: ranked focus list
+- `next_week_priorities`: ranked focus list
 
 ## Edge Cases
 

@@ -19,7 +19,8 @@ Preferred routing targets:
 - `summarize` for compression
 - `cron` for reminders/scheduling
 - `memory` for durable preferences
-- productivity skills for triage, extraction, and reviews
+- `task-extractor`, `inbox-triage`, `follow-up-manager`, `daily-briefing`, `weekly-review`,
+  `meeting-prep-and-recap`, and `decision-log` for productivity workflows
 
 ## Output Format
 

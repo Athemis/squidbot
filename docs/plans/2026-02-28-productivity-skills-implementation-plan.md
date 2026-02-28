@@ -140,7 +140,8 @@ Include:
 
 **Step 6: Verify frontmatter and naming for Wave 2 skills**
 
-Run the same metadata script from Task 1 with Wave 2 file paths.
+Run the same metadata script from Task 1 with Wave 2 file paths and update the final
+print line to `wave2 metadata OK`.
 Expected: `wave2 metadata OK`
 
 **Step 7: Commit Wave 2**
@@ -180,7 +181,17 @@ Run:
 python - <<'PY'
 from pathlib import Path
 
-paths = list(Path('squidbot/skills').glob('*/SKILL.md'))
+productivity_skills = [
+    'task-extractor',
+    'inbox-triage',
+    'follow-up-manager',
+    'daily-briefing',
+    'weekly-review',
+    'meeting-prep-and-recap',
+    'decision-log',
+    'personal-ops-router',
+]
+paths = [Path('squidbot/skills') / skill / 'SKILL.md' for skill in productivity_skills]
 for p in sorted(paths):
     lines = p.read_text(encoding='utf-8').splitlines()
     assert len(lines) < 500, f'too long: {p} ({len(lines)} lines)'
