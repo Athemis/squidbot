@@ -65,10 +65,10 @@ When you have all four answers, write them to `IDENTITY.md`. Tell the user what 
 
 Ask about them — not all at once, just naturally. Ask these questions **in order**, waiting for each answer before proceeding:
 
-**Question 1:** "What's your name?"
+**Question 1:** "What's your name (full or formal)?"
 - Wait for their answer.
 
-**Question 2:** "What should I call you?"
+**Question 2:** "What should I call you (nickname or preferred name)?"
 - Wait for their answer.
 
 **Question 3:** "What timezone are you in?"
