@@ -118,7 +118,7 @@ def _parse_frontmatter(path: Path) -> dict[str, Any]:
     if closing_index == -1:
         return {}
 
-    yaml_block = "\n".join(lines[1:closing_index]).strip()
+    yaml_block = "\n".join(lines[1:closing_index])
     data = _yaml.load(yaml_block)
     return dict(data) if data else {}
 ```
@@ -313,6 +313,29 @@ def test_frontmatter_with_crlf_fences_parses_metadata(tmp_path):
     assert len(skills) == 1
     assert skills[0].name == "crlf"
     assert "crlf delimiters" in skills[0].description
+
+
+def test_frontmatter_preserves_block_scalar_boundary_blank_lines(tmp_path):
+    skill = tmp_path / "boundary"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: boundary\n"
+        "description: |\n"
+        "\n"
+        "  line\n"
+        "\n"
+        "---\n"
+        "# Boundary Skill\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "boundary"
+    assert "line" in skills[0].description
 ```
 
 Expected behavior for all strict-fence tests:

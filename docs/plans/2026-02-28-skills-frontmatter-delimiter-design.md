@@ -99,6 +99,8 @@ Implement Approach A.
 - Delimiter policy is strict: accepted fence is exact root-level `---` line (`line.rstrip("\\r") ==
   "---"`). Leading whitespace, trailing spaces, or BOM-prefixed opener are treated as
   non-delimiters.
+- Extracted YAML content is passed to `ruamel.yaml` without additional `.strip()` normalization, so
+  boundary whitespace semantics stay parser-native.
 
 ## Testing Strategy (TDD)
 
@@ -129,6 +131,7 @@ Add focused regression coverage in `tests/core/test_skills.py`:
 | Malformed YAML => fail-safe skip | `test_malformed_frontmatter_yaml_is_skipped_without_crash` | Task 3 |
 | Strict fence: leading/trailing whitespace, BOM not delimiters | strict-fence tests in Task 3 Step 4 | Task 3 |
 | CRLF fence compatibility | CRLF-specific strict-fence test in Task 3 Step 4 | Task 3 |
+| YAML boundary whitespace preserved | block-scalar boundary whitespace regression in Task 3 | Task 3 |
 
 Success criteria:
 - New regression test fails on old logic and passes on new logic.
