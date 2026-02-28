@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -39,6 +40,19 @@ def test_load_skill_body(skill_dir):
     loader = FsSkillsLoader(search_dirs=[skill_dir])
     body = loader.load_skill_body("github")
     assert "GitHub Skill" in body
+
+
+def test_bundled_tmux_skill_is_discoverable():
+    bundled_skills = Path(__file__).parents[2] / "squidbot" / "skills"
+    loader = FsSkillsLoader(search_dirs=[bundled_skills])
+
+    skills = loader.list_skills()
+    tmux_skill = next((skill for skill in skills if skill.name == "tmux"), None)
+
+    assert tmux_skill is not None
+    assert tmux_skill.description
+    body = loader.load_skill_body("tmux")
+    assert "bins: [tmux]" in body
 
 
 def test_mtime_cache(skill_dir):
