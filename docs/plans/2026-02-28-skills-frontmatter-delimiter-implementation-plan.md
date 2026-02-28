@@ -219,15 +219,83 @@ def test_malformed_frontmatter_yaml_is_skipped_without_crash(tmp_path):
 Add tests that lock down strict delimiter behavior:
 
 ```python
-def test_frontmatter_with_trailing_space_in_fence_is_not_treated_as_delimiter(tmp_path):
-    ...
+def test_frontmatter_with_leading_whitespace_opening_fence_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "ws-open"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        " ---\n"
+        "name: ws-open\n"
+        "description: should not parse\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "ws-open"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_with_trailing_space_opening_fence_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "space-open"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "--- \n"
+        "name: space-open\n"
+        "description: should not parse\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "space-open"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_with_trailing_space_closing_fence_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "space-close"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: space-close\n"
+        "description: should not parse\n"
+        "--- \n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "space-close"
+    assert skills[0].description == ""
 
 
 def test_frontmatter_with_bom_prefixed_opening_fence_is_not_treated_as_delimiter(tmp_path):
-    ...
+    skill = tmp_path / "bom-open"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "\ufeff---\n"
+        "name: bom-open\n"
+        "description: should not parse\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "bom-open"
+    assert skills[0].description == ""
 ```
 
-Expected behavior for both:
+Expected behavior for all strict-fence tests:
 - `_parse_frontmatter()` returns `{}` path.
 - loader keeps skill with fallback defaults (name from dir, empty description).
 
