@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -39,6 +40,19 @@ def test_load_skill_body(skill_dir):
     loader = FsSkillsLoader(search_dirs=[skill_dir])
     body = loader.load_skill_body("github")
     assert "GitHub Skill" in body
+
+
+def test_bundled_tmux_skill_is_discoverable():
+    bundled_skills = Path(__file__).parents[2] / "squidbot" / "skills"
+    loader = FsSkillsLoader(search_dirs=[bundled_skills])
+
+    skills = loader.list_skills()
+    tmux_skill = next((skill for skill in skills if skill.name == "tmux"), None)
+
+    assert tmux_skill is not None
+    assert tmux_skill.description
+    body = loader.load_skill_body("tmux")
+    assert "bins: [tmux]" in body
 
 
 def test_mtime_cache(skill_dir):
@@ -86,6 +100,101 @@ def test_unavailable_skill_shows_requires(tmp_path):
     assert skills[0].available is False
     xml = build_skills_xml(skills)
     assert 'available="false"' in xml
+
+
+def test_openclaw_requires_fallback_marks_skill_unavailable(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: [__definitely_missing_tmux_bin__]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills[0].available is False
+    assert "__definitely_missing_tmux_bin__" in skills[0].requires_bins
+
+
+def test_top_level_requires_precedence_over_openclaw(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "requires:\n"
+        "  bins: []\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: [__definitely_missing_tmux_bin__]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills[0].available is True
+    assert skills[0].requires_bins == []
+
+
+def test_openclaw_requires_used_when_top_level_requires_is_empty_dict(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "requires: {}\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: [__definitely_missing_tmux_bin__]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills[0].available is False
+    assert "__definitely_missing_tmux_bin__" in skills[0].requires_bins
+
+
+def test_invalid_requires_shapes_do_not_crash(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "requires: definitely-not-a-dict\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: definitely-not-a-list\n"
+        "      env: {NOT: A_LIST}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].available is True
+    assert skills[0].requires_bins == []
+    assert skills[0].requires_env == []
 
 
 def test_list_skills_ttl_cache_hit_skips_scan_work(skill_dir, monkeypatch):
