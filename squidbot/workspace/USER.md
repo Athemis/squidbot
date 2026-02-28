@@ -5,6 +5,7 @@ _Learn about the person you're helping. Update this as you go._
 - **Name:**
 - **What to call them:**
 - **Timezone:**
+- **Preferred language:**
 - **Notes:**
 
 ## Context
