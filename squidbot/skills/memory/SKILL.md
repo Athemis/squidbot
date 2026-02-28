@@ -1,11 +1,17 @@
 ---
 name: memory
-description: "Manage your long-term memory document across sessions."
+description: "Manages long-term cross-session memory in `MEMORY.md`. Use when durable user preferences, facts, or ongoing context should persist across sessions."
 always: true
 requires: {}
 ---
 
 # Memory
+
+## When to Use
+
+- The user shares durable preferences or profile facts worth retaining.
+- A long-running project needs continuity across sessions or channels.
+- The user explicitly asks to remember something for later.
 
 **`## Your Memory`** — Your global cross-session notes (MEMORY.md). Injected into every
 system prompt when non-empty. Write to it with `memory_write`. Persists across all sessions.

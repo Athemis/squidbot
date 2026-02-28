@@ -106,8 +106,6 @@ squidbot/
 │   │   ├── cron/SKILL.md        # Scheduling instructions
 │   │   ├── github/SKILL.md      # requires: [gh]
 │   │   ├── git/SKILL.md         # requires: [git]
-│   │   ├── python/SKILL.md      # requires: [python3]
-│   │   ├── web-search/SKILL.md  # Web search best practices
 │   │   ├── summarize/SKILL.md   # Document/content summarization
 │   │   ├── research/SKILL.md    # Structured research with web search
 │   │   └── skill-creator/SKILL.md  # How to create new skills
@@ -593,20 +591,16 @@ all SKILL.md files and invalidates any entry whose mtime has changed.
 squidbot/skills/                         # Bundled (read-only, shipped with package)
 ├── memory/SKILL.md      always: true    # memory.md conventions, always injected
 ├── cron/SKILL.md                        # Scheduling instructions
-├── github/SKILL.md      requires: [gh]  # GitHub via gh CLI       [planned]
-├── git/SKILL.md         requires: [git] # Git operations           [planned]
-├── python/SKILL.md      requires: [python3]                        [planned]
-├── web-search/SKILL.md                  # Web search best practices
+├── github/SKILL.md      requires: [gh]  # GitHub via gh CLI
+├── git/SKILL.md         requires: [git] # Git operations
 ├── summarize/SKILL.md                   # Document/content summarization
 ├── research/SKILL.md                    # Structured research workflow
 └── skill-creator/SKILL.md               # How to create new skills
 ```
 
 **Note on `requires`:** The `requires_bins` and `requires_env` fields exist in `SkillMetadata`
-and are fully supported by `FsSkillsLoader`. However, the bundled skills above marked `[planned]`
-currently contain placeholder content ("Content coming soon.") and do not yet set the `requires`
-frontmatter field. The `available="false"` rendering in the skills XML block is therefore not yet
-exercised in practice.
+and are fully supported by `FsSkillsLoader`. Skills with missing requirements render with
+`available="false"` in the skills XML block.
 
 ## Agent Loop (core/agent.py)
 
