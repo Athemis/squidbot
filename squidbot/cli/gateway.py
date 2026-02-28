@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 if TYPE_CHECKING:
     from squidbot.adapters.persistence.jsonl import JsonlMemory
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
@@ -95,6 +97,15 @@ async def _channel_loop_with_state(
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
     async for inbound in channel.receive():
+        logger.debug(
+            "channel_loop: inbound channel={} session={} sender={} room={} event={} len={}",
+            inbound.session.channel,
+            inbound.session.id,
+            inbound.session.sender_id,
+            inbound.metadata.get("matrix_room_id", ""),
+            inbound.metadata.get("matrix_event_id", ""),
+            len(inbound.text),
+        )
         if tracker is not None:
             tracker.update(channel, inbound.session, inbound.metadata)
         sid = inbound.session.id
@@ -123,6 +134,7 @@ async def _channel_loop_with_state(
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
         )
+        logger.debug("channel_loop: handled session={}", inbound.session.id)
 
 
 async def _channel_loop(
@@ -144,6 +156,15 @@ async def _channel_loop(
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
     async for inbound in channel.receive():
+        logger.debug(
+            "channel_loop: inbound channel={} session={} sender={} room={} event={} len={}",
+            inbound.session.channel,
+            inbound.session.id,
+            inbound.session.sender_id,
+            inbound.metadata.get("matrix_room_id", ""),
+            inbound.metadata.get("matrix_event_id", ""),
+            len(inbound.text),
+        )
         if tracker is not None:
             tracker.update(channel, inbound.session, inbound.metadata)
         extra = [
@@ -161,6 +182,7 @@ async def _channel_loop(
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
         )
+        logger.debug("channel_loop: handled session={}", inbound.session.id)
 
 
 def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
@@ -458,8 +480,6 @@ async def _run_gateway(config_path: Path) -> None:
     interactive terminal use. Log output goes to stderr; control the bot
     via Matrix or Email.
     """
-    from loguru import logger  # noqa: PLC0415
-
     from squidbot.config.schema import Settings  # noqa: PLC0415
     from squidbot.core.heartbeat import HeartbeatService, LastChannelTracker  # noqa: PLC0415
     from squidbot.core.models import ChannelStatus, Session  # noqa: PLC0415

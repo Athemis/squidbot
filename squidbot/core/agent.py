@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from loguru import logger
+
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
     Message,
@@ -209,13 +211,21 @@ class AgentLoop:
                                messages emitted during this run.
         """
         selected_llm = llm if llm is not None else self._llm
+        logger.debug(
+            "agent.run: start session={} channel={} sender={} text_len={}",
+            session.id,
+            session.channel,
+            session.sender_id,
+            len(user_message),
+        )
 
         try:
             messages = await self._memory.build_messages(
                 user_message=user_message,
                 system_prompt=self._system_prompt,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent.run: build_messages failed, fallback to minimal context: {}", exc)
             messages = [
                 Message(role="system", content=self._system_prompt),
                 Message(role="user", content=user_message),
@@ -226,6 +236,7 @@ class AgentLoop:
         tool_round = 0
 
         while tool_round < MAX_TOOL_ROUNDS:
+            logger.debug("agent.run: llm round={} session={}", tool_round + 1, session.id)
             try:
                 text_response, tool_calls, reasoning_content = await self._run_llm_stream(
                     llm=selected_llm,
@@ -244,6 +255,7 @@ class AgentLoop:
                         metadata=dict(outbound_metadata or {}),
                     )
                 )
+                logger.error("agent.run: llm failed for session={}: {}", session.id, e)
                 return
 
             if text_response:
@@ -252,6 +264,8 @@ class AgentLoop:
             if not tool_calls:
                 # No tool calls — the agent is done
                 break
+
+            logger.debug("agent.run: executing {} tool call(s)", len(tool_calls))
 
             messages.append(
                 Message(
@@ -269,6 +283,11 @@ class AgentLoop:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 
         await self._deliver_final_text(channel, session, final_text, outbound_metadata)
+        logger.debug(
+            "agent.run: delivered response session={} response_len={}",
+            session.id,
+            len(final_text),
+        )
 
         # Persist the exchange
         try:
@@ -278,5 +297,6 @@ class AgentLoop:
                 user_message=user_message,
                 assistant_reply=final_text,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent.run: persist_exchange failed for session={}: {}", session.id, exc)
             return
