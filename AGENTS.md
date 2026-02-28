@@ -72,7 +72,7 @@ uv tool install --reinstall /home/alex/git/squidbot
 - `rich` -> `/Textualize/rich`
 - `loguru` -> `/Delgan/loguru`
 - `Pillow` -> `/python-pillow/Pillow`
-- `markdown-it-py` -> `/lepture/markdown-it-py`
+- `mistune` -> `/lepture/mistune`
 - `aioimaplib` -> `/kksilicon/aioimaplib`
 - `aiosmtplib` -> `/aio-libs/aiosmtplib`
 - `openclaw` -> `/openclaw/openclaw`
