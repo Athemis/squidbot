@@ -520,3 +520,49 @@ class TestMatrixMediaMetadata:
 
         source = Path(matrix_mod.__file__).read_text(encoding="utf-8")
         assert "subprocess.run(" not in source
+
+
+class TestMatrixRoomMembershipLogging:
+    """Room-membership observability logs cover joined and missing rooms."""
+
+    @pytest.mark.asyncio
+    async def test_logs_joined_and_missing_configured_rooms(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(room_ids=["!room1:example.org", "!room2:example.org"])
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.rooms = {
+            "!room1:example.org": MagicMock(),
+            "!other:example.org": MagicMock(),
+        }
+
+        with (
+            patch("squidbot.adapters.channels.matrix.logger.info") as info_log,
+            patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log,
+        ):
+            ch._log_room_membership_snapshot()
+
+        info_log.assert_called_once_with("MatrixChannel: currently joined {} room(s)", 2)
+        warn_log.assert_called_once_with(
+            "MatrixChannel: not joined to configured room(s): {}",
+            "!room2:example.org",
+        )
+
+    @pytest.mark.asyncio
+    async def test_logs_all_configured_rooms_joined(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(room_ids=["!room1:example.org"])
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.rooms = {"!room1:example.org": MagicMock()}
+
+        with (
+            patch("squidbot.adapters.channels.matrix.logger.debug") as debug_log,
+            patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log,
+        ):
+            ch._log_room_membership_snapshot()
+
+        warn_log.assert_not_called()
+        debug_log.assert_any_call("MatrixChannel: joined all configured room(s) ({})", 1)

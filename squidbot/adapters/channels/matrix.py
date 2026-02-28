@@ -251,6 +251,11 @@ class MatrixChannel:
         assert self._client is not None
         logger.debug("MatrixChannel: starting sync_forever")
         try:
+            snapshot = await self._client.sync(timeout=30_000, full_state=True)
+            if isinstance(snapshot, nio.SyncError):
+                logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
+            else:
+                self._log_room_membership_snapshot()
             await self._client.sync_forever(timeout=30_000)
             logger.warning("MatrixChannel: sync_forever returned unexpectedly")
         except Exception as exc:  # noqa: BLE001
@@ -389,6 +394,26 @@ class MatrixChannel:
         if relates_to.get("rel_type") == "m.thread":
             meta["matrix_thread_root"] = relates_to["event_id"]
         return meta
+
+    def _log_room_membership_snapshot(self) -> None:
+        """Log a snapshot of currently joined rooms and missing configured rooms."""
+        assert self._client is not None
+        joined_room_ids = set(self._client.rooms)
+        logger.info("MatrixChannel: currently joined {} room(s)", len(joined_room_ids))
+
+        configured = self._config.room_ids
+        if not configured:
+            return
+
+        missing = [room_id for room_id in configured if room_id not in joined_room_ids]
+        if missing:
+            logger.warning(
+                "MatrixChannel: not joined to configured room(s): {}",
+                ", ".join(missing),
+            )
+            return
+
+        logger.debug("MatrixChannel: joined all configured room(s) ({})", len(configured))
 
     # ── Sending helpers ──────────────────────────────────────────────────────
 
