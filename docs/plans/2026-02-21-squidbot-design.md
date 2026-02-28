@@ -106,6 +106,14 @@ squidbot/
 │   │   ├── cron/SKILL.md        # Scheduling instructions
 │   │   ├── github/SKILL.md      # requires: [gh]
 │   │   ├── git/SKILL.md         # requires: [git]
+│   │   ├── task-extractor/SKILL.md  # Extract tasks from unstructured text
+│   │   ├── inbox-triage/SKILL.md    # Prioritize inbox backlog into action buckets
+│   │   ├── follow-up-manager/SKILL.md  # Track open loops and schedule follow-ups
+│   │   ├── daily-briefing/SKILL.md  # Morning/start-of-day briefing
+│   │   ├── weekly-review/SKILL.md   # Weekly reflection and planning reset
+│   │   ├── meeting-prep-and-recap/SKILL.md  # Meeting agenda and recap structure
+│   │   ├── decision-log/SKILL.md    # Decision history with rationale
+│   │   ├── personal-ops-router/SKILL.md  # Route multi-step productivity requests
 │   │   ├── summarize/SKILL.md   # Document/content summarization
 │   │   ├── research/SKILL.md    # Structured research with web search
 │   │   └── skill-creator/SKILL.md  # How to create new skills
@@ -593,6 +601,14 @@ squidbot/skills/                         # Bundled (read-only, shipped with pack
 ├── cron/SKILL.md                        # Scheduling instructions
 ├── github/SKILL.md      requires: [gh]  # GitHub via gh CLI
 ├── git/SKILL.md         requires: [git] # Git operations
+├── task-extractor/SKILL.md              # Extract tasks from unstructured text
+├── inbox-triage/SKILL.md                # Prioritize inbox backlog
+├── follow-up-manager/SKILL.md           # Follow-up tracking and reminders
+├── daily-briefing/SKILL.md              # Daily briefing generation
+├── weekly-review/SKILL.md               # Weekly review and planning reset
+├── meeting-prep-and-recap/SKILL.md      # Meeting prep and recap workflow
+├── decision-log/SKILL.md                # Decision capture with rationale
+├── personal-ops-router/SKILL.md         # Route multi-step productivity requests
 ├── summarize/SKILL.md                   # Document/content summarization
 ├── research/SKILL.md                    # Structured research workflow
 └── skill-creator/SKILL.md               # How to create new skills
