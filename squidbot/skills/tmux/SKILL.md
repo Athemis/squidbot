@@ -18,8 +18,8 @@ Use this skill when you need to inspect or control long-running terminal work in
 
 ## When not to use
 
-- You can run the command directly with the Bash tool and wait for completion.
-- You only need to read or edit files; use file tools (`Read`, `Grep`, `Glob`, `apply_patch`) instead.
+- You can run the command directly with the `shell` tool and wait for completion.
+- You only need to read or edit files; use `read_file`, `write_file`, and `list_files` instead.
 - The task can be solved with a short one-off command and does not need persistent terminal state.
 
 ## Safe command patterns
@@ -33,7 +33,7 @@ Use this skill when you need to inspect or control long-running terminal work in
 
 ## Squidbot examples
 
-Use the Bash tool for tmux commands and then report key lines back to the user.
+Use the `shell` tool for tmux commands and then report key lines back to the user.
 
 ```bash
 tmux list-sessions
@@ -42,4 +42,4 @@ tmux send-keys -t dev:0.1 "uv run ruff check ." C-m
 tmux capture-pane -t dev:0.1 -p -S -80
 ```
 
-If tmux is missing, report that `tmux` is required and suggest running the task directly with Bash.
+If tmux is missing, report that `tmux` is required and suggest running the task directly with `shell`.
