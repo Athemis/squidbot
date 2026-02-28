@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Add failing loader compatibility tests
+## Task 1: Add failing loader compatibility tests
 
 **Files:**
 - Modify: `tests/core/test_skills.py`
@@ -61,7 +61,7 @@ git add tests/core/test_skills.py
 git commit -m "test(skills): cover openclaw metadata requires fallback"
 ```
 
-### Task 2: Implement compatibility extraction in loader
+## Task 2: Implement compatibility extraction in loader
 
 **Files:**
 - Modify: `squidbot/adapters/skills/fs.py`
@@ -103,7 +103,7 @@ git add squidbot/adapters/skills/fs.py tests/core/test_skills.py
 git commit -m "feat(skills): support openclaw requires metadata fallback"
 ```
 
-### Task 3: Add bundled squidbot-native tmux skill
+## Task 3: Add bundled squidbot-native tmux skill
 
 **Files:**
 - Create: `squidbot/skills/tmux/SKILL.md`
@@ -147,7 +147,7 @@ git add squidbot/skills/tmux/SKILL.md tests/core/test_skills.py
 git commit -m "feat(skills): add bundled squidbot-native tmux skill"
 ```
 
-### Task 4: Verify end-to-end quality gates
+## Task 4: Verify end-to-end quality gates
 
 **Files:**
 - Verify: `squidbot/adapters/skills/fs.py`

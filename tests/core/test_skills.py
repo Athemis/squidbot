@@ -148,6 +148,29 @@ def test_top_level_requires_precedence_over_openclaw(tmp_path):
     assert skills[0].requires_bins == []
 
 
+def test_openclaw_requires_used_when_top_level_requires_is_empty_dict(tmp_path):
+    skill = tmp_path / "tmux"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: tmux\n"
+        "description: 'tmux skill'\n"
+        "requires: {}\n"
+        "metadata:\n"
+        "  openclaw:\n"
+        "    requires:\n"
+        "      bins: [__definitely_missing_tmux_bin__]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills[0].available is False
+    assert "__definitely_missing_tmux_bin__" in skills[0].requires_bins
+
+
 def test_invalid_requires_shapes_do_not_crash(tmp_path):
     skill = tmp_path / "tmux"
     skill.mkdir()

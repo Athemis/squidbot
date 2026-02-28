@@ -57,8 +57,12 @@ def _extract_requires(meta: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Extract normalized requires.bins/env values from skill frontmatter."""
     requires_raw = meta.get("requires")
     requires: dict[str, Any] = {}
-    if isinstance(requires_raw, dict):
-        requires = requires_raw
+    top_level_has_usable_shape = isinstance(requires_raw, dict) and (
+        isinstance(requires_raw.get("bins"), list) or isinstance(requires_raw.get("env"), list)
+    )
+    if top_level_has_usable_shape:
+        if isinstance(requires_raw, dict):
+            requires = requires_raw
     else:
         metadata_raw = meta.get("metadata")
         if isinstance(metadata_raw, dict):
