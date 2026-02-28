@@ -91,6 +91,22 @@ class TestCronAddTool:
         assert result.is_error
         assert "channel is required" in result.content
 
+    async def test_add_rejects_non_positive_interval(self, tmp_path: Path) -> None:
+        storage = _storage(tmp_path)
+        tool = CronAddTool(
+            storage=storage, default_channel="email:user@example.com", default_metadata={}
+        )
+
+        result = await tool.execute(name="Invalid", message="Ping", schedule="every 0")
+
+        assert result.is_error
+        assert "Invalid schedule" in result.content
+
+        negative_result = await tool.execute(name="Invalid", message="Ping", schedule="every -1")
+
+        assert negative_result.is_error
+        assert "Invalid schedule" in negative_result.content
+
 
 class TestCronListRemoveSetEnabled:
     async def test_list_remove_and_toggle(self, tmp_path: Path) -> None:
