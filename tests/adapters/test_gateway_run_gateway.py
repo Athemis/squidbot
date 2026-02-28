@@ -1,3 +1,5 @@
+"""Tests for squidbot.cli.gateway._run_gateway execution flow."""
+
 from __future__ import annotations
 
 import asyncio

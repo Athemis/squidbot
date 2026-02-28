@@ -136,9 +136,11 @@ def test_add_with_invalid_schedule_prints_error_and_exits(
     cron_dir = tmp_path / ".squidbot" / "cron"
     cron_dir.mkdir(parents=True)
 
-    with patch("squidbot.cli.cron.Path.home", return_value=tmp_path), patch(
-        "squidbot.core.cron_ops.generate_job_id", return_value="test1234"
-    ), pytest.raises(SystemExit) as exc_info:
+    with (
+        patch("squidbot.cli.cron.Path.home", return_value=tmp_path),
+        patch("squidbot.core.cron_ops.generate_job_id", return_value="test1234"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
         add(
             name="Bad Job",
             message="Test message",
@@ -308,7 +310,7 @@ def test_remove_when_jobs_file_absent_prints_not_found(
 
 
 def test_remove_last_job_deletes_file(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
-    """remove() removes the jobs file when last job is deleted."""
+    """remove() leaves empty jobs list when last job is deleted."""
     cron_dir = tmp_path / ".squidbot" / "cron"
     cron_dir.mkdir(parents=True)
     jobs_file = cron_dir / "jobs.json"

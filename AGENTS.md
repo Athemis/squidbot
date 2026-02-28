@@ -55,7 +55,7 @@ uv run mypy squidbot/
 uv tool install --reinstall /home/alex/git/squidbot
 ```
 
-**Always run `uv run ruff check .` and `uv run pytest` before committing.**
+**Always run `uv run ruff check .`, `uv run ruff format . --check`, and `uv run pytest` before committing.**
 
 ## Context7 Library IDs
 
