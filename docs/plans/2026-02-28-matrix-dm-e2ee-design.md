@@ -13,8 +13,8 @@ Approved
 Enable reliable handling of end-to-end encrypted Matrix direct messages so inbound DM text reaches
 `AgentLoop` and receives replies in the existing Matrix channel flow.
 
-Also allow automatic room join on invitation events, but only when the invitation sender is the
-configured owner identity.
+Also allow automatic room join on invitation events when the invitation sender is a configured
+owner identity (applies to owner-invited DMs and owner-invited group rooms).
 
 ## Context
 
@@ -78,6 +78,7 @@ Implement Approach A.
 - Add explicit observability for encrypted inbound events and decryption failures.
 - Register an invite handler that auto-joins invited rooms only if the inviter is in the owner
   allowlist derived from `settings.owner.aliases` for Matrix.
+- Derive owner Matrix IDs in gateway wiring and pass them into `MatrixChannel`.
 
 ### Data Flow
 
@@ -96,22 +97,43 @@ Implement Approach A.
 - If E2EE dependencies are unavailable at startup, emit a clear warning with remediation text and
   keep channel alive for unencrypted rooms.
 - If encrypted events arrive but are not decryptable, log event type, room, sender, and reason.
+- If E2EE is unavailable and an encrypted room/event is encountered, emit an error-level log for
+  that room/event while continuing gateway operation.
 - If invite auto-join is attempted and join fails, log room id, inviter, and server error.
 - If invite sender is unknown or not owner, log drop reason and do not join.
 - Keep existing non-fatal adapter behavior (log errors, do not crash gateway loop).
 
+### E2EE Capability Detection
+
+- `MatrixChannel` keeps an explicit runtime flag (for example `self._e2ee_available: bool`) that is
+  set during `_connect()` based on deterministic capability probing.
+- Probe criteria:
+  - `nio.AsyncClientConfig(encryption_enabled=True, store_sync_tokens=True)` can be constructed.
+  - E2EE-enabled `nio.AsyncClient(..., config=..., store_path=...)` can be created.
+- If probing fails, set `self._e2ee_available = False`, continue in degraded mode, and emit startup
+  warning logs with a concise reason (no secrets).
+- Encrypted-event handling must branch on this flag and emit error-level logs when encrypted events
+  are seen while degraded.
+
 ### Security and Persistence
 
 - Crypto store lives under `~/.squidbot/crypto/matrix/<sanitized-user-id>`.
+- Crypto-store directories are created with owner-only permissions (`0700`).
+- If permission hardening fails, emit a warning and continue degraded for encrypted traffic in that
+  runtime (no crash), with explicit startup reason logging.
 - Do not log secrets, access tokens, or key material.
 - Logs may include room ID, sender ID, and event IDs for debugging.
 
 ## Testing Strategy (TDD)
 
-1. Add failing adapter tests for:
+1. Add failing adapter and wiring tests for:
    - E2EE client config/store path initialization
+   - encrypted inbound event reaches normal queue path after decryption
    - encrypted-event observability logs
    - graceful startup when E2EE support is unavailable
+   - error logging when encrypted events arrive while E2EE is unavailable
+   - owner-only invite auto-join behavior for DM and group invites
+   - gateway owner-alias extraction and MatrixChannel wiring
 2. Run tests to confirm failures.
 3. Implement minimal code to satisfy each test.
 4. Run focused Matrix adapter tests, then full repository checks.
@@ -122,13 +144,31 @@ In scope:
 - `MatrixChannel` E2EE setup and startup diagnostics
 - Persistent crypto-store path derivation under `~/.squidbot/crypto`
 - Encrypted-event logging for investigation
-- Owner-only invitation auto-join handling
-- Adapter tests for above behavior
+- Owner-only invitation auto-join handling (owner-invited DMs and groups)
+- Gateway wiring for owner alias propagation to Matrix channel
+- Adapter and gateway tests for above behavior
 
 Out of scope:
 - Interactive device verification UX
-- Automatic room join behavior changes
 - Cross-channel architecture changes outside Matrix adapter/config
+
+## Acceptance Criteria
+
+| ID | Requirement |
+|---|---|
+| AC1 | With E2EE available, encrypted inbound DM text is processed through the normal inbound queue and reaches `AgentLoop`. |
+| AC2 | Owner-invited room invites (DM or group) trigger auto-join; non-owner invites are ignored and logged. |
+| AC3 | When E2EE dependencies are missing, startup degrades with warning logs; unencrypted rooms still function. |
+| AC4 | When encrypted events are seen while E2EE is unavailable, error logs include room/event context without secrets. |
+| AC5 | Startup logs include E2EE readiness mode (`enabled` or `degraded`), degraded reason when present, and current joined-room count. |
+
+Traceability note for AC1:
+- AC1 is considered complete only when evidence exists at the gateway boundary (`AgentLoop.run(...)`
+  invocation), not just adapter queue insertion.
+
+Operational note:
+- Degraded mode is an accepted fallback state, but deployments that are expected to process
+  encrypted DMs must reach readiness mode `enabled` for full AC1 fulfillment.
 
 ## Validation Commands
 
