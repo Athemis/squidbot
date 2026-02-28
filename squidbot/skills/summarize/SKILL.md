@@ -55,8 +55,8 @@ Next steps, decisions, or follow-ups.
 - Communication: Prefer async messaging over sync HTTP
 - Monitoring: Distributed tracing is essential
 
-## Considerations
-- Requires DevOps maturity
-- Data consistency is challenging
-- Network latency impacts performance
+## Action Items
+- Assess team DevOps readiness before migration
+- Define data consistency strategy per service boundary
+- Budget for latency/observability in service-to-service calls
 ```

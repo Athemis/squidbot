@@ -21,7 +21,7 @@ Use the `shell` tool to execute git commands for local version control operation
 ## When NOT to Use
 
 - GitHub-specific operations (PRs, issues, CI) → use `github` skill
-- Cloning from GitHub → use `git clone` directly, then github skill for remote ops
+- Cloning from GitHub → use `git clone` directly, then the `github` skill for remote ops
 
 ## Branch Naming
 

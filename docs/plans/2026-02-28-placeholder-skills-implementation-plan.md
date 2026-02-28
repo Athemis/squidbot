@@ -19,7 +19,7 @@
 
 Write the following content to `squidbot/skills/git/SKILL.md`:
 
-```markdown
+````markdown
 ---
 name: git
 description: "Local git workflows: commits, branches, merges, conflict resolution."
@@ -43,7 +43,7 @@ Use the `shell` tool to execute git commands for local version control operation
 ## When NOT to Use
 
 - GitHub-specific operations (PRs, issues, CI) → use `github` skill
-- Cloning from GitHub → use `git clone` directly, then github skill for remote ops
+- Cloning from GitHub → use `git clone` directly, then the `github` skill for remote ops
 
 ## Branch Naming
 
@@ -64,7 +64,7 @@ Example: `feat/add-email-channel`, `fix/memory-leak`
 
 Format: `type(scope): description`
 
-```
+````
 feat(email): add IMAP connection pooling
 fix(agent): handle empty tool responses
 docs(readme): update installation steps
@@ -133,7 +133,7 @@ git commit -m "feat(skills): implement git skill"
 
 Write the following content to `squidbot/skills/github/SKILL.md`:
 
-```markdown
+````markdown
 ---
 name: github
 description: "GitHub via `gh` CLI: issues, PRs, CI runs, reviews. Requires `gh auth login`."
@@ -164,7 +164,7 @@ Use the `shell` tool to execute `gh` CLI commands for GitHub operations.
 ```bash
 gh auth login
 gh auth status
-```
+````
 
 ## Pull Requests
 
@@ -249,7 +249,7 @@ git commit -m "feat(skills): implement github skill"
 
 Write the following content to `squidbot/skills/research/SKILL.md`:
 
-```markdown
+````markdown
 ---
 name: research
 description: "Structured research workflow using web_search and fetch_url tools."
@@ -271,7 +271,7 @@ Clarify what information is needed. Break complex questions into sub-queries.
 
 Use `web_search` to find relevant sources:
 
-```
+````
 web_search(query="topic", num_results=10)
 ```
 
@@ -344,7 +344,7 @@ git commit -m "feat(skills): implement research skill"
 
 Write the following content to `squidbot/skills/summarize/SKILL.md`:
 
-```markdown
+````markdown
 ---
 name: summarize
 description: "Summarize documents, conversations, or content into key points."
@@ -402,11 +402,11 @@ Next steps, decisions, or follow-ups.
 - Communication: Prefer async messaging over sync HTTP
 - Monitoring: Distributed tracing is essential
 
-## Considerations
-- Requires DevOps maturity
-- Data consistency is challenging
-- Network latency impacts performance
-```
+## Action Items
+- Assess team DevOps readiness before migration
+- Define data consistency strategy per service boundary
+- Budget for latency/observability in service-to-service calls
+````
 ```
 
 **Step 2: Verify file syntax**
@@ -437,8 +437,8 @@ Expected: All tests pass
 
 **Step 3: Verify all skills updated**
 
-Run: `grep -L "coming soon" squidbot/skills/*/SKILL.md`
-Expected: All 4 skill files listed (no "coming soon" remaining)
+Run: `grep -L "coming soon" squidbot/skills/{git,github,research,summarize}/SKILL.md`
+Expected: All 4 files listed
 
 ---
 
