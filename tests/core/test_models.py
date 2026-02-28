@@ -25,7 +25,25 @@ def test_message_basic():
 def test_message_with_tool_call():
     tool_call = ToolCall(id="tc_1", name="shell", arguments={"command": "ls"})
     msg = Message(role="assistant", content="", tool_calls=[tool_call])
+    assert msg.tool_calls is not None
     assert msg.tool_calls[0].name == "shell"
+
+
+def test_message_to_openai_dict_includes_reasoning_content() -> None:
+    msg = Message(role="assistant", content="", reasoning_content="internal reasoning")
+    # Default: reasoning_content not included
+    payload = msg.to_openai_dict()
+    assert "reasoning_content" not in payload
+    # With flag: reasoning_content included
+    payload = msg.to_openai_dict(include_reasoning_content=True)
+    assert payload["reasoning_content"] == "internal reasoning"
+
+
+def test_message_empty_reasoning_content_preserved() -> None:
+    msg = Message(role="assistant", content="hi", reasoning_content="")
+    payload = msg.to_openai_dict(include_reasoning_content=True)
+    assert payload["reasoning_content"] == ""
+    assert payload["reasoning_content"] is not None
 
 
 def test_session_id_format():

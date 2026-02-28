@@ -201,6 +201,7 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
                 api_base=provider_cfg.api_base,
                 api_key=provider_cfg.api_key,
                 model=model_cfg.model,
+                supports_reasoning_content=provider_cfg.supports_reasoning_content,
             )
         )
 

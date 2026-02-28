@@ -170,6 +170,7 @@ async def _run_agent(message: str | None, config_path: Path) -> None:
         for conn in mcp_connections:
             await conn.close()
 
+
 async def _run_onboard(config_path: Path) -> None:
     """Interactive setup wizard. Idempotent — existing values shown as defaults."""
     settings = _load_or_init_settings(config_path)

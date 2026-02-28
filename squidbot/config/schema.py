@@ -22,6 +22,7 @@ class LLMProviderConfig(BaseModel):
 
     api_base: str
     api_key: str = ""
+    supports_reasoning_content: bool = False
 
 
 class LLMModelConfig(BaseModel):

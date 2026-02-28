@@ -55,6 +55,8 @@ def _serialize_message(message: Message) -> str:
         ]
     if message.tool_call_id:
         d["tool_call_id"] = message.tool_call_id
+    if message.reasoning_content is not None:
+        d["reasoning_content"] = message.reasoning_content
     if message.channel is not None:
         d["channel"] = message.channel
     if message.sender_id is not None:
@@ -83,6 +85,7 @@ def deserialize_message(line: str) -> Message:
         content=d.get("content", ""),
         tool_calls=tool_calls,
         tool_call_id=d.get("tool_call_id"),
+        reasoning_content=d.get("reasoning_content"),
         timestamp=datetime.fromisoformat(d["timestamp"]),
         channel=d.get("channel"),
         sender_id=d.get("sender_id"),

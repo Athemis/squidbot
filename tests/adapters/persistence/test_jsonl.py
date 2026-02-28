@@ -92,6 +92,21 @@ async def test_message_channel_sender_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_reasoning_content_roundtrip(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    msg = Message(
+        role="assistant",
+        content="",
+        reasoning_content="tool selection reasoning",
+        channel="cli",
+        sender_id="assistant",
+    )
+    await storage.append_message(msg)
+    loaded = await storage.load_history()
+    assert loaded[0].reasoning_content == "tool selection reasoning"
+
+
+@pytest.mark.asyncio
 async def test_global_memory_roundtrip(tmp_path: Path) -> None:
     storage = JsonlMemory(base_dir=tmp_path)
     await storage.save_global_memory("facts")

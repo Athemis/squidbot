@@ -105,9 +105,10 @@ class AgentLoop:
         channel: ChannelPort,
         session: Session,
         outbound_metadata: dict[str, Any] | None,
-    ) -> tuple[str, list[ToolCall]]:
+    ) -> tuple[str, list[ToolCall], str | None]:
         tool_calls: list[ToolCall] = []
         text_chunks: list[str] = []
+        reasoning_content: str | None = None
 
         response_stream = await llm.chat(messages, tool_definitions)
         async for chunk in response_stream:
@@ -125,8 +126,12 @@ class AgentLoop:
 
             if isinstance(chunk, list):
                 tool_calls = chunk
+                continue
 
-        return "".join(text_chunks), tool_calls
+            if isinstance(chunk, tuple):
+                tool_calls, reasoning_content = chunk
+
+        return "".join(text_chunks), tool_calls, reasoning_content
 
     async def _append_tool_results(
         self,
@@ -222,7 +227,7 @@ class AgentLoop:
 
         while tool_round < MAX_TOOL_ROUNDS:
             try:
-                text_response, tool_calls = await self._run_llm_stream(
+                text_response, tool_calls, reasoning_content = await self._run_llm_stream(
                     llm=selected_llm,
                     messages=messages,
                     tool_definitions=tool_definitions,
@@ -253,6 +258,7 @@ class AgentLoop:
                     role="assistant",
                     content=text_response,
                     tool_calls=tool_calls,
+                    reasoning_content=reasoning_content,
                 )
             )
 
