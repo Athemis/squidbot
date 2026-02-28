@@ -8,7 +8,7 @@
 2. **Update `RichCliChannel` in `squidbot/adapters/channels/cli.py`:**
    - Import `PromptSession` and `patch_stdout` from `prompt_toolkit`.
    - Initialize a `PromptSession` instance in `RichCliChannel.__init__` (or lazily in `receive`).
-   - Modify the `receive` method to use `await self.session.prompt_async("You: ")` wrapped in an `async with patch_stdout():` block.
+   - Modify the `receive` method to use `await self.session.prompt_async("You: ")` wrapped in a `with patch_stdout():` block.
    - Remove the `_prompt` method and the `asyncio.to_thread` call, as `prompt_async` is natively asynchronous.
    - Ensure `EOFError` and `KeyboardInterrupt` are caught and handled by breaking the loop.
 

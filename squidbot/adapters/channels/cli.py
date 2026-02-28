@@ -20,6 +20,8 @@ from rich.rule import Rule
 
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 
+EXIT_COMMANDS = ("exit", "quit", "/exit", "/quit", ":q")
+
 
 class CliChannel:
     """
@@ -40,7 +42,7 @@ class CliChannel:
                 if line is None:
                     break
                 text = line.strip()
-                if text.lower() in ("exit", "quit", "/exit", "/quit", ":q"):
+                if text.lower() in EXIT_COMMANDS:
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
@@ -93,7 +95,7 @@ class RichCliChannel:
             try:
                 with patch_stdout():
                     text = (await self._get_session().prompt_async()).strip()
-                if text.lower() in ("exit", "quit", "/exit", "/quit", ":q"):
+                if text.lower() in EXIT_COMMANDS:
                     break
                 if text:
                     yield InboundMessage(session=self.SESSION, text=text)
