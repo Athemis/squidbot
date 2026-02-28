@@ -10,6 +10,16 @@
 
 ---
 
+## Behavior contract (must remain explicit)
+
+- Missing opening delimiter => `_parse_frontmatter()` returns `{}` and loader keeps skill with
+  fallback defaults.
+- Missing closing delimiter => `_parse_frontmatter()` returns `{}` and loader keeps skill with
+  fallback defaults.
+- Malformed YAML between delimiters => parse error is caught in `_load_cached()`; skill is skipped.
+- Delimiters are strict root-level fence lines only (`line.rstrip("\\r") == "---"`).
+- Lines with leading whitespace, trailing spaces, or BOM-prefixed opener are not delimiters.
+
 ## Task 1: Add failing regression tests for delimiter edge cases
 
 **Files:**
@@ -204,12 +214,29 @@ def test_malformed_frontmatter_yaml_is_skipped_without_crash(tmp_path):
     assert skills == []
 ```
 
-**Step 4: Run targeted tests**
+**Step 4: Add strict-fence policy tests**
+
+Add tests that lock down strict delimiter behavior:
+
+```python
+def test_frontmatter_with_trailing_space_in_fence_is_not_treated_as_delimiter(tmp_path):
+    ...
+
+
+def test_frontmatter_with_bom_prefixed_opening_fence_is_not_treated_as_delimiter(tmp_path):
+    ...
+```
+
+Expected behavior for both:
+- `_parse_frontmatter()` returns `{}` path.
+- loader keeps skill with fallback defaults (name from dir, empty description).
+
+**Step 5: Run targeted tests**
 
 Run: `uv run pytest tests/core/test_skills.py -v`
 Expected: PASS.
 
-**Step 5: Commit test additions**
+**Step 6: Commit test additions**
 
 ```bash
 git add tests/core/test_skills.py

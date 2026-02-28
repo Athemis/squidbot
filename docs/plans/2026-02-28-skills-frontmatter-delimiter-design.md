@@ -88,6 +88,18 @@ Implement Approach A.
 - YAML parse errors continue to be handled by `_load_cached()` fail-safe behavior (skill skipped,
   loader continues).
 
+### Behavior Contract
+
+- Missing opening delimiter -> `_parse_frontmatter()` returns `{}`; loader keeps skill with fallback
+  defaults.
+- Missing closing delimiter -> `_parse_frontmatter()` returns `{}`; loader keeps skill with fallback
+  defaults.
+- Malformed YAML between delimiters -> YAML parse error is caught by `_load_cached()` fail-safe;
+  skill entry is skipped.
+- Delimiter policy is strict: accepted fence is exact root-level `---` line (`line.rstrip("\\r") ==
+  "---"`). Leading whitespace, trailing spaces, or BOM-prefixed opener are treated as
+  non-delimiters.
+
 ## Testing Strategy (TDD)
 
 Add focused regression coverage in `tests/core/test_skills.py`:
@@ -116,7 +128,12 @@ Success criteria:
 
 In scope:
 - `_parse_frontmatter()` delimiter hardening
-- 1-2 focused regression tests
+- required regression + defensive coverage:
+  - quoted-string `---`
+  - indented `---` inside YAML block scalar
+  - missing opening delimiter
+  - missing closing delimiter
+  - malformed YAML fail-safe
 
 Out of scope:
 - Cache/discovery refactors
