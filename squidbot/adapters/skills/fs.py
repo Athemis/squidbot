@@ -28,12 +28,20 @@ _yaml.preserve_quotes = True
 def _parse_frontmatter(path: Path) -> dict[str, Any]:
     """Extract YAML frontmatter from a SKILL.md file."""
     text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
+    lines = text.splitlines()
+    if not lines or lines[0].rstrip("\r") != "---":
         return {}
-    end = text.find("---", 3)
-    if end == -1:
+
+    closing_index = -1
+    for idx in range(1, len(lines)):
+        line = lines[idx]
+        if line.rstrip("\r") == "---":
+            closing_index = idx
+            break
+    if closing_index == -1:
         return {}
-    yaml_block = text[3:end].strip()
+
+    yaml_block = "\n".join(lines[1:closing_index])
     data = _yaml.load(yaml_block)
     return dict(data) if data else {}
 
