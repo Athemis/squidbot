@@ -17,6 +17,35 @@ from openai import AsyncOpenAI
 from squidbot.core.models import Message, ToolCall, ToolDefinition
 
 
+def _extract_reasoning_content(message_part: Any) -> str | None:
+    direct = getattr(message_part, "reasoning_content", None)
+    if isinstance(direct, str):
+        return direct
+
+    alt = getattr(message_part, "reasoning", None)
+    if isinstance(alt, str):
+        return alt
+
+    model_extra = getattr(message_part, "model_extra", None)
+    if isinstance(model_extra, dict):
+        extra_reasoning = model_extra.get("reasoning_content")
+        if isinstance(extra_reasoning, str):
+            return extra_reasoning
+        extra_alt = model_extra.get("reasoning")
+        if isinstance(extra_alt, str):
+            return extra_alt
+
+    if isinstance(message_part, dict):
+        dict_reasoning = message_part.get("reasoning_content")
+        if isinstance(dict_reasoning, str):
+            return dict_reasoning
+        dict_alt = message_part.get("reasoning")
+        if isinstance(dict_alt, str):
+            return dict_alt
+
+    return None
+
+
 class OpenAIAdapter:
     """
     LLM adapter for OpenAI-compatible endpoints.
@@ -92,8 +121,9 @@ class OpenAIAdapter:
                     yield delta.content
 
                 # Accumulate reasoning content (for thinking models like Kimi K2.5)
-                if getattr(delta, "reasoning_content", None) is not None:
-                    accumulated_reasoning.append(delta.reasoning_content)
+                reasoning_chunk = _extract_reasoning_content(delta)
+                if reasoning_chunk is not None:
+                    accumulated_reasoning.append(reasoning_chunk)
 
                 # Accumulate tool call fragments
                 if delta.tool_calls:
@@ -147,8 +177,9 @@ class OpenAIAdapter:
 
         # Capture reasoning content for thinking models (e.g., Kimi K2.5)
         reasoning: str | None = None
-        if getattr(choice.message, "reasoning_content", None) is not None:
-            reasoning = choice.message.reasoning_content
+        extracted_reasoning = _extract_reasoning_content(choice.message)
+        if extracted_reasoning is not None:
+            reasoning = extracted_reasoning
 
         if choice.message.tool_calls:
             tool_calls = [

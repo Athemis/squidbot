@@ -122,3 +122,82 @@ async def test_openai_adapter_empty_reasoning_preserved() -> None:
         _, kwargs = mock_client.chat.completions.create.call_args
         sent_messages = kwargs["messages"]
         assert sent_messages[0]["reasoning_content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_stream_reads_reasoning_from_model_extra() -> None:
+    with patch("squidbot.adapters.llm.openai.AsyncOpenAI") as mock_openai:
+        mock_client = mock_openai.return_value
+
+        delta = MagicMock()
+        delta.content = None
+        delta.tool_calls = [
+            MagicMock(
+                index=0,
+                id="tc_1",
+                function=MagicMock(name="echo", arguments='{"text":"hi"}'),
+            )
+        ]
+        delta.model_extra = {"reasoning_content": "reasoning via model_extra"}
+        delta.reasoning_content = None
+
+        chunk = MagicMock()
+        chunk.choices = [MagicMock(delta=delta)]
+
+        mock_stream = AsyncMock()
+        mock_stream.__aenter__.return_value = AsyncMock()
+        mock_stream.__aenter__.return_value.__aiter__.return_value = iter([chunk])
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream)
+
+        adapter = OpenAIAdapter(
+            api_base="http://test",
+            api_key="key",
+            model="gpt-4",
+            supports_reasoning_content=True,
+        )
+
+        events: list[object] = []
+        async for event in await adapter.chat([Message(role="user", content="hi")], []):
+            events.append(event)
+
+        assert events
+        assert isinstance(events[-1], tuple)
+        tool_calls, reasoning = events[-1]
+        assert reasoning == "reasoning via model_extra"
+        assert tool_calls[0].id == "tc_1"
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_complete_reads_reasoning_from_model_extra() -> None:
+    with patch("squidbot.adapters.llm.openai.AsyncOpenAI") as mock_openai:
+        mock_client = mock_openai.return_value
+
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = None
+        mock_choice.message.tool_calls = [
+            MagicMock(id="tc_1", function=MagicMock(name="echo", arguments='{"text":"hi"}'))
+        ]
+        mock_choice.message.reasoning_content = None
+        mock_choice.message.model_extra = {"reasoning_content": "reasoning via model_extra"}
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        adapter = OpenAIAdapter(
+            api_base="http://test",
+            api_key="key",
+            model="gpt-4",
+            supports_reasoning_content=True,
+        )
+
+        events: list[object] = []
+        async for event in await adapter.chat(
+            [Message(role="user", content="hi")], [], stream=False
+        ):
+            events.append(event)
+
+        assert events
+        assert isinstance(events[-1], tuple)
+        tool_calls, reasoning = events[-1]
+        assert reasoning == "reasoning via model_extra"
+        assert tool_calls[0].id == "tc_1"
