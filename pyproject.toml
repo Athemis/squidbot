@@ -20,6 +20,7 @@ dependencies = [
     "mistune>=3.0",
     "aioimaplib>=1.0",
     "aiosmtplib>=3.0",
+    "prompt-toolkit>=3,<4",
 ]
 
 [project.scripts]
