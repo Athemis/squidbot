@@ -249,6 +249,14 @@ class MatrixChannel:
                 )
                 self._e2ee_available = True
                 self._e2ee_degraded_reason = None
+                try:
+                    client.load_store()
+                except Exception as load_exc:  # noqa: BLE001
+                    logger.warning(
+                        "MatrixChannel: E2EE store load failed ({}); "
+                        "encrypted messages may be undecryptable until keys are re-established.",
+                        load_exc,
+                    )
             except (AttributeError, ImportError, ImportWarning) as exc:
                 self._e2ee_available = False
                 self._e2ee_degraded_reason = type(exc).__name__
