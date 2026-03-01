@@ -89,7 +89,7 @@ MatrixChannel._handle_media(room, event)
   ↓
 MatrixChannel._download_attachment(event) → (text: str, multimodal_content: list[dict] | None)
   ↓
-  if MIME in EMBEDDABLE_IMAGE_MIMES and size ≤ max_embed_bytes:
+  if MIME in EMBEDDABLE_IMAGE_MIMES and size ≤ max_inbound_embed_bytes:
     read bytes → base64 encode → build image_url block
     multimodal_content = [
       {"type": "text", "text": "[Anhang: foto.jpg (image/jpeg)] → /tmp/..."},
@@ -142,8 +142,8 @@ resp = await self._client.upload(
 
 | Threshold | Default | Purpose |
 |-----------|---------|---------|
-| `max_download_bytes` | 50 MB | Hard cap on download size (memory protection) |
-| `max_embed_bytes` | 2 MB | Cap for Base64 embedding (LLM request budget) |
+| `max_inbound_download_bytes` | 50 MB | Preflight and post-fetch guard for inbound media processing |
+| `max_inbound_embed_bytes` | 2 MB | Cap for Base64 embedding (LLM request budget) |
 | `max_outbound_upload_bytes` | 20 MB | Local cap for outbound upload attempts |
 
 **MIME Allowlist for Embedding:**
@@ -160,7 +160,7 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset({
 **SVG (`image/svg+xml`) is explicitly excluded** — it's XML, not a raster format, and can cause provider-specific handling issues.
 
 **What happens for files outside the allowlist?**
-- They are still downloaded (unless blocked by `max_download_bytes`) and persisted locally.
+- They are still downloaded (unless blocked by `max_inbound_download_bytes`) and persisted locally.
 - They are forwarded as text-path context only (no `image_url` Base64 block).
 - This preserves tool-based access (`read_file`, etc.) without bloating LLM payloads.
 
@@ -173,10 +173,16 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset({
 - If server limit is unavailable, only local threshold applies.
 - If a file exceeds the effective limit, skip upload and log debug reason `exceeds_outbound_limit`.
 
+**Download-limit enforcement semantics:**
+- Preflight check: if event-declared size is available and exceeds `max_inbound_download_bytes`, skip download.
+- Post-fetch guard: if downloaded byte length exceeds `max_inbound_download_bytes`, discard payload and fallback to text warning.
+- This is still not byte-stream hard-capping; true streaming hard-cap can be added later.
+
 **Fallback reasons logged at DEBUG level:**
 - `non-image` — MIME not in allowlist
-- `exceeds_embed_limit` — size > max_embed_bytes
-- `exceeds_download_limit` — size > max_download_bytes (skip download entirely)
+- `exceeds_embed_limit` — size > max_inbound_embed_bytes
+- `exceeds_download_limit_preflight` — declared size > max_inbound_download_bytes
+- `exceeds_download_limit_postfetch` — downloaded size > max_inbound_download_bytes
 
 ### Gateway Dispatch Path
 
@@ -196,6 +202,7 @@ Both loops call `agent.run()`. Update to pass `msg.multimodal_content or msg.tex
 | Base64 encoding error | Text-path fallback, log warning |
 | Image > embed limit | Text-path fallback, log debug with reason |
 | Declared size > download limit | Skip download, text `[Anhang: zu groß]`, log debug |
+| Downloaded size > download limit | Discard payload, text `[Anhang: zu groß]`, log debug |
 | MIME not in allowlist | Download + local persistence + text-path fallback, log debug |
 | Outbound file > effective outbound limit | Skip upload, log debug (`exceeds_outbound_limit`) |
 | Upload fails (outbound) | `logger.error` + skip file |
@@ -215,6 +222,8 @@ Both loops call `agent.run()`. Update to pass `msg.multimodal_content or msg.tex
 - `test_download_attachment_too_large_returns_text_only`: oversized image → text fallback
 - `test_download_attachment_mime_not_allowed`: SVG → text fallback
 - `test_download_attachment_declared_size_exceeds_download_limit`: skip download
+- `test_download_attachment_downloaded_size_exceeds_download_limit`: post-fetch discard + fallback
+- `test_download_attachment_mime_not_allowed_persists_and_returns_path`: SVG/PDF still downloaded and persisted
 - `test_send_attachment_uses_bytesio`: mock upload → assert BytesIO called
 - `test_send_multiple_attachments`: two paths → two upload calls
 - `test_email_channel_attaches_all_files`: list[Path] → all existing files attached
@@ -248,8 +257,8 @@ All attachment decision points emit `logger.debug()` (silent in production, visi
 
 ## Security Considerations
 
-1. **Memory protection:** `max_download_bytes` prevents OOM from malicious large files
-2. **Request budget:** `max_embed_bytes` prevents LLM API failures from oversized payloads
+1. **Memory protection:** `max_inbound_download_bytes` provides preflight + post-fetch safeguards
+2. **Request budget:** `max_inbound_embed_bytes` prevents LLM API failures from oversized payloads
 3. **MIME allowlist:** Reduces attack surface from unusual image formats
 4. **Path traversal:** Existing workspace restrictions apply to outbound attachments
 5. **SVG exclusion:** Prevents potential XML-based attacks via image embedding

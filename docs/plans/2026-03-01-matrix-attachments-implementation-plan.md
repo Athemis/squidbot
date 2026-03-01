@@ -258,6 +258,8 @@ Add tests for:
 - svg -> no embedding (text-only fallback)
 - declared size above download limit -> skip download and fallback text
 - downloaded size above embed limit -> no embedding
+- downloaded size above download limit -> discard payload + fallback text
+- non-allowlist file (svg/pdf) under download limit -> still downloaded/persisted + text path marker, `multimodal_content is None`
 
 **Step 2: Run to verify failure**
 
@@ -272,6 +274,7 @@ In `matrix.py`:
 - Define `EMBEDDABLE_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})`
 - Check declared size first (if available) against `max_inbound_download_bytes`
 - Only embed when MIME in allowlist and bytes <= `max_inbound_embed_bytes`
+- Check downloaded byte length against `max_inbound_download_bytes` before persistence/embedding
 - Non-allowlist files are still downloaded and persisted, then forwarded as text path
 
 **Step 4: Re-run tests**
@@ -344,7 +347,7 @@ git commit -m "feat(email): attach all files from list-based attachment contract
 
 **Files:**
 - Modify: `squidbot/cli/gateway.py`
-- Modify: `tests/core/test_agent.py` or existing gateway-focused tests (create if missing)
+- Modify: `tests/adapters/test_channel_loops.py`
 
 **Step 1: Write failing test**
 
@@ -353,7 +356,7 @@ Add a focused test for dispatch behavior: when `InboundMessage.multimodal_conten
 **Step 2: Run to verify failure**
 
 Run:
-`uv run pytest tests -k "gateway and multimodal" -v`
+`uv run pytest tests/adapters/test_channel_loops.py -k "multimodal" -v`
 
 Expected: FAIL.
 
@@ -378,7 +381,7 @@ inbound.multimodal_content if inbound.multimodal_content else inbound.text
 **Step 4: Re-run tests**
 
 Run:
-`uv run pytest tests -k "gateway and multimodal" -v`
+`uv run pytest tests/adapters/test_channel_loops.py -v`
 
 Expected: PASS.
 
