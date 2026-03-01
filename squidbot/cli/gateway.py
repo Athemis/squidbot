@@ -573,7 +573,7 @@ async def _run_gateway(config_path: Path) -> None:
     cron_jobs = await storage.load_cron_jobs()
     logger.info("cron: {} jobs loaded", len(cron_jobs))
     workspace = Path(settings.agents.workspace).expanduser()
-    restrict_to_workspace = bool(getattr(settings.agents, "restrict_to_workspace", False))
+    restrict_to_workspace = settings.agents.restrict_to_workspace
 
     tracker = LastChannelTracker()
 

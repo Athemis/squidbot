@@ -481,7 +481,7 @@ class TestMatrixChannelSend:
         session = Session(channel="matrix", sender_id="@alice:example.org")
         msg = OutboundMessage(
             session=session,
-            text="",
+            text="done",
             attachments=[jpg],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
@@ -495,12 +495,20 @@ class TestMatrixChannelSend:
             f"Expected BytesIO but got {type(upload_args[0])}"
         )
 
-        # Should have sent one media event
+        # Should have sent media before text
+        assert len(sent) == 2
+        assert sent[0]["content"]["msgtype"] == "m.image"
+        assert sent[1]["content"]["msgtype"] == "m.text"
+
         media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
         assert len(media_events) == 1
         assert media_events[0]["content"]["url"] == "mxc://example.org/TestMediaId"
         assert media_events[0]["content"]["filename"] == "test.jpg"
         assert media_events[0]["ignore_unverified_devices"] is True
+
+        text_events = [e for e in sent if e["content"].get("msgtype") == "m.text"]
+        assert len(text_events) == 1
+        assert sent.index(media_events[0]) < sent.index(text_events[0])
 
     @pytest.mark.asyncio
     async def test_send_multiple_attachments_uploads_each(self, tmp_path: Path) -> None:

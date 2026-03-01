@@ -1,4 +1,10 @@
-"""Tool for explicit message delivery and routed sends across channels."""
+"""Message delivery tool for explicit routed sends.
+
+This module provides a dedicated messaging tool that lets the model send content
+and attachments to the current channel, or route to supported channels when the
+owner explicitly requests it. It centralizes routing policy checks, recipient
+resolution, and workspace-safe attachment path validation.
+"""
 
 from __future__ import annotations
 
@@ -39,8 +45,11 @@ def _resolve_safe(workspace: Path, path: str, restrict: bool) -> Path | None:
     resolved = (
         (workspace / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
     )
-    if restrict and not str(resolved).startswith(str(workspace_resolved)):
-        return None
+    if restrict:
+        try:
+            resolved.relative_to(workspace_resolved)
+        except ValueError:
+            return None
     return resolved
 
 
@@ -73,7 +82,13 @@ def _is_supported_route(source_channel: str, target_channel: str, sender_overrid
 
 
 class MessageTool:
-    """Send explicit messages in the current or another supported channel."""
+    """Send explicit messages in the current or another supported channel.
+
+    The tool is injected per inbound message with session context and a live
+    channel registry. It enforces owner-only routing policy for cross-channel
+    sends and validates attachment paths before dispatching to the destination
+    channel adapter.
+    """
 
     name = "message"
     description = (
@@ -112,6 +127,20 @@ class MessageTool:
         workspace: Path,
         restrict_to_workspace: bool,
     ) -> None:
+        """Initialize MessageTool with per-turn delivery context.
+
+        Args:
+            channel_registry: Active channel adapters keyed by channel name.
+            current_session: Session for the current inbound turn.
+            inbound_text: Raw inbound user text used for explicitness checks.
+            owner_aliases: Owner aliases used for routing authorization.
+            outbound_metadata: Metadata forwarded to outbound channel sends.
+            workspace: Workspace root for safe attachment path resolution.
+            restrict_to_workspace: Whether out-of-workspace paths are denied.
+
+        Returns:
+            None.
+        """
         self._channel_registry = channel_registry
         self._current_session = current_session
         self._inbound_text = inbound_text
@@ -121,6 +150,11 @@ class MessageTool:
         self._restrict_to_workspace = restrict_to_workspace
 
     def to_definition(self) -> ToolDefinition:
+        """Build the tool schema exposed to the model.
+
+        Returns:
+            ToolDefinition describing the message tool contract.
+        """
         return ToolDefinition(
             name=self.name,
             description=self.description,
@@ -128,6 +162,15 @@ class MessageTool:
         )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        """Validate and dispatch an explicit message send request.
+
+        Args:
+            **kwargs: Tool call payload containing content, attachments, and
+                optional routing overrides.
+
+        Returns:
+            ToolResult indicating success or a value-based error.
+        """
         content_raw = kwargs.get("content")
         if not isinstance(content_raw, str) or not content_raw:
             return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)

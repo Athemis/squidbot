@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from squidbot.config.schema import OwnerAliasEntry
 from squidbot.core.models import OutboundMessage, Session
+
+if TYPE_CHECKING:
+    from squidbot.adapters.tools.message import MessageTool
 
 
 class _CollectingChannel:
@@ -48,7 +51,7 @@ def _make_tool(
     outbound_metadata: dict[str, Any],
     workspace: Path,
     restrict_to_workspace: bool = False,
-):
+) -> MessageTool:
     from squidbot.adapters.tools.message import MessageTool
 
     return MessageTool(
