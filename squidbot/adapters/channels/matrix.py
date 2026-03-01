@@ -38,15 +38,16 @@ _TYPING_TIMEOUT_MS: int = 30_000
 _TYPING_KEEPALIVE_S: float = 25.0
 _TYPING_RETRY_DEFAULT_S: float = 5.0
 
-# Event types registered as nio callbacks — used for both registration and diagnostic logging
-# so the two cannot silently diverge.
+# Event types covered by registered nio callbacks — used for diagnostic logging so the
+# two cannot silently diverge. MEDIA_EVENT_FILTER expands to RoomMessageMedia +
+# RoomEncryptedMedia; BadEvent handles encrypted-upload events that fail schema validation.
 _REGISTERED_EVENT_TYPES: tuple[type, ...] = (
     nio.RoomMessageText,
     nio.RoomMessageMedia,
     nio.RoomEncryptedMedia,
+    nio.BadEvent,
     nio.InviteMemberEvent,
     nio.UnknownEvent,
-    nio.BadEvent,
 )
 
 # Tuple passed to add_event_callback so _handle_media fires for both plain and E2EE media.
@@ -361,11 +362,9 @@ class MatrixChannel:
                     load_exc,
                 )
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
-        # Register _handle_media individually so both types appear in the callback list.
-        client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
-        client.add_event_callback(self._handle_media, cast(Any, nio.RoomEncryptedMedia))
-        # Also register via MEDIA_EVENT_FILTER tuple — required by the callback-registration
-        # contract tests that assert the tuple appears as a registered unit.
+        # Register _handle_media for both plain and E2EE (Megolm-decrypted) media events.
+        # MEDIA_EVENT_FILTER is a tuple so nio fires _handle_media for either type with a
+        # single registration, preventing double-dispatch.
         client.add_event_callback(self._handle_media, cast(Any, MEDIA_EVENT_FILTER))
         # Register _handle_bad_event for events nio cannot parse (encrypted-upload shape).
         # cast(Any, ...) on the callback silences the contravariant signature mismatch —
@@ -462,6 +461,25 @@ class MatrixChannel:
         except Exception as exc:  # noqa: BLE001
             text = f"[Anhang nicht verfügbar: {exc}]"
             multimodal_content = None
+        self._enqueue_media_message(room, event, text, multimodal_content)
+
+    def _enqueue_media_message(
+        self,
+        room: Any,
+        event: Any,
+        text: str,
+        multimodal_content: list[dict[str, Any]] | None,
+    ) -> None:
+        """Build an InboundMessage from a processed media event and add it to the queue.
+
+        Shared by _handle_media and _handle_bad_event to avoid duplicate queue-building logic.
+
+        Args:
+            room: The Matrix room the event was received in.
+            event: The media event (RoomMessageMedia, RoomEncryptedMedia, or BadEvent).
+            text: Text description of the attachment (path or error marker).
+            multimodal_content: Optional multimodal blocks for embeddable images.
+        """
         metadata = self._extract_metadata(event)
         session = Session(channel="matrix", sender_id=event.sender)
         room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
@@ -549,18 +567,7 @@ class MatrixChannel:
         except Exception as exc:  # noqa: BLE001
             text = f"[Anhang nicht verfügbar: {exc}]"
             multimodal_content = None
-        metadata = self._extract_metadata(event)
-        session = Session(channel="matrix", sender_id=event.sender)
-        room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
-        self._session_rooms[session.id] = room_id
-        self._queue.put_nowait(
-            InboundMessage(
-                session=session,
-                text=text,
-                metadata=metadata,
-                multimodal_content=multimodal_content,
-            )
-        )
+        self._enqueue_media_message(room, event, text, multimodal_content)
 
     async def _handle_invite(self, room: Any, event: Any) -> None:
         """Auto-join invitations from allowlisted owner Matrix IDs."""

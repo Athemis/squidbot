@@ -1508,8 +1508,22 @@ class TestMatrixEncryptedMediaIntake:
         This is the pre-existing RED test (added in this branch) verifying the callback
         registration gap. The more complete version is
         test_registers_room_message_media_encrypted_media_and_bad_event_callbacks.
+
+        The implementation uses a single tuple registration (MEDIA_EVENT_FILTER) rather than
+        two individual registrations, so we flatten tuples when checking coverage.
         """
         from squidbot.adapters.channels.matrix import MatrixChannel
+
+        def _covered_types(call_args_list: list[Any]) -> set[type]:
+            """Flatten registered types from individual and tuple registrations."""
+            types: set[type] = set()
+            for c in call_args_list:
+                filter_arg = c.args[1]
+                if isinstance(filter_arg, tuple):
+                    types.update(filter_arg)
+                else:
+                    types.add(filter_arg)
+            return types
 
         config = _make_config(user_id="@bot:example.org")
         ch = MatrixChannel(config=config)
@@ -1525,10 +1539,10 @@ class TestMatrixEncryptedMediaIntake:
         ):
             await ch._connect()
 
-        registered_types = [call.args[1] for call in fake_client.add_event_callback.call_args_list]
+        covered = _covered_types(fake_client.add_event_callback.call_args_list)
 
-        assert nio.RoomMessageMedia in registered_types
-        assert nio.RoomEncryptedMedia in registered_types
+        assert nio.RoomMessageMedia in covered
+        assert nio.RoomEncryptedMedia in covered
 
     # ── BadEvent routing ──────────────────────────────────────────────────────
 
