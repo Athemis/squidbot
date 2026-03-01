@@ -347,7 +347,10 @@ class TestMatrixChannelSend:
         sent: list[dict[str, Any]] = []
 
         async def fake_room_send(
-            room_id: str, message_type: str, content: dict[str, Any]
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
         ) -> MagicMock:
             sent.append({"room_id": room_id, "type": message_type, "content": content})
             return MagicMock()
@@ -380,7 +383,10 @@ class TestMatrixChannelSend:
         sent: list[dict[str, Any]] = []
 
         async def fake_room_send(
-            room_id: str, message_type: str, content: dict[str, Any]
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
         ) -> MagicMock:
             sent.append(content)
             return MagicMock()
@@ -442,7 +448,10 @@ class TestMatrixChannelSend:
             return resp, None
 
         async def fake_room_send(
-            room_id: str, message_type: str, content: dict[str, Any]
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
         ) -> MagicMock:
             sent.append(content)
             return MagicMock()

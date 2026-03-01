@@ -569,6 +569,7 @@ class MatrixChannel:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,
         )
         if isinstance(resp, nio.RoomSendError):
             logger.error("MatrixChannel: send error in {}: {}", room_id, resp)
@@ -615,6 +616,7 @@ class MatrixChannel:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,
         )
         if isinstance(resp2, nio.RoomSendError):
             logger.error("MatrixChannel: media send error in {}: {}", room_id, resp2)
