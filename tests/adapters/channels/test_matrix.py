@@ -595,6 +595,47 @@ class TestMatrixChannelE2ee:
         assert kwargs["config"].store_sync_tokens is True
 
     @pytest.mark.asyncio
+    async def test_connect_degrades_when_crypto_store_permissions_fail(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_client = MagicMock()
+        fake_client.add_event_callback = MagicMock()
+
+        with (
+            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", False)),
+            patch(
+                "squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client
+            ) as ctor,
+        ):
+            await ch._connect()
+
+        kwargs = ctor.call_args.kwargs
+        assert "store_path" not in kwargs
+        assert ch._e2ee_available is False
+        assert ch._e2ee_degraded_reason == "CryptoStorePermissions"
+
+    @pytest.mark.asyncio
+    async def test_connect_does_not_swallow_unexpected_e2ee_errors(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_cfg = MagicMock()
+
+        with (
+            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", True)),
+            patch("squidbot.adapters.channels.matrix.nio.AsyncClientConfig", return_value=fake_cfg),
+            patch(
+                "squidbot.adapters.channels.matrix.nio.AsyncClient",
+                side_effect=TypeError("boom"),
+            ),
+            pytest.raises(TypeError, match="boom"),
+        ):
+            await ch._connect()
+
+    @pytest.mark.asyncio
     async def test_logs_encrypted_unknown_event_details(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -700,6 +741,30 @@ class TestMatrixChannelE2ee:
             "ImportWarning",
         )
 
+    @pytest.mark.asyncio
+    async def test_sync_loop_logs_readiness_when_initial_sync_errors(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._e2ee_available = False
+        ch._e2ee_degraded_reason = "ImportWarning"
+
+        client = MagicMock()
+        client.sync = AsyncMock(return_value=nio.SyncError("sync failed"))
+        client.sync_forever = AsyncMock(side_effect=RuntimeError("stop"))
+        ch._client = client
+
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
+            await ch._sync_loop()
+
+        warn_log.assert_any_call(
+            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
+            "degraded",
+            0,
+            "ImportWarning",
+        )
+
     def test_crypto_store_path_applies_owner_only_permissions(self, tmp_path: Path) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -707,7 +772,10 @@ class TestMatrixChannelE2ee:
         ch = MatrixChannel(config=config)
 
         with patch("squidbot.adapters.channels.matrix.Path.home", return_value=tmp_path):
-            store_path = Path(ch._crypto_store_path("@bot:example.org"))
+            store_path_raw, hardened = ch._crypto_store_path("@bot:example.org")
+
+        store_path = Path(store_path_raw)
+        assert hardened is True
 
         mode = stat.S_IMODE(store_path.stat().st_mode)
         assert mode == 0o700

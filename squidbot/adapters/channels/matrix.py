@@ -228,21 +228,34 @@ class MatrixChannel:
         cfg = self._config
 
         client: nio.AsyncClient
-        store_path = self._crypto_store_path(cfg.user_id)
-        try:
-            e2ee_config = nio.AsyncClientConfig(encryption_enabled=True, store_sync_tokens=True)
-            client = nio.AsyncClient(
-                homeserver=cfg.homeserver,
-                user=cfg.user_id,
-                device_id=cfg.device_id,
-                store_path=store_path,
-                config=e2ee_config,
-            )
-            self._e2ee_available = True
-            self._e2ee_degraded_reason = None
-        except Exception as exc:  # noqa: BLE001
+        store_path, store_hardened = self._crypto_store_path(cfg.user_id)
+        if store_hardened:
+            try:
+                e2ee_config = nio.AsyncClientConfig(encryption_enabled=True, store_sync_tokens=True)
+                client = nio.AsyncClient(
+                    homeserver=cfg.homeserver,
+                    user=cfg.user_id,
+                    device_id=cfg.device_id,
+                    store_path=store_path,
+                    config=e2ee_config,
+                )
+                self._e2ee_available = True
+                self._e2ee_degraded_reason = None
+            except (AttributeError, ImportError, ImportWarning) as exc:
+                self._e2ee_available = False
+                self._e2ee_degraded_reason = type(exc).__name__
+                logger.warning(
+                    "MatrixChannel: E2EE unavailable, degrading to unencrypted mode: {}",
+                    self._e2ee_degraded_reason,
+                )
+                client = nio.AsyncClient(
+                    homeserver=cfg.homeserver,
+                    user=cfg.user_id,
+                    device_id=cfg.device_id,
+                )
+        else:
             self._e2ee_available = False
-            self._e2ee_degraded_reason = type(exc).__name__
+            self._e2ee_degraded_reason = "CryptoStorePermissions"
             logger.warning(
                 "MatrixChannel: E2EE unavailable, degrading to unencrypted mode: {}",
                 self._e2ee_degraded_reason,
@@ -268,23 +281,24 @@ class MatrixChannel:
         assert self._client is not None
         try:
             snapshot = await self._client.sync(timeout=30_000, full_state=True)
+            joined_rooms = 0
             if isinstance(snapshot, nio.SyncError):
                 logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
             else:
                 joined_rooms = self._log_room_membership_snapshot()
-                if self._e2ee_available:
-                    logger.info(
-                        "MatrixChannel: E2EE readiness={} joined_rooms={}",
-                        "enabled",
-                        joined_rooms,
-                    )
-                else:
-                    logger.warning(
-                        "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-                        "degraded",
-                        joined_rooms,
-                        self._e2ee_degraded_reason or "unknown",
-                    )
+            if self._e2ee_available:
+                logger.info(
+                    "MatrixChannel: E2EE readiness={} joined_rooms={}",
+                    "enabled",
+                    joined_rooms,
+                )
+            else:
+                logger.warning(
+                    "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
+                    "degraded",
+                    joined_rooms,
+                    self._e2ee_degraded_reason or "unknown",
+                )
             await self._client.sync_forever(timeout=30_000)
             logger.warning("MatrixChannel: sync_forever returned unexpectedly")
         except Exception as exc:  # noqa: BLE001
@@ -478,8 +492,8 @@ class MatrixChannel:
 
         return joined_count
 
-    def _crypto_store_path(self, user_id: str) -> str:
-        """Build and prepare a persistent crypto-store path for Matrix E2EE state."""
+    def _crypto_store_path(self, user_id: str) -> tuple[str, bool]:
+        """Build crypto-store path and report whether permissions were hardened."""
         sanitized_user_id = re.sub(r"[^A-Za-z0-9._-]", "_", user_id)
         store_dir = Path.home() / ".squidbot" / "crypto" / "matrix" / sanitized_user_id
         try:
@@ -487,7 +501,8 @@ class MatrixChannel:
             store_dir.chmod(0o700)
         except Exception as exc:  # noqa: BLE001
             logger.warning("MatrixChannel: cannot harden crypto store permissions: {}", exc)
-        return str(store_dir)
+            return str(store_dir), False
+        return str(store_dir), True
 
     # ── Sending helpers ──────────────────────────────────────────────────────
 
