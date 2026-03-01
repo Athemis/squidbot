@@ -319,8 +319,16 @@ class MatrixChannel:
                 if isinstance(resp, nio.SyncError):
                     logger.warning("MatrixChannel: sync error: {}", resp)
                 else:
-                    rooms = list(getattr(getattr(resp, "rooms", None), "join", {}).keys())
-                    logger.debug("MatrixChannel: sync poll ok joined_rooms={}", rooms)
+                    join = getattr(getattr(resp, "rooms", None), "join", {})
+                    for room_id, room_info in join.items():
+                        events = getattr(room_info, "timeline", None)
+                        event_list = getattr(events, "events", []) if events else []
+                        for ev in event_list:
+                            logger.debug(
+                                "MatrixChannel: raw event type={} sender={}",
+                                type(ev).__name__,
+                                getattr(ev, "sender", "?"),
+                            )
         except Exception as exc:  # noqa: BLE001
             logger.error("MatrixChannel: sync_forever error: {}", exc)
 
