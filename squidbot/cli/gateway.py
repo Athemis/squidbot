@@ -136,11 +136,12 @@ async def _channel_loop_with_state(
                 default_metadata=inbound.metadata,
             ),
         ]
-        user_payload = inbound.multimodal_content if inbound.multimodal_content else inbound.text
+        has_multimodal = inbound.multimodal_content is not None
+        user_payload = inbound.multimodal_content if has_multimodal else inbound.text
         logger.debug(
             "gateway: dispatching session={} multimodal={}",
             inbound.session.id,
-            inbound.multimodal_content is not None,
+            has_multimodal,
         )
         await loop.run(
             inbound.session,
@@ -180,11 +181,12 @@ async def _channel_loop(
                 default_metadata=inbound.metadata,
             ),
         ]
-        user_payload = inbound.multimodal_content if inbound.multimodal_content else inbound.text
+        has_multimodal = inbound.multimodal_content is not None
+        user_payload = inbound.multimodal_content if has_multimodal else inbound.text
         logger.debug(
             "gateway: dispatching session={} multimodal={}",
             inbound.session.id,
-            inbound.multimodal_content is not None,
+            has_multimodal,
         )
         await loop.run(
             inbound.session,

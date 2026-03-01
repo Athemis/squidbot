@@ -310,12 +310,16 @@ class EmailChannel:
         alt.attach(plain_part)
         alt.attach(html_part)
 
-        attachments = [p for p in message.attachment if p.exists()]
+        attachments = [p for p in message.attachment if p.is_file()]
         if attachments:
             outer = MIMEMultipart("mixed")
             outer.attach(alt)
             for attachment in attachments:
-                att_data = await asyncio.to_thread(attachment.read_bytes)
+                try:
+                    att_data = await asyncio.to_thread(attachment.read_bytes)
+                except OSError as exc:
+                    logger.warning("email: skipping unreadable attachment {}: {}", attachment, exc)
+                    continue
                 att_mime, _ = mimetypes.guess_type(attachment.name)
                 att_part = MIMEBase(*(att_mime or "application/octet-stream").split("/", 1))
                 att_part.set_payload(att_data)

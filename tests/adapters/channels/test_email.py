@@ -527,6 +527,10 @@ class TestEmailChannelSend:
         assert isinstance(parts, list)
         # multipart/alternative + 2 attachments = 3 parts
         assert len(parts) == 3, f"Expected 3 parts but got {len(parts)}"
+        attached_names = sorted(
+            part.get_filename() for part in parts if part.get_content_disposition() == "attachment"
+        )
+        assert attached_names == ["photo.jpg", "report.pdf"]
 
     async def test_send_references_header(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import EmailChannel

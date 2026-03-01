@@ -216,7 +216,11 @@ class MatrixChannel:
         for path in message.attachment:
             if not path.exists():
                 continue
-            file_size = path.stat().st_size
+            try:
+                file_size = path.stat().st_size
+            except OSError as exc:
+                logger.error("MatrixChannel: cannot stat attachment path={} err={}", path, exc)
+                continue
             if file_size > effective_limit:
                 logger.debug(
                     "MatrixChannel: skip outbound path={} size={} limit={} reason={}",
@@ -226,7 +230,15 @@ class MatrixChannel:
                     "exceeds_outbound_limit",
                 )
                 continue
-            await self._send_attachment(room_id, path, thread_root)
+            try:
+                await self._send_attachment(room_id, path, thread_root)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "MatrixChannel: attachment send failed path={} room={} err={}",
+                    path,
+                    room_id,
+                    exc,
+                )
 
         # Send text (skip if empty and at least one attachment was present in the list).
         if message.text or not message.attachment:
@@ -588,7 +600,9 @@ class MatrixChannel:
             try:
                 resp = await self._client.content_repository_config()
                 server_cap = getattr(resp, "upload_size", None)
-                self._server_upload_limit = int(server_cap) if server_cap else local_limit
+                self._server_upload_limit = (
+                    int(server_cap) if server_cap is not None else local_limit
+                )
             except Exception:  # noqa: BLE001
                 self._server_upload_limit = local_limit
         return min(local_limit, self._server_upload_limit)

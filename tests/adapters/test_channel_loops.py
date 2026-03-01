@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from squidbot.cli.gateway import GatewayState, _channel_loop, _channel_loop_with_state
@@ -101,9 +102,9 @@ async def test_channel_loop_with_state_forwards_metadata_to_agent_loop() -> None
 
 def _make_multimodal_channel(
     session_id: str = "@alice:example.org",
-) -> MagicMock:
+) -> tuple[MagicMock, list[dict[str, Any]]]:
     """Return a channel that yields one InboundMessage with multimodal_content."""
-    multimodal: list[dict] = [
+    multimodal: list[dict[str, Any]] = [
         {"type": "text", "text": "what is in this image?"},
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,abc"}},
     ]

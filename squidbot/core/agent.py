@@ -243,7 +243,10 @@ class AgentLoop:
             ]
 
         # Replace the last user message content with the full multimodal payload when present.
+        # If no user slot exists (e.g. empty history), append one so the LLM always
+        # receives the full multimodal payload.
         if isinstance(user_message, list):
+            replaced_user = False
             for i in range(len(messages) - 1, -1, -1):
                 if messages[i].role == "user":
                     messages[i] = Message(
@@ -252,7 +255,17 @@ class AgentLoop:
                         channel=messages[i].channel,
                         sender_id=messages[i].sender_id,
                     )
+                    replaced_user = True
                     break
+            if not replaced_user:
+                messages.append(
+                    Message(
+                        role="user",
+                        content=user_message,
+                        channel=session.channel,
+                        sender_id=session.sender_id,
+                    )
+                )
 
         tool_definitions, extra_tool_map = self._build_tool_definitions(extra_tools)
 

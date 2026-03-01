@@ -8,6 +8,7 @@ in-memory test doubles. No network calls, no filesystem I/O.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -334,7 +335,7 @@ async def test_agent_run_multimodal_user_message_forwarded_to_llm(storage, memor
 
             return _gen()
 
-    multimodal: list[dict] = [
+    multimodal: list[dict[str, Any]] = [
         {"type": "text", "text": "describe this image"},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
     ]
@@ -343,7 +344,7 @@ async def test_agent_run_multimodal_user_message_forwarded_to_llm(storage, memor
     channel = CollectingChannel()
     loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="test")
 
-    await loop.run(SESSION, multimodal, channel)  # type: ignore[arg-type]
+    await loop.run(SESSION, multimodal, channel)
 
     user_msgs = [m for m in llm.received_messages if m.role == "user"]
     assert user_msgs, "No user message forwarded to LLM"
@@ -357,12 +358,12 @@ async def test_agent_run_multimodal_persists_text_fallback(storage, memory) -> N
     channel = CollectingChannel()
     loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="test")
 
-    multimodal: list[dict] = [
+    multimodal: list[dict[str, Any]] = [
         {"type": "text", "text": "what is in this image?"},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,BIGPAYLOAD"}},
     ]
 
-    await loop.run(SESSION, multimodal, channel)  # type: ignore[arg-type]
+    await loop.run(SESSION, multimodal, channel)
 
     history = await storage.load_history()
     user_hist = [m for m in history if m.role == "user"]

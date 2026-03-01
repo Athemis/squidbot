@@ -1295,10 +1295,13 @@ class TestMatrixInboundGuardrails:
 
         text, multimodal = await ch._download_attachment(event)
 
-        # A file right at or below the boundary should embed
+        # A file right at or below the boundary should embed.
+        # Assert precondition first so the test fails if fixture math drifts.
         estimated = 4 * ((len(image_bytes) + 2) // 3) + header
-        if estimated <= target_encoded:
-            assert multimodal is not None
+        assert estimated <= target_encoded, (
+            f"Fixture miscomputed boundary: estimated={estimated}, target={target_encoded}"
+        )
+        assert multimodal is not None
 
     async def test_fallback_reason_non_image_logged(self) -> None:
         """non-image MIME emits debug log with reason=non-image."""

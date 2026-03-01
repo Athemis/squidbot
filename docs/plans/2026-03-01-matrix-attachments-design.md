@@ -38,7 +38,7 @@ squidbot's design differs: we *do* embed images as Base64 for vision models, whi
 
 ### Component Map
 
-```
+```text
 squidbot/core/models.py              ← Message.content type + OutboundMessage.attachment type
 squidbot/core/agent.py               ← user_message type + Message construction
 squidbot/adapters/channels/matrix.py ← upload fix + inbound multimodal builder
@@ -82,7 +82,7 @@ Changed from `Path | None` to `list[Path]`. Default is `[]` (empty list).
 
 ### Inbound Multimodal Flow
 
-```
+```text
 nio RoomMessageMedia event
   ↓
 MatrixChannel._handle_media(room, event)
@@ -111,7 +111,7 @@ agent.run(user_message=msg.multimodal_content or msg.text, ...)
   ↓
 Message(role="user", content=multimodal_content or text)
   ↓
-LLM API: {"role": "user", "content": [...]} 
+LLM API: {"role": "user", "content": [...]}
 ```
 
 **Propagation requirement:** `_handle_media()` MUST forward the exact `multimodal_content`
