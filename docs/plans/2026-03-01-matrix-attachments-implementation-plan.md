@@ -262,6 +262,7 @@ Add tests for:
 - non-allowlist file (svg/pdf) under download limit -> still downloaded/persisted + text path marker, `multimodal_content is None`
 - `_handle_media` propagation: when `_download_attachment` returns multimodal blocks, queued `InboundMessage.multimodal_content` matches exactly
 - encoded-size boundary: payload just below encoded threshold embeds; just above threshold does not embed
+- fallback reason keys are exact: `non-image`, `exceeds_embed_limit`, `exceeds_download_limit_preflight`, `exceeds_download_limit_postfetch`
 
 **Step 2: Run to verify failure**
 
@@ -276,6 +277,9 @@ In `matrix.py`:
 - Define `EMBEDDABLE_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})`
 - Check declared size first (if available) against `max_inbound_download_bytes`
 - Only embed when MIME in allowlist and estimated encoded size <= `max_inbound_embed_bytes`
+- Use exact formula for encoded estimate:
+  `estimated_encoded_bytes = 4 * ((raw_bytes + 2) // 3) + len(f"data:{mime};base64,")`
+- Accept embedding only when `estimated_encoded_bytes <= max_inbound_embed_bytes`
 - Check downloaded byte length against `max_inbound_download_bytes` before persistence/embedding
 - Non-allowlist files are still downloaded and persisted, then forwarded as text path
 

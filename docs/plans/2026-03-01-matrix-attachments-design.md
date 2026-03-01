@@ -184,8 +184,9 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset({
 
 **Embed-limit enforcement semantics:**
 - Embedding decision uses encoded-size estimate, not only raw bytes.
-- Compute `estimated_encoded_bytes = (raw_bytes * 4 / 3) + data_url_overhead` and compare
-  against `max_inbound_embed_bytes`.
+- Compute exact integer-safe estimate:
+  `estimated_encoded_bytes = 4 * ((raw_bytes + 2) // 3) + len(f"data:{mime};base64,")`
+- Accept embedding only if `estimated_encoded_bytes <= max_inbound_embed_bytes`.
 - This prevents near-threshold files from passing raw-byte checks but failing provider request
   size limits after Base64 expansion.
 
