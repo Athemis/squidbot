@@ -365,7 +365,7 @@ class TestEmailChannelSend:
     def _make_outbound(
         self,
         text: str = "Response text",
-        attachment: Path | None = None,
+        attachments: list[Path] | None = None,
         subject: str = "Test",
         msg_id: str = "<abc@host>",
         references: str = "",
@@ -377,7 +377,7 @@ class TestEmailChannelSend:
         return OutboundMessage(
             session=session,
             text=text,
-            attachment=attachment,
+            attachments=attachments or [],
             metadata={
                 "email_from": to_addr,
                 "email_subject": subject,
@@ -456,14 +456,16 @@ class TestEmailChannelSend:
         assert sent["Subject"] == "[squidbot] Daily reminder"
         assert sent.get("In-Reply-To") is None
 
-    async def test_send_with_attachment(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
+    async def test_send_with_attachments(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import EmailChannel
 
-        att = tmp_path / "report.pdf"
-        att.write_bytes(b"pdfdata")
+        first = tmp_path / "report.pdf"
+        second = tmp_path / "report2.pdf"
+        first.write_bytes(b"pdfdata")
+        second.write_bytes(b"pdfdata2")
         config = _make_config()
         ch = EmailChannel(config=config, tmp_dir=tmp_path)
-        outbound = self._make_outbound(attachment=att)
+        outbound = self._make_outbound(attachments=[first, second])
 
         to_thread_calls: list[str] = []
 
@@ -486,8 +488,8 @@ class TestEmailChannelSend:
         assert sent.get_content_type() == "multipart/mixed"
         parts = sent.get_payload()
         assert isinstance(parts, list)
-        assert len(parts) == 2  # multipart/alternative + attachment
-        assert "read_bytes" in to_thread_calls
+        assert len(parts) == 3  # multipart/alternative + two attachments
+        assert to_thread_calls.count("read_bytes") == 2
 
     async def test_send_references_header(self, fake_smtp: MagicMock, tmp_path: Path) -> None:
         from squidbot.adapters.channels.email import EmailChannel

@@ -18,7 +18,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from squidbot.adapters.persistence.jsonl import JsonlMemory
     from squidbot.adapters.tools.mcp import McpConnectionProtocol
-    from squidbot.config.schema import Settings
+    from squidbot.config.schema import OwnerAliasEntry, Settings
     from squidbot.core.agent import AgentLoop
     from squidbot.core.heartbeat import LastChannelTracker
     from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
@@ -95,6 +95,10 @@ async def _channel_loop_with_state(
     loop: Any,
     state: GatewayState,
     storage: JsonlMemory,
+    channel_registry: dict[str, ChannelPort] | None = None,
+    owner_aliases: list[OwnerAliasEntry] | None = None,
+    workspace: Path | None = None,
+    restrict_to_workspace: bool = False,
     tracker: LastChannelTracker | None = None,
 ) -> None:
     """
@@ -108,10 +112,15 @@ async def _channel_loop_with_state(
         loop: The agent loop to handle each message.
         state: Live gateway state — updated in-place.
         storage: Persistence adapter used to construct MemoryWriteTool per message.
+        channel_registry: Optional channel map used for routed message sends.
+        owner_aliases: Optional owner aliases used by MessageTool policy checks.
+        workspace: Optional workspace root for attachment path validation.
+        restrict_to_workspace: Whether MessageTool blocks paths outside workspace.
         tracker: Optional tracker receiving the latest channel/session/metadata.
     """
     from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+    from squidbot.adapters.tools.message import MessageTool  # noqa: PLC0415
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
     async for inbound in channel.receive():
@@ -128,8 +137,19 @@ async def _channel_loop_with_state(
                 started_at=datetime.now(),
                 message_count=1,
             )
+        tool_workspace = workspace if workspace is not None else Path(".")
+        registry = channel_registry or {inbound.session.channel: channel}
         extra = [
             MemoryWriteTool(storage=storage),
+            MessageTool(
+                channel_registry=registry,
+                current_session=inbound.session,
+                inbound_text=inbound.text,
+                owner_aliases=list(owner_aliases or []),
+                outbound_metadata=inbound.metadata,
+                workspace=tool_workspace,
+                restrict_to_workspace=restrict_to_workspace,
+            ),
             *build_context_cron_tools(
                 storage=storage,
                 default_channel=inbound.session.id,
@@ -149,6 +169,10 @@ async def _channel_loop(
     channel: ChannelPort,
     loop: Any,
     storage: JsonlMemory,
+    channel_registry: dict[str, ChannelPort] | None = None,
+    owner_aliases: list[OwnerAliasEntry] | None = None,
+    workspace: Path | None = None,
+    restrict_to_workspace: bool = False,
     tracker: LastChannelTracker | None = None,
 ) -> None:
     """
@@ -158,16 +182,32 @@ async def _channel_loop(
         channel: The channel adapter to drive.
         loop: The agent loop to handle each message.
         storage: Persistence adapter used to construct MemoryWriteTool per message.
+        channel_registry: Optional channel map used for routed message sends.
+        owner_aliases: Optional owner aliases used by MessageTool policy checks.
+        workspace: Optional workspace root for attachment path validation.
+        restrict_to_workspace: Whether MessageTool blocks paths outside workspace.
         tracker: Optional tracker receiving the latest channel/session/metadata.
     """
     from squidbot.adapters.tools.cron import build_context_cron_tools  # noqa: PLC0415
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
+    from squidbot.adapters.tools.message import MessageTool  # noqa: PLC0415
 
     async for inbound in channel.receive():
         if tracker is not None:
             tracker.update(channel, inbound.session, inbound.metadata)
+        tool_workspace = workspace if workspace is not None else Path(".")
+        registry = channel_registry or {inbound.session.channel: channel}
         extra = [
             MemoryWriteTool(storage=storage),
+            MessageTool(
+                channel_registry=registry,
+                current_session=inbound.session,
+                inbound_text=inbound.text,
+                owner_aliases=list(owner_aliases or []),
+                outbound_metadata=inbound.metadata,
+                workspace=tool_workspace,
+                restrict_to_workspace=restrict_to_workspace,
+            ),
             *build_context_cron_tools(
                 storage=storage,
                 default_channel=inbound.session.id,
@@ -242,6 +282,15 @@ BOOTSTRAP_FILES_MAIN: list[str] = [
     "BOOTSTRAP.md",  # loaded last if present; self-deletes after first-run interview
 ]
 BOOTSTRAP_FILES_SUBAGENT: list[str] = ["AGENTS.md", "ENVIRONMENT.md"]
+
+ATTACHMENT_DELIVERY_GUIDANCE = (
+    "\n\n"
+    "## File Delivery\n"
+    "When a file should be delivered to the user:\n"
+    "1. Create it with write_file\n"
+    "2. Send it with message using attachments\n"
+    "Do not paste file metadata JSON as a substitute for a real attachment."
+)
 
 
 def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
@@ -359,6 +408,7 @@ async def _make_agent_loop(
             mcp_connections.append(conn)
 
     system_prompt = _load_bootstrap_prompt(workspace, BOOTSTRAP_FILES_MAIN)
+    system_prompt = system_prompt + ATTACHMENT_DELIVERY_GUIDANCE
 
     # Spawn tool profile injection into system prompt
     if settings.tools.spawn.enabled and settings.tools.spawn.profiles:
@@ -509,6 +559,7 @@ async def _run_gateway(config_path: Path) -> None:
     cron_jobs = await storage.load_cron_jobs()
     logger.info("cron: {} jobs loaded", len(cron_jobs))
     workspace = Path(settings.agents.workspace).expanduser()
+    restrict_to_workspace = bool(getattr(settings.agents, "restrict_to_workspace", False))
 
     tracker = LastChannelTracker()
 
@@ -578,7 +629,17 @@ async def _run_gateway(config_path: Path) -> None:
                 )
                 logger.info("matrix channel: starting")
                 tg.create_task(
-                    _channel_loop_with_state(matrix_ch, agent_loop, state, storage, tracker=tracker)
+                    _channel_loop_with_state(
+                        matrix_ch,
+                        agent_loop,
+                        state,
+                        storage,
+                        channel_registry=channel_registry,
+                        owner_aliases=list(settings.owner.aliases),
+                        workspace=workspace,
+                        restrict_to_workspace=restrict_to_workspace,
+                        tracker=tracker,
+                    )
                 )
             else:
                 state.channel_status.append(
@@ -595,7 +656,17 @@ async def _run_gateway(config_path: Path) -> None:
                 )
                 logger.info("email channel: starting")
                 tg.create_task(
-                    _channel_loop_with_state(email_ch, agent_loop, state, storage, tracker=tracker)
+                    _channel_loop_with_state(
+                        email_ch,
+                        agent_loop,
+                        state,
+                        storage,
+                        channel_registry=channel_registry,
+                        owner_aliases=list(settings.owner.aliases),
+                        workspace=workspace,
+                        restrict_to_workspace=restrict_to_workspace,
+                        tracker=tracker,
+                    )
                 )
             else:
                 state.channel_status.append(

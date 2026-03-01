@@ -108,3 +108,20 @@ async def test_no_profile_injection_when_no_profiles(tmp_path):
 
         loop, _, _storage = await _make_agent_loop(s, storage_dir=tmp_path)
     assert "<available_spawn_profiles>" not in loop._system_prompt
+
+
+async def test_attachment_delivery_guidance_mentions_message_tool(
+    settings_spawn_disabled, tmp_path
+):
+    with (
+        patch("squidbot.adapters.llm.openai.AsyncOpenAI"),
+        patch.object(Path, "exists", return_value=False),
+    ):
+        from squidbot.cli.gateway import _make_agent_loop
+
+        loop, _, _storage = await _make_agent_loop(settings_spawn_disabled, storage_dir=tmp_path)
+
+    old_tool_name = "send" + "_attachment"
+    assert "message" in loop._system_prompt
+    assert "attachments" in loop._system_prompt
+    assert old_tool_name not in loop._system_prompt

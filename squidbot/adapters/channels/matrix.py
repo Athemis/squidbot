@@ -190,7 +190,7 @@ class MatrixChannel:
             yield msg
 
     async def send(self, message: OutboundMessage) -> None:
-        """Send a message (and optional attachment) to Matrix."""
+        """Send a message (and optional attachments) to Matrix."""
         assert self._client is not None
         room_id = message.metadata.get("matrix_room_id", "")
         if not isinstance(room_id, str) or not room_id:
@@ -200,12 +200,14 @@ class MatrixChannel:
         thread_root_raw = message.metadata.get("matrix_thread_root")
         thread_root: str | None = thread_root_raw if isinstance(thread_root_raw, str) else None
 
-        # Send attachment first if present
-        if message.attachment and message.attachment.exists():
-            await self._send_attachment(room_id, message.attachment, thread_root)
+        existing_attachments = [
+            attachment for attachment in message.attachments if attachment.exists()
+        ]
+        for attachment in existing_attachments:
+            await self._send_attachment(room_id, attachment, thread_root)
 
-        # Send text (skip if empty and attachment was sent)
-        if message.text or not message.attachment:
+        # Send text (skip if empty and at least one attachment exists)
+        if message.text or not existing_attachments:
             await self._send_text(room_id, message.text, thread_root)
 
     async def send_typing(self, session_id: str, typing: bool = True) -> None:

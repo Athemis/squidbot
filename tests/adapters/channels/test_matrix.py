@@ -438,14 +438,15 @@ class TestMatrixChannelSend:
         ch._client.room_send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_attachment_uploads_and_sends_media_event(self, tmp_path: Path) -> None:
-        """send() with attachment uploads the file and sends a media event."""
+    async def test_send_attachments_upload_and_send_media_events(self, tmp_path: Path) -> None:
+        """send() with attachments uploads files and sends media events in order."""
         from squidbot.adapters.channels.matrix import MatrixChannel
         from squidbot.core.models import OutboundMessage, Session
 
-        # Create a minimal valid JPEG (enough for magic to detect)
-        jpg = tmp_path / "test.jpg"
-        jpg.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\xd9")  # minimal JPEG
+        first = tmp_path / "first.jpg"
+        second = tmp_path / "second.jpg"
+        first.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\xd9")
+        second.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\xd9")
 
         config = _make_config()
         ch = MatrixChannel(config=config)
@@ -476,20 +477,23 @@ class TestMatrixChannelSend:
         session = Session(channel="matrix", sender_id="@alice:example.org")
         msg = OutboundMessage(
             session=session,
-            text="",
-            attachment=jpg,
+            text="done",
+            attachments=[first, second],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
         with patch("squidbot.adapters.channels.matrix._detect_mime", return_value="image/jpeg"):
             await ch.send(msg)
 
-        # Should have sent one media event
+        # Should have sent two media events before text
         media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
-        assert len(media_events) == 1
-        assert media_events[0]["content"]["url"] == "mxc://example.org/TestMediaId"
-        assert media_events[0]["content"]["filename"] == "test.jpg"
+        assert len(media_events) == 2
+        assert media_events[0]["content"]["filename"] == "first.jpg"
+        assert media_events[1]["content"]["filename"] == "second.jpg"
         assert media_events[0]["ignore_unverified_devices"] is True
+
+        text_events = [e for e in sent if e["content"].get("msgtype") == "m.text"]
+        assert len(text_events) == 1
 
 
 class TestMatrixMediaMetadata:

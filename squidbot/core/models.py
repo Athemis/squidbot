@@ -99,7 +99,7 @@ class OutboundMessage:
 
     session: Session
     text: str
-    attachment: Path | None = None
+    attachments: list[Path] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

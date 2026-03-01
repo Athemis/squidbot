@@ -284,10 +284,10 @@ class EmailChannel:
         Send a reply email via SMTP.
 
         Builds a multipart/alternative message (plain + HTML rendered from Markdown).
-        If message.attachment is set and exists, wraps in multipart/mixed.
+        If message.attachments contains existing files, wraps in multipart/mixed.
 
         Args:
-            message: Outbound message with text, optional attachment, and email metadata.
+            message: Outbound message with text, optional attachments, and email metadata.
         """
         from email import encoders  # noqa: PLC0415
         from email.mime.base import MIMEBase  # noqa: PLC0415
@@ -310,20 +310,26 @@ class EmailChannel:
         alt.attach(plain_part)
         alt.attach(html_part)
 
-        if message.attachment and message.attachment.exists():
+        existing_attachments = [
+            attachment for attachment in message.attachments if attachment.exists()
+        ]
+        if existing_attachments:
             outer = MIMEMultipart("mixed")
             outer.attach(alt)
-            att_data = await asyncio.to_thread(message.attachment.read_bytes)
-            att_mime, _ = mimetypes.guess_type(message.attachment.name)
-            att_part = MIMEBase(*(att_mime or "application/octet-stream").split("/", 1))
-            att_part.set_payload(att_data)
-            encoders.encode_base64(att_part)
-            att_part.add_header(
-                "Content-Disposition",
-                "attachment",
-                filename=message.attachment.name,
-            )
-            outer.attach(att_part)
+            for attachment in existing_attachments:
+                att_data = await asyncio.to_thread(attachment.read_bytes)
+                att_mime, _ = mimetypes.guess_type(attachment.name)
+                mime_type = att_mime or "application/octet-stream"
+                maintype, subtype = mime_type.split("/", 1)
+                att_part = MIMEBase(maintype, subtype)
+                att_part.set_payload(att_data)
+                encoders.encode_base64(att_part)
+                att_part.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=attachment.name,
+                )
+                outer.attach(att_part)
             root: MIMEMultipart = outer
         else:
             root = alt

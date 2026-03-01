@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from squidbot.core.models import (
     ChannelStatus,
@@ -88,19 +89,18 @@ def test_inbound_message_metadata_custom():
     assert msg.metadata["matrix_event_id"] == "$abc"
 
 
-def test_outbound_message_attachment_default_none():
+def test_outbound_message_attachments_default_empty_list():
     session = Session(channel="test", sender_id="user")
     msg = OutboundMessage(session=session, text="hi")
-    assert msg.attachment is None
+    assert msg.attachments == []
     assert msg.metadata == {}
 
 
-def test_outbound_message_attachment_set():
-    from pathlib import Path
-
+def test_outbound_message_attachments_accepts_list():
     session = Session(channel="test", sender_id="user")
-    msg = OutboundMessage(session=session, text="", attachment=Path("/tmp/foo.jpg"))
-    assert msg.attachment == Path("/tmp/foo.jpg")
+    path = Path("/tmp/foo.jpg")
+    msg = OutboundMessage(session=session, text="", attachments=[path])
+    assert msg.attachments == [path]
 
 
 class TestSessionInfo:
