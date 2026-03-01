@@ -100,9 +100,12 @@ class MemoryManager:
         """
         if msg.channel is None:
             return msg
+        # Assistant messages do not need a label — the LLM already knows they are
+        # its own prior responses. Labelling them causes the model to mimic the
+        # prefix format in new replies.
         if msg.sender_id == "assistant":
-            label = "assistant"
-        elif self._is_owner(msg.sender_id or "", msg.channel):
+            return msg
+        if self._is_owner(msg.sender_id or "", msg.channel):
             label = "owner"
         else:
             label = msg.sender_id or "unknown"
