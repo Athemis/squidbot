@@ -868,3 +868,30 @@ class TestMatrixChannelInvites:
             "@owner:example.org",
             join_error,
         )
+
+    async def test_invite_join_exception_is_logged(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids={"@owner:example.org"})
+
+        room = MagicMock()
+        room.room_id = "!group:example.org"
+        event = MagicMock()
+        event.membership = "invite"
+        event.state_key = "@bot:example.org"
+        event.sender = "@owner:example.org"
+
+        boom = RuntimeError("boom")
+        ch._client = MagicMock()
+        ch._client.join = AsyncMock(side_effect=boom)
+
+        with patch("squidbot.adapters.channels.matrix.logger.error") as error_log:
+            await ch._handle_invite(room, event)
+
+        error_log.assert_any_call(
+            "MatrixChannel: auto-join exception room={} inviter={} err={}",
+            "!group:example.org",
+            "@owner:example.org",
+            boom,
+        )

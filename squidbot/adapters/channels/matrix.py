@@ -407,7 +407,21 @@ class MatrixChannel:
             return
 
         room_id = getattr(room, "room_id", getattr(event, "room_id", ""))
-        join_resp = await self._client.join(room_id)
+        if not room_id:
+            logger.warning("MatrixChannel: invite missing room_id from inviter {}", sender)
+            return
+
+        try:
+            join_resp = await self._client.join(room_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "MatrixChannel: auto-join exception room={} inviter={} err={}",
+                room_id,
+                sender,
+                exc,
+            )
+            return
+
         if isinstance(join_resp, nio.JoinError):
             logger.error(
                 "MatrixChannel: auto-join failed room={} inviter={} err={}",
