@@ -281,9 +281,11 @@ class MatrixChannel:
             try:
                 client.load_store()
             except Exception as load_exc:  # noqa: BLE001
+                self._e2ee_available = False
+                self._e2ee_degraded_reason = f"StoreLoad:{type(load_exc).__name__}"
                 logger.warning(
                     "MatrixChannel: E2EE store load failed ({}); "
-                    "encrypted messages may be undecryptable until keys are re-established.",
+                    "falling back to degraded mode — encrypted messages will be undecryptable.",
                     load_exc,
                 )
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
