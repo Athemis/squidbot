@@ -84,7 +84,7 @@ class CollectingChannel:
     async def send(self, message: OutboundMessage) -> None:
         self.sent.append(message)
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         pass
 
 

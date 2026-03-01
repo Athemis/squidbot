@@ -212,6 +212,8 @@ class AgentLoop:
         """
         selected_llm = llm if llm is not None else self._llm
 
+        await channel.send_typing(session.id)
+
         try:
             messages = await self._memory.build_messages(
                 user_message=user_message,
@@ -272,6 +274,7 @@ class AgentLoop:
         else:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 
+        await channel.send_typing(session.id, typing=False)
         await self._deliver_final_text(channel, session, final_text, outbound_metadata)
 
         # Persist the exchange

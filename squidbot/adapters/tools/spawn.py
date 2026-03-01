@@ -47,7 +47,7 @@ class CollectingChannel:
         """Append message text to the internal buffer."""
         self._parts.append(message.text)
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         """No-op — sub-agents do not send typing indicators."""
 
     def receive(self) -> AsyncIterator[InboundMessage]:

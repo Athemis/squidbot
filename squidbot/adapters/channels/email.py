@@ -361,7 +361,7 @@ class EmailChannel:
         except Exception as exc:  # noqa: BLE001
             logger.error("email: SMTP error sending to {}: {}", to_addr, exc)
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         """No-op: email does not support typing indicators."""
 
     # ── IMAP loop ────────────────────────────────────────────────────────────

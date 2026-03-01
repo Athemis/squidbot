@@ -123,7 +123,7 @@ class _SinkChannel:
         if isinstance(message, OutboundMessage):
             self.collected = message.text
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         pass
 
 

@@ -47,7 +47,7 @@ class MockChannel:
     async def send(self, message: OutboundMessage) -> None:
         pass
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         pass
 
 
