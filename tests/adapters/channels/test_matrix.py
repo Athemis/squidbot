@@ -824,6 +824,17 @@ class TestMatrixChannelInvites:
 
         ch._client.join.assert_not_awaited()
 
+    def test_owner_matrix_ids_are_copied_defensively(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        provided = {"@owner:example.org"}
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids=provided)
+
+        provided.clear()
+
+        assert "@owner:example.org" in ch._owner_matrix_ids
+
     @pytest.mark.asyncio
     async def test_invite_with_non_matching_state_key_is_ignored(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel

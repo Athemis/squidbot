@@ -155,9 +155,17 @@ class MatrixChannel:
         config: MatrixChannelConfig,
         owner_matrix_ids: set[str] | None = None,
     ) -> None:
-        """Initialize MatrixChannel with the given configuration."""
+        """Initialize MatrixChannel with configuration and invite policy.
+
+        Args:
+            config: Matrix channel settings from application configuration.
+            owner_matrix_ids: Matrix user IDs allowed to trigger invite auto-join.
+
+        Returns:
+            None.
+        """
         self._config = config
-        self._owner_matrix_ids = owner_matrix_ids or set()
+        self._owner_matrix_ids = set(owner_matrix_ids or ())
         self._queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self._sync_start_ms: int = int(datetime.now().timestamp() * 1000)
         # Typing state per room
@@ -270,7 +278,9 @@ class MatrixChannel:
         client.user_id = cfg.user_id
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
+        # matrix-nio's callback typing rejects InviteMemberEvent without widening.
         client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
+        # Keep UnknownEvent for reaction parsing and encrypted-event diagnostics.
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
