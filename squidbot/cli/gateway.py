@@ -136,9 +136,10 @@ async def _channel_loop_with_state(
                 default_metadata=inbound.metadata,
             ),
         ]
+        user_payload = inbound.multimodal_content if inbound.multimodal_content else inbound.text
         await loop.run(
             inbound.session,
-            inbound.text,
+            user_payload,
             channel,
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
@@ -174,9 +175,10 @@ async def _channel_loop(
                 default_metadata=inbound.metadata,
             ),
         ]
+        user_payload = inbound.multimodal_content if inbound.multimodal_content else inbound.text
         await loop.run(
             inbound.session,
-            inbound.text,
+            user_payload,
             channel,
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
