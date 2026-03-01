@@ -626,6 +626,7 @@ class MatrixChannel:
         info = await _media_metadata(path, mime)
 
         data = await asyncio.to_thread(path.read_bytes)
+        logger.debug("MatrixChannel: uploading path={} mime={} size={}", path, mime, len(data))
         resp = await self._client.upload(
             io.BytesIO(data),
             content_type=mime,
@@ -637,9 +638,10 @@ class MatrixChannel:
         else:
             upload_resp = resp
         if isinstance(upload_resp, nio.UploadError):
-            logger.error("MatrixChannel: upload failed: {}", upload_resp)
+            logger.error("MatrixChannel: upload failed path={} err={}", path, upload_resp)
             return
         mxc_uri: str = upload_resp.content_uri
+        logger.debug("MatrixChannel: uploaded path={} mxc={}", path, mxc_uri)
 
         content: dict[str, Any] = {
             "msgtype": msgtype,
@@ -664,6 +666,10 @@ class MatrixChannel:
         )
         if isinstance(resp2, nio.RoomSendError):
             logger.error("MatrixChannel: media send error in {}: {}", room_id, resp2)
+            return
+        logger.debug(
+            "MatrixChannel: sent media room={} msgtype={} mxc={}", room_id, msgtype, mxc_uri
+        )
 
     # ── Attachment download ──────────────────────────────────────────────────
 

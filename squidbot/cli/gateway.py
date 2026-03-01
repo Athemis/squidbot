@@ -137,6 +137,11 @@ async def _channel_loop_with_state(
             ),
         ]
         user_payload = inbound.multimodal_content if inbound.multimodal_content else inbound.text
+        logger.debug(
+            "gateway: dispatching session={} multimodal={}",
+            inbound.session.id,
+            inbound.multimodal_content is not None,
+        )
         await loop.run(
             inbound.session,
             user_payload,
@@ -176,6 +181,11 @@ async def _channel_loop(
             ),
         ]
         user_payload = inbound.multimodal_content if inbound.multimodal_content else inbound.text
+        logger.debug(
+            "gateway: dispatching session={} multimodal={}",
+            inbound.session.id,
+            inbound.multimodal_content is not None,
+        )
         await loop.run(
             inbound.session,
             user_payload,
