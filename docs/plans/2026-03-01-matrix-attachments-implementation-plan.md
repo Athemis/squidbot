@@ -147,7 +147,7 @@ git commit -m "feat: allow agent loop to handle multimodal user messages"
 
 ---
 
-### Task 4: Add config defaults for safe media handling
+### Task 4: Add config defaults for safe inbound/outbound media handling
 
 **Files:**
 - Modify: `squidbot/config/schema.py`
@@ -162,6 +162,7 @@ def test_matrix_media_limits_defaults() -> None:
     s = Settings()
     assert s.channels.matrix.max_inbound_download_bytes == 50 * 1024 * 1024
     assert s.channels.matrix.max_inbound_embed_bytes == 2 * 1024 * 1024
+    assert s.channels.matrix.max_outbound_upload_bytes == 20 * 1024 * 1024
 ```
 
 **Step 2: Run to verify failure**
@@ -178,6 +179,7 @@ In `MatrixChannelConfig` add:
 ```python
 max_inbound_download_bytes: int = 50 * 1024 * 1024
 max_inbound_embed_bytes: int = 2 * 1024 * 1024
+max_outbound_upload_bytes: int = 20 * 1024 * 1024
 ```
 
 **Step 4: Re-run tests**
@@ -191,7 +193,7 @@ Expected: PASS.
 
 ```bash
 git add squidbot/config/schema.py tests/config/test_schema.py
-git commit -m "feat: add matrix inbound download and embed size limits"
+git commit -m "feat: add matrix inbound and outbound media size thresholds"
 ```
 
 ---
@@ -207,6 +209,8 @@ git commit -m "feat: add matrix inbound download and embed size limits"
 Add tests:
 - upload call receives `io.BytesIO` as first argument
 - `send()` uploads each attachment in `message.attachment`
+- when homeserver upload cap is available, effective limit uses `min(local, server)`
+- file exceeding effective outbound limit is skipped
 
 **Step 2: Run to verify failure**
 
@@ -220,6 +224,9 @@ Expected: FAIL.
 - Add `import io`.
 - Replace broken lambda upload argument with `io.BytesIO(data)`.
 - Update `send()` to iterate `for path in message.attachment:`.
+- Add helper that fetches/caches homeserver upload limit (`content_repository_config().upload_size`).
+- Compute `effective_outbound_limit = min(max_outbound_upload_bytes, server_upload_limit)` when server limit exists.
+- Skip uploads above effective limit and emit debug reason `exceeds_outbound_limit`.
 - Preserve existing behavior: send text even if attachment send fails.
 
 **Step 4: Re-run tests**
@@ -233,7 +240,7 @@ Expected: PASS.
 
 ```bash
 git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
-git commit -m "fix(matrix): use BytesIO for uploads and support multiple outbound attachments"
+git commit -m "fix(matrix): use BytesIO, server-aware upload limits, and multiple outbound attachments"
 ```
 
 ---
@@ -265,7 +272,7 @@ In `matrix.py`:
 - Define `EMBEDDABLE_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})`
 - Check declared size first (if available) against `max_inbound_download_bytes`
 - Only embed when MIME in allowlist and bytes <= `max_inbound_embed_bytes`
-- Fallback to text path otherwise
+- Non-allowlist files are still downloaded and persisted, then forwarded as text path
 
 **Step 4: Re-run tests**
 
@@ -291,25 +298,28 @@ git commit -m "feat(matrix): add inbound image embedding guardrails and MIME all
 
 **Step 1: Write failing test**
 
-Add test: when `OutboundMessage.attachment` contains two files, Email channel uses the first file as MIME attachment.
+Add test: when `OutboundMessage.attachment` contains two files, Email channel attaches both files to the outgoing MIME message.
 
 **Step 2: Run to verify failure**
 
 Run:
-`uv run pytest tests/adapters/channels/test_email.py -k "first_attachment" -v`
+`uv run pytest tests/adapters/channels/test_email.py -k "multiple_attachments" -v`
 
 Expected: FAIL.
 
 **Step 3: Implement compatibility behavior**
 
 In `email.py`:
-- Replace `if message.attachment and message.attachment.exists():`
-- With first-element contract:
+- Replace single-path check with iteration over `message.attachment`.
+- Build multipart/mixed once when at least one file exists.
+- For each existing path, create one MIME part and attach it.
 
 ```python
-attachment = message.attachment[0] if message.attachment else None
-if attachment and attachment.exists():
+attachments = [p for p in message.attachment if p.exists()]
+if attachments:
     ...
+    for attachment in attachments:
+        ...
 ```
 
 Keep MIME creation unchanged.
@@ -325,7 +335,7 @@ Expected: PASS.
 
 ```bash
 git add squidbot/adapters/channels/email.py tests/adapters/channels/test_email.py
-git commit -m "fix(email): support list attachment contract by using first item"
+git commit -m "feat(email): attach all files from list-based attachment contract"
 ```
 
 ---
@@ -468,9 +478,10 @@ gh pr create --title "feat(matrix): fix attachment upload and add safe inbound m
 
 - fix matrix outbound upload by using `io.BytesIO`
 - support multiple outbound attachments in Matrix
+- respect homeserver-advertised upload cap (`m.upload.size`) with local threshold
 - add safe inbound image embedding with MIME allowlist and size guardrails
 - forward multimodal inbound payloads via `cli/gateway.py`
-- keep Email behavior compatible with list-based attachment contract
+- attach all files in Email for list-based attachment contract
 - add lightweight debug logs for attachment decisions
 
 ## Docs

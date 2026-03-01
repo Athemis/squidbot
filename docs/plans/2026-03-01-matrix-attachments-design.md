@@ -42,10 +42,10 @@ squidbot's design differs: we *do* embed images as Base64 for vision models, whi
 squidbot/core/models.py              ← Message.content type + OutboundMessage.attachment type
 squidbot/core/agent.py               ← user_message type + Message construction
 squidbot/adapters/channels/matrix.py ← upload fix + inbound multimodal builder
-squidbot/adapters/channels/email.py  ← adapt to list[Path] (use first element)
+squidbot/adapters/channels/email.py  ← adapt to list[Path] (attach all existing files)
 squidbot/adapters/channels/cli.py    ← no change (ignores attachment field)
 squidbot/cli/gateway.py              ← dispatch multimodal_content to agent.run()
-squidbot/config/schema.py            ← max_inbound_media_bytes config
+squidbot/config/schema.py            ← inbound/outbound media thresholds
 tests/core/test_models.py            ← Message.to_openai_dict multimodal tests
 tests/adapters/channels/test_matrix.py ← upload + inbound + outbound tests
 tests/config/test_schema.py          ← config default tests
@@ -56,10 +56,10 @@ tests/config/test_schema.py          ← config default tests
 | Channel | `OutboundMessage.attachment` Behavior |
 |---------|---------------------------------------|
 | Matrix  | Iterate all paths, upload+send each as separate media event |
-| Email   | Use first element only (`attachment[0]` if non-empty) |
+| Email   | Iterate all paths and add each existing file as MIME attachment |
 | CLI     | Ignore attachment field (text-only) |
 
-**Rationale:** Email MIME structure expects a single attachment per message. Matrix supports multiple media events. CLI is text-only.
+**Rationale:** Attaching multiple files to one email is a normal and useful behavior; Matrix maps each file to one media event; CLI remains text-only.
 
 ### `Message.content` — Multimodal Extension
 
@@ -77,7 +77,7 @@ Changed from `Path | None` to `list[Path]`. Default is `[]` (empty list).
 
 **Migration for existing channels:**
 - **Matrix:** Iterate list, send each as separate media event
-- **Email:** Use `attachment[0]` if list non-empty, else no attachment
+- **Email:** Iterate list and attach each existing file to one outgoing email
 - **CLI:** No change (already ignores attachment)
 
 ### Inbound Multimodal Flow
@@ -136,7 +136,7 @@ resp = await self._client.upload(
 
 `upload()` accepts either a `DataProvider` callable with signature `(offset, limit) -> bytes` OR a SynchronousFile (BytesIO, BufferedReader, etc.). `BytesIO` is the simplest and correct choice for in-memory data.
 
-### Size Limits and MIME Allowlist
+### Size Limits, MIME Allowlist, and Homeserver Upload Cap
 
 **Two-threshold policy:**
 
@@ -144,6 +144,7 @@ resp = await self._client.upload(
 |-----------|---------|---------|
 | `max_download_bytes` | 50 MB | Hard cap on download size (memory protection) |
 | `max_embed_bytes` | 2 MB | Cap for Base64 embedding (LLM request budget) |
+| `max_outbound_upload_bytes` | 20 MB | Local cap for outbound upload attempts |
 
 **MIME Allowlist for Embedding:**
 
@@ -157,6 +158,20 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset({
 ```
 
 **SVG (`image/svg+xml`) is explicitly excluded** — it's XML, not a raster format, and can cause provider-specific handling issues.
+
+**What happens for files outside the allowlist?**
+- They are still downloaded (unless blocked by `max_download_bytes`) and persisted locally.
+- They are forwarded as text-path context only (no `image_url` Base64 block).
+- This preserves tool-based access (`read_file`, etc.) without bloating LLM payloads.
+
+**Homeserver upload limit integration (`m.upload.size`):**
+- Matrix homeservers may expose upload cap via `/_matrix/media/*/config` (`m.upload.size`).
+- Channel resolves this once (cached) and computes:
+
+`effective_outbound_limit = min(max_outbound_upload_bytes, server_upload_limit_if_present)`
+
+- If server limit is unavailable, only local threshold applies.
+- If a file exceeds the effective limit, skip upload and log debug reason `exceeds_outbound_limit`.
 
 **Fallback reasons logged at DEBUG level:**
 - `non-image` — MIME not in allowlist
@@ -181,7 +196,8 @@ Both loops call `agent.run()`. Update to pass `msg.multimodal_content or msg.tex
 | Base64 encoding error | Text-path fallback, log warning |
 | Image > embed limit | Text-path fallback, log debug with reason |
 | Declared size > download limit | Skip download, text `[Anhang: zu groß]`, log debug |
-| MIME not in allowlist | Text-path fallback, log debug |
+| MIME not in allowlist | Download + local persistence + text-path fallback, log debug |
+| Outbound file > effective outbound limit | Skip upload, log debug (`exceeds_outbound_limit`) |
 | Upload fails (outbound) | `logger.error` + skip file |
 | All attachments fail | Text reply still sent |
 
@@ -201,8 +217,10 @@ Both loops call `agent.run()`. Update to pass `msg.multimodal_content or msg.tex
 - `test_download_attachment_declared_size_exceeds_download_limit`: skip download
 - `test_send_attachment_uses_bytesio`: mock upload → assert BytesIO called
 - `test_send_multiple_attachments`: two paths → two upload calls
-- `test_email_channel_uses_first_attachment`: list[Path] → first element used
-- `test_matrix_channel_config_max_media_bytes_default`: config default = 2MB embed, 50MB download
+- `test_email_channel_attaches_all_files`: list[Path] → all existing files attached
+- `test_matrix_channel_config_media_defaults`: config defaults = 2MB embed, 50MB download, 20MB outbound local cap
+- `test_effective_outbound_limit_uses_server_upload_size_when_available`
+- `test_outbound_upload_skips_when_exceeding_effective_limit`
 
 ### Integration Tests
 
