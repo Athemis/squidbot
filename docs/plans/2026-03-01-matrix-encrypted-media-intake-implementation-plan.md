@@ -4,10 +4,14 @@
 
 **Goal:** Ensure encrypted and unencrypted Matrix uploads are consistently surfaced to the agent.
 
-**Architecture:** Add diagnostics first, then implement dual media callback handling and
-normalized encrypted payload extraction in the Matrix adapter. Keep current guardrails,
-validate mention-policy media behavior, and add a `BadEvent` fallback only if logs prove
-callback miss.
+**Architecture:** Fix two separate failure modes: (A) register `RoomEncryptedMedia` callback for
+E2EE Megolm rooms, (B) add `BadEvent` fallback for non-E2EE clients using `content.file` shape.
+Fix the pre-existing `decrypt_attachment` call-site bug (dict arg → positional string args).
+Add diagnostics. Preserve mention-policy safety.
+
+**Reference implementation:** `~/projects/nanobot-redux/nanobot/channels/matrix.py` — this has
+a working dual-callback setup (`MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)`)
+and correct `_decrypt_media_bytes` using positional string args. Port the relevant patterns.
 
 **Tech Stack:** Python 3.14, matrix-nio, Loguru, pytest, mypy --strict, ruff.
 
@@ -18,74 +22,108 @@ callback miss.
 **Files:**
 - Modify: `tests/adapters/channels/test_matrix.py`
 
-**Step 1: Write failing callback coverage test**
+**Step 1: Write failing callback registration test**
 
-Assert both that `nio.RoomEncryptedMedia` is registered AND that it is registered with
-`_handle_media` specifically (not another handler):
+Assert that `(RoomMessageMedia, RoomEncryptedMedia)` tuple is registered with `_handle_media`,
+AND that `BadEvent` is registered with `_handle_bad_event`:
 
 ```python
-async def test_registers_room_message_and_room_encrypted_media_callbacks() -> None:
-    # assert nio.RoomEncryptedMedia in registered_types
+async def test_registers_room_message_media_encrypted_media_and_bad_event_callbacks() -> None:
     # assert any(
-    #     c.args == (ch._handle_media, nio.RoomEncryptedMedia)
+    #     c.args == (ch._handle_media,) and
+    #     set(c.args[1]) == {nio.RoomMessageMedia, nio.RoomEncryptedMedia}  # tuple filter
     #     for c in fake_client.add_event_callback.call_args_list
-    # ), "RoomEncryptedMedia must be registered with _handle_media, not another handler"
+    # )
+    # assert any(
+    #     c.args == (ch._handle_bad_event, nio.BadEvent)
+    #     for c in fake_client.add_event_callback.call_args_list
+    # )
     ...
 ```
 
-**Step 2: Write failing encrypted payload test (third URL fallback)**
-
-This tests the shape where `event.url = ""`, `event.file = None`, but
-`source["content"]["file"]["url"]` contains the mxc URL:
+**Step 2: Write failing test — BadEvent with media shape routes to pipeline**
 
 ```python
-async def test_encrypted_file_with_content_file_url_is_processed() -> None:
-    # event.url = "", event.file = None
-    # event.source["content"]["file"]["url"] = "mxc://..."
-    # assert download called with correct server_name and media_id
+async def test_bad_event_with_media_shape_routes_to_media_pipeline() -> None:
+    # event = nio.BadEvent with source["content"] = {
+    #     "msgtype": "m.file", "body": "doc.pdf",
+    #     "file": {"url": "mxc://example.com/abc", "key": {...}, "iv": "...", "hashes": {...}}
+    # }
+    # assert InboundMessage queued with attachment
     ...
 ```
 
-**Step 3: Write failing encrypted payload test (key material from source)**
-
-Tests the case where key material (`key`, `iv`, `hashes`) is in `source["content"]["file"]`
-and `event.file is None`:
+**Step 3: Write failing test — non-media BadEvent is ignored**
 
 ```python
-async def test_encrypted_file_key_material_extracted_from_source_when_event_file_is_none() -> None:
-    # event.file = None, event.url = ""
-    # event.source["content"]["file"] = {"url": "mxc://...", "key": {...}, "iv": "...", "hashes": {...}}
-    # assert decrypt called with key material from source
+async def test_bad_event_without_media_shape_is_ignored() -> None:
+    # event = nio.BadEvent with source["content"] = {"msgtype": "m.text", "body": "hi"}
+    # assert no InboundMessage queued
     ...
 ```
 
-**Step 4: Write failing mention-policy media test**
+**Step 4: Write failing test — RoomEncryptedMedia decrypt uses positional string args**
+
+```python
+async def test_room_encrypted_media_decrypt_uses_key_k_and_hashes_sha256() -> None:
+    # event = nio.RoomEncryptedFile with:
+    #   event.url = "mxc://example.com/enc"
+    #   event.key = {"k": "base64key", "kty": "oct", ...}
+    #   event.hashes = {"sha256": "base64hash"}
+    #   event.iv = "base64iv"
+    # mock decrypt_attachment, assert called with (ciphertext, "base64key", "base64hash", "base64iv")
+    # NOT called with a dict
+    ...
+```
+
+**Step 5: Write failing test — BadEvent decrypt uses source["content"]["file"] key material**
+
+```python
+async def test_bad_event_media_decrypt_uses_source_content_file_key_material() -> None:
+    # BadEvent with source["content"]["file"] = {
+    #   "url": "mxc://...", "key": {"k": "base64key", ...},
+    #   "iv": "base64iv", "hashes": {"sha256": "base64hash"}
+    # }
+    # mock decrypt_attachment, assert called with positional strings from file dict
+    ...
+```
+
+**Step 6: Write failing mention-policy media test**
 
 ```python
 async def test_media_event_not_dropped_only_due_to_filename_without_mention() -> None:
+    # group_policy = "mention", event msgtype in {m.image, m.file, m.audio, m.video}
+    # event.body = "photo.jpg" (no bot mention)
+    # assert event is accepted
     ...
 ```
 
-**Step 5: Write test for malformed declared_size**
+**Step 7: Write failing test — malformed declared_size does not block download**
 
 ```python
 async def test_malformed_declared_size_does_not_block_download() -> None:
     # event.info.size = "not-a-number"
-    # assert download is still attempted (post-fetch guard applies, preflight guard bypassed)
+    # assert download is still attempted (post-fetch guard applies)
     ...
 ```
 
-**Step 6: Run tests to verify RED**
+**Step 8: Run tests to verify RED**
 
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "encrypted_file or callback or mention or declared_size" -v`
-Expected: FAIL.
+```
+uv run pytest tests/adapters/channels/test_matrix.py \
+  -k "bad_event or encrypted_media or callback or mention or declared_size" -v
+```
 
-**Step 7: Commit red tests**
+Expected: FAIL on all new tests.
+
+**Step 9: Commit red tests**
 
 ```bash
 git add tests/adapters/channels/test_matrix.py
 git commit -m "test(matrix): add failing encrypted media intake coverage"
 ```
+
+---
 
 ### Task 2: Add parser/routing diagnostics
 
@@ -95,27 +133,29 @@ git commit -m "test(matrix): add failing encrypted media intake coverage"
 
 **Step 1: Write failing diagnostic assertion test**
 
-Assert the exact log format strings from the design doc:
-
 ```python
 async def test_debug_logs_include_event_class_and_media_shape() -> None:
     # capture loguru output at DEBUG level
-    # assert log contains: "MatrixChannel: classify event=... class=... msgtype=... has_url=... has_file_url=... has_key_material=..."
-    # assert log contains: "MatrixChannel: policy event=... result=... reason=..."
+    # assert log contains:
+    #   "MatrixChannel: classify event=... class=... msgtype=... has_url=... has_file_url=... has_key_material=..."
+    #   "MatrixChannel: policy event=... result=... reason=..."
     ...
 ```
 
 **Step 2: Run to verify RED**
 
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "debug_logs_include_event_class" -v`
+```
+uv run pytest tests/adapters/channels/test_matrix.py -k "debug_logs_include_event_class" -v
+```
+
 Expected: FAIL.
 
 **Step 3: Implement debug logging boundaries**
 
-Add `logger.debug(...)` at five boundaries using the exact log format from the design doc:
+Add `logger.debug(...)` at five boundaries using exact log format from design doc:
 
 | Boundary | Log format |
-|----------|------------|
+|---|---|
 | Callback registration | `"MatrixChannel: registered callbacks classes={}"` |
 | Event classification | `"MatrixChannel: classify event={} class={} msgtype={} has_url={} has_file_url={} has_key_material={}"` |
 | Policy decision | `"MatrixChannel: policy event={} result={} reason={}"` |
@@ -125,9 +165,12 @@ Add `logger.debug(...)` at five boundaries using the exact log format from the d
 Reason codes: `accepted`, `policy_filtered`, `missing_media_url`, `decryption_failed`,
 `size_exceeded`, `embedded`, `not_embedded`.
 
-**Step 4: Re-run diagnostic tests**
+**Step 4: Re-run diagnostic test**
 
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "debug_logs_include_event_class" -v`
+```
+uv run pytest tests/adapters/channels/test_matrix.py -k "debug_logs_include_event_class" -v
+```
+
 Expected: PASS.
 
 **Step 5: Commit diagnostics**
@@ -137,60 +180,94 @@ git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix
 git commit -m "feat(matrix): add inbound media parser diagnostics"
 ```
 
-### Task 3: Implement dual callback handling + normalized extraction
+---
+
+### Task 3: Implement dual callback registration + fix decrypt call
 
 **Files:**
 - Modify: `squidbot/adapters/channels/matrix.py`
-- Modify: `tests/adapters/channels/test_matrix.py`
 
-**Step 1: Register both callback classes**
-
-- `nio.RoomMessageMedia`
-- `nio.RoomEncryptedMedia` — registered with `_handle_media`
-
-**Step 2: Implement `_extract_media_url` helper**
-
-Three-level URL fallback with safe `.get()` access throughout:
+**Step 1: Define `MEDIA_EVENT_FILTER` constant**
 
 ```python
-def _extract_media_url(event: Any) -> str:
-    """Return the first non-empty mxc:// URL from event using three-level fallback."""
-    return (
-        getattr(event, "url", "") or
-        getattr(getattr(event, "file", None), "url", "") or
-        event.source.get("content", {}).get("file", {}).get("url", "") or
-        ""
-    )
+MEDIA_EVENT_FILTER = (nio.RoomMessageMedia, nio.RoomEncryptedMedia)
 ```
 
-**Step 3: Implement key-material extraction helper**
-
-When `event.file is None`, extract key material from `source["content"]["file"]`:
+**Step 2: Register callbacks in `_register_callbacks`**
 
 ```python
-def _extract_key_material(event: Any) -> tuple[dict, str, dict] | None:
-    """Return (key, iv, hashes) from event or source, or None if unavailable."""
-    if getattr(event, "key", None):
-        return event.key, event.iv, event.hashes
-    source_file = event.source.get("content", {}).get("file", {})
-    if source_file.get("key"):
-        return source_file["key"], source_file["iv"], source_file["hashes"]
-    return None
+self._client.add_event_callback(self._handle_media, MEDIA_EVENT_FILTER)
+self._client.add_event_callback(self._handle_bad_event, nio.BadEvent)
 ```
 
-**Step 4: Route both classes through same media processing path**
+**Step 3: Implement `_handle_bad_event`**
 
-**Step 5: Run focused tests**
+```python
+async def _handle_bad_event(self, room: nio.MatrixRoom, event: nio.BadEvent) -> None:
+    """Route media-shaped BadEvent into the media pipeline; ignore all others."""
+    if not _is_media_shaped_bad_event(event):
+        return
+    # delegate to shared media processing path
+```
 
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "encrypted_file or callback" -v`
+**Step 4: Implement `_is_media_shaped_bad_event`**
+
+```python
+MEDIA_MSGTYPES = {"m.image", "m.file", "m.audio", "m.video"}
+
+def _is_media_shaped_bad_event(event: nio.BadEvent) -> bool:
+    content = event.source.get("content", {})
+    msgtype = content.get("msgtype", "")
+    has_file_url = bool(content.get("file", {}).get("url", ""))
+    return msgtype in MEDIA_MSGTYPES and has_file_url
+```
+
+**Step 5: Fix `decrypt_attachment` call (pre-existing bug at line ~773)**
+
+Replace the dict-based call with positional string extraction. For `RoomEncryptedMedia`
+events (direct attrs):
+
+```python
+from nio.crypto.attachments import decrypt_attachment
+from nio.exceptions import EncryptionError
+
+key = event.key.get("k") if isinstance(event.key, dict) else None
+sha256 = event.hashes.get("sha256") if isinstance(event.hashes, dict) else None
+iv = event.iv if isinstance(event.iv, str) else None
+if not (key and sha256 and iv):
+    # log warning, return error marker
+body = decrypt_attachment(body, key, sha256, iv)
+```
+
+For `BadEvent` (source dict path):
+
+```python
+content_file = event.source["content"]["file"]
+key = content_file.get("key", {}).get("k")
+sha256 = content_file.get("hashes", {}).get("sha256")
+iv = content_file.get("iv")
+if not (key and sha256 and iv):
+    # log warning, return error marker
+body = decrypt_attachment(body, key, sha256, iv)
+```
+
+**Step 6: Run focused tests**
+
+```
+uv run pytest tests/adapters/channels/test_matrix.py \
+  -k "bad_event or callback or encrypted_media" -v
+```
+
 Expected: PASS.
 
-**Step 6: Commit implementation**
+**Step 7: Commit**
 
 ```bash
 git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
-git commit -m "fix(matrix): handle room media and encrypted media event classes"
+git commit -m "fix(matrix): register RoomEncryptedMedia callback and BadEvent fallback"
 ```
+
+---
 
 ### Task 4: Validate mention-policy behavior for media events
 
@@ -198,25 +275,17 @@ git commit -m "fix(matrix): handle room media and encrypted media event classes"
 - Modify: `squidbot/adapters/channels/matrix.py`
 - Modify: `tests/adapters/channels/test_matrix.py`
 
-**Step 1: Write failing media policy regression tests**
+**Step 1: Run failing mention-policy test from Task 1 Step 6**
 
-Test all four media msgtypes:
-
-```python
-async def test_mention_policy_accepts_media_event_without_textual_mention_marker() -> None:
-    # m.image, m.file, m.audio, m.video — all must be accepted in mention-policy rooms
-    # even when body (filename) contains no bot mention
-    ...
+```
+uv run pytest tests/adapters/channels/test_matrix.py -k "mention_policy" -v
 ```
 
-**Step 2: Run to verify RED**
-
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "mention_policy_accepts_media_event" -v`
 Expected: FAIL.
 
-**Step 3: Implement mention-policy fix in `_accept_event`**
+**Step 2: Add `MEDIA_MSGTYPES` bypass in `_accept_event`**
 
-Before the body-based mention check, add:
+Before the body-based mention check:
 
 ```python
 MEDIA_MSGTYPES = {"m.image", "m.file", "m.audio", "m.video"}
@@ -226,15 +295,15 @@ if msgtype in MEDIA_MSGTYPES:
     return True  # skip mention check for all media uploads
 ```
 
-This bypasses the mention check for all four media msgtypes. Text events (`m.text`,
-`m.notice`, `m.emote`) continue to require a textual mention.
+**Step 3: Re-run mention-policy tests**
 
-**Step 4: Re-run mention policy subset**
+```
+uv run pytest tests/adapters/channels/test_matrix.py -k "mention_policy" -v
+```
 
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "mention_policy" -v`
 Expected: PASS.
 
-**Step 5: Commit policy fix**
+**Step 4: Commit**
 
 ```bash
 git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
@@ -243,78 +312,49 @@ git commit -m "fix(matrix): avoid false mention-policy drops for media events"
 
 ---
 
-**Decision gate (Task 5 trigger):** After deploying Task 3 and Task 4, run
-`LOG_LEVEL=DEBUG uv run squidbot gateway` and send an encrypted file from a Matrix client.
-Search logs for `MatrixChannel: _handle_media`. If no such line appears for the upload event,
-proceed to Task 5. If `_handle_media` is called, mark Task 5 as skipped and proceed to Task 6.
-
----
-
-### Task 5 (Conditional): Add BadEvent fallback if diagnostics prove callback miss
-
-**Files:**
-- Modify: `squidbot/adapters/channels/matrix.py`
-- Modify: `tests/adapters/channels/test_matrix.py`
-
-**Only run if the Task 5 decision gate above is triggered (no `_handle_media` log appears).**
-
-**Step 1: Add failing fallback test**
-
-```python
-async def test_bad_event_with_media_shape_routes_to_media_pipeline() -> None:
-    ...
-```
-
-**Step 2: Verify RED**
-
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "bad_event" -v`
-Expected: FAIL.
-
-**Step 3: Implement guarded fallback**
-
-Only route media-shaped bad events (`msgtype` in `MEDIA_MSGTYPES` + `content.file.url`
-or `content.url`).
-
-**Step 4: Re-run fallback tests**
-
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -k "bad_event" -v`
-Expected: PASS.
-
-**Step 5: Commit fallback**
-
-```bash
-git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
-git commit -m "fix(matrix): add guarded bad-event fallback for encrypted media"
-```
-
-### Task 6: Full verification
+### Task 5: Full verification
 
 **Files:**
 - Modify: none
 
-**Step 1: Run matrix adapter suite**
+**Step 1: Run full matrix adapter suite**
 
-Run: `uv run pytest tests/adapters/channels/test_matrix.py -v`
-Expected: PASS.
+```
+uv run pytest tests/adapters/channels/test_matrix.py -v
+```
+
+Expected: all PASS.
 
 **Step 2: Run lint**
 
-Run: `uv run ruff check .`
+```
+uv run ruff check .
+```
+
 Expected: PASS.
 
 **Step 3: Run format check**
 
-Run: `uv run ruff format . --check`
+```
+uv run ruff format . --check
+```
+
 Expected: PASS.
 
-**Step 4: Run typing**
+**Step 4: Run type-check**
 
-Run: `uv run mypy squidbot/`
+```
+uv run mypy squidbot/
+```
+
 Expected: PASS.
 
-**Step 5: Run full tests**
+**Step 5: Run full test suite**
 
-Run: `uv run pytest`
+```
+uv run pytest
+```
+
 Expected: PASS.
 
 **Step 6: Final integration commit**
