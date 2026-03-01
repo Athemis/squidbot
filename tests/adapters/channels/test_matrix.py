@@ -553,7 +553,7 @@ class TestMatrixRoomMembershipLogging:
         ):
             ch._log_room_membership_snapshot()
 
-        info_log.assert_called_once_with("MatrixChannel: currently joined {} room(s)", 2)
+        info_log.assert_not_called()
         warn_log.assert_called_once_with(
             "MatrixChannel: not joined to configured room(s): {}",
             "!room2:example.org",
@@ -736,11 +736,7 @@ class TestMatrixChannelE2ee:
         with patch("squidbot.adapters.channels.matrix.logger.info") as info_log:
             await ch._sync_loop()
 
-        info_log.assert_any_call(
-            "MatrixChannel: E2EE readiness={} joined_rooms={}",
-            "enabled",
-            1,
-        )
+        info_log.assert_any_call("MatrixChannel: E2EE readiness=enabled")
 
     async def test_sync_loop_logs_degraded_readiness_reason(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
@@ -760,9 +756,7 @@ class TestMatrixChannelE2ee:
             await ch._sync_loop()
 
         warn_log.assert_any_call(
-            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-            "degraded",
-            1,
+            "MatrixChannel: E2EE readiness=degraded reason={}",
             "ImportWarning",
         )
 
@@ -783,9 +777,7 @@ class TestMatrixChannelE2ee:
             await ch._sync_loop()
 
         warn_log.assert_any_call(
-            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-            "degraded",
-            0,
+            "MatrixChannel: E2EE readiness=degraded reason={}",
             "ImportWarning",
         )
 

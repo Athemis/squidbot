@@ -302,22 +302,15 @@ class MatrixChannel:
         assert self._client is not None
         try:
             snapshot = await self._client.sync(timeout=30_000, full_state=True)
-            joined_rooms = 0
             if isinstance(snapshot, nio.SyncError):
                 logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
             else:
-                joined_rooms = self._log_room_membership_snapshot()
+                self._log_room_membership_snapshot()
             if self._e2ee_available:
-                logger.info(
-                    "MatrixChannel: E2EE readiness={} joined_rooms={}",
-                    "enabled",
-                    joined_rooms,
-                )
+                logger.info("MatrixChannel: E2EE readiness=enabled")
             else:
                 logger.warning(
-                    "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-                    "degraded",
-                    joined_rooms,
+                    "MatrixChannel: E2EE readiness=degraded reason={}",
                     self._e2ee_degraded_reason or "unknown",
                 )
             await self._client.sync_forever(timeout=30_000, full_state=True)
@@ -514,11 +507,10 @@ class MatrixChannel:
         return meta
 
     def _log_room_membership_snapshot(self) -> int:
-        """Log a snapshot of currently joined rooms and missing configured rooms."""
+        """Warn about configured rooms the bot has not joined."""
         assert self._client is not None
         joined_room_ids = set(self._client.rooms)
         joined_count = len(joined_room_ids)
-        logger.info("MatrixChannel: currently joined {} room(s)", joined_count)
 
         configured = self._config.room_ids
         if not configured:
