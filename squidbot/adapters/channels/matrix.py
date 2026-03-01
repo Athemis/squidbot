@@ -277,7 +277,6 @@ class MatrixChannel:
 
         client.access_token = cfg.access_token
         client.user_id = cfg.user_id
-        client.device_id = cfg.device_id
         if self._e2ee_available:
             try:
                 client.load_store()
