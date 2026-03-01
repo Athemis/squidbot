@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import io
 import mimetypes
 import re
 from collections.abc import AsyncIterator
@@ -177,6 +178,7 @@ class MatrixChannel:
         self._client: nio.AsyncClient | None = None
         self._e2ee_available: bool = False
         self._e2ee_degraded_reason: str | None = None
+        self._server_upload_limit: int | None = None  # cached homeserver cap
 
     # ── ChannelPort interface ────────────────────────────────────────────────
 
@@ -190,7 +192,7 @@ class MatrixChannel:
             yield msg
 
     async def send(self, message: OutboundMessage) -> None:
-        """Send a message (and optional attachment) to Matrix."""
+        """Send a message (and optional attachments) to Matrix."""
         assert self._client is not None
         room_id = message.metadata.get("matrix_room_id", "")
         if not isinstance(room_id, str) or not room_id:
@@ -200,11 +202,25 @@ class MatrixChannel:
         thread_root_raw = message.metadata.get("matrix_thread_root")
         thread_root: str | None = thread_root_raw if isinstance(thread_root_raw, str) else None
 
-        # Send attachment first if present
-        if message.attachment and message.attachment.exists():
-            await self._send_attachment(room_id, message.attachment, thread_root)
+        # Resolve effective outbound upload limit (min of local and homeserver cap).
+        effective_limit = await self._effective_outbound_limit()
 
-        # Send text (skip if empty and attachment was sent)
+        # Send each attachment first; text reply follows regardless of attachment outcome.
+        for path in message.attachment:
+            if not path.exists():
+                continue
+            file_size = path.stat().st_size
+            if file_size > effective_limit:
+                logger.debug(
+                    "MatrixChannel: skip outbound path={} size={} limit={} reason=exceeds_outbound_limit",
+                    path,
+                    file_size,
+                    effective_limit,
+                )
+                continue
+            await self._send_attachment(room_id, path, thread_root)
+
+        # Send text (skip if empty and at least one attachment was present in the list).
         if message.text or not message.attachment:
             await self._send_text(room_id, message.text, thread_root)
 
@@ -541,6 +557,26 @@ class MatrixChannel:
 
     # ── Sending helpers ──────────────────────────────────────────────────────
 
+    async def _effective_outbound_limit(self) -> int:
+        """Return effective outbound upload limit (min of local config and homeserver cap).
+
+        Fetches the homeserver's upload limit once and caches it for subsequent calls.
+        If the homeserver limit is unavailable or raises, only the local threshold applies.
+
+        Returns:
+            Effective upload size limit in bytes.
+        """
+        assert self._client is not None
+        local_limit = self._config.max_outbound_upload_bytes
+        if self._server_upload_limit is None:
+            try:
+                resp = await self._client.content_repository_config()
+                server_cap = getattr(resp, "upload_size", None)
+                self._server_upload_limit = int(server_cap) if server_cap else local_limit
+            except Exception:  # noqa: BLE001
+                self._server_upload_limit = local_limit
+        return min(local_limit, self._server_upload_limit)
+
     async def _send_text(self, room_id: str, text: str, thread_root: str | None) -> None:
         """Send a text message to Matrix with optional thread context."""
         assert self._client is not None
@@ -576,7 +612,7 @@ class MatrixChannel:
 
         data = await asyncio.to_thread(path.read_bytes)
         resp = await self._client.upload(
-            data_provider=lambda *_: data,
+            io.BytesIO(data),
             content_type=mime,
             filename=path.name,
             filesize=len(data),

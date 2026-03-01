@@ -440,6 +440,8 @@ class TestMatrixChannelSend:
     @pytest.mark.asyncio
     async def test_send_attachment_uploads_and_sends_media_event(self, tmp_path: Path) -> None:
         """send() with attachment uploads the file and sends a media event."""
+        import io
+
         from squidbot.adapters.channels.matrix import MatrixChannel
         from squidbot.core.models import OutboundMessage, Session
 
@@ -450,10 +452,12 @@ class TestMatrixChannelSend:
         config = _make_config()
         ch = MatrixChannel(config=config)
         sent: list[dict[str, Any]] = []
+        upload_args: list[Any] = []
 
         async def fake_upload(
-            data_provider: Any, content_type: str, filename: str, filesize: int
+            data: Any, content_type: str, filename: str, filesize: int
         ) -> tuple[MagicMock, Any]:
+            upload_args.append(data)
             resp = MagicMock()
             resp.content_uri = "mxc://example.org/TestMediaId"
             return resp, None
@@ -472,17 +476,24 @@ class TestMatrixChannelSend:
         ch._client = MagicMock()
         ch._client.upload = fake_upload
         ch._client.room_send = fake_room_send
+        ch._client.content_repository_config = AsyncMock(return_value=MagicMock(upload_size=None))
 
         session = Session(channel="matrix", sender_id="@alice:example.org")
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=jpg,
+            attachment=[jpg],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
         with patch("squidbot.adapters.channels.matrix._detect_mime", return_value="image/jpeg"):
             await ch.send(msg)
+
+        # Upload must receive io.BytesIO, not a lambda
+        assert len(upload_args) == 1
+        assert isinstance(upload_args[0], io.BytesIO), (
+            f"Expected BytesIO but got {type(upload_args[0])}"
+        )
 
         # Should have sent one media event
         media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
@@ -490,6 +501,139 @@ class TestMatrixChannelSend:
         assert media_events[0]["content"]["url"] == "mxc://example.org/TestMediaId"
         assert media_events[0]["content"]["filename"] == "test.jpg"
         assert media_events[0]["ignore_unverified_devices"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_multiple_attachments_uploads_each(self, tmp_path: Path) -> None:
+        """send() with multiple attachments uploads and sends each as a separate media event."""
+        import io
+
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        jpg1 = tmp_path / "photo1.jpg"
+        jpg1.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\xd9")
+        jpg2 = tmp_path / "photo2.jpg"
+        jpg2.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9")
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        upload_calls: list[Any] = []
+        sent: list[dict[str, Any]] = []
+        media_id = 0
+
+        async def fake_upload(data: Any, content_type: str, filename: str, filesize: int) -> Any:
+            nonlocal media_id
+            upload_calls.append(data)
+            media_id += 1
+            resp = MagicMock()
+            resp.content_uri = f"mxc://example.org/Media{media_id}"
+            return resp, None
+
+        async def fake_room_send(
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
+        ) -> MagicMock:
+            sent.append({"content": content})
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = fake_room_send
+        ch._client.content_repository_config = AsyncMock(return_value=MagicMock(upload_size=None))
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=[jpg1, jpg2],
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        with patch("squidbot.adapters.channels.matrix._detect_mime", return_value="image/jpeg"):
+            await ch.send(msg)
+
+        assert len(upload_calls) == 2
+        assert all(isinstance(a, io.BytesIO) for a in upload_calls)
+        media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
+        assert len(media_events) == 2
+
+    @pytest.mark.asyncio
+    async def test_send_skips_attachment_exceeding_effective_outbound_limit(
+        self, tmp_path: Path
+    ) -> None:
+        """Attachment larger than effective outbound limit is skipped."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        big_file = tmp_path / "big.bin"
+        big_file.write_bytes(b"x" * 100)  # small content, but we'll fake a tiny limit
+
+        config = _make_config(max_outbound_upload_bytes=50)  # only 50 bytes allowed
+        ch = MatrixChannel(config=config)
+        upload_called = False
+
+        async def fake_upload(data: Any, content_type: str, filename: str, filesize: int) -> Any:
+            nonlocal upload_called
+            upload_called = True
+            return MagicMock(), None
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = AsyncMock(return_value=MagicMock())
+        ch._client.content_repository_config = AsyncMock(return_value=MagicMock(upload_size=None))
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=[big_file],
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        await ch.send(msg)
+
+        assert not upload_called, "Upload should have been skipped"
+
+    @pytest.mark.asyncio
+    async def test_send_uses_min_of_local_and_server_upload_limit(self, tmp_path: Path) -> None:
+        """Effective outbound limit uses min(local, server) when server limit is available."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        big_file = tmp_path / "medium.bin"
+        big_file.write_bytes(b"x" * 200)
+
+        # Local limit is 1000 bytes but server allows only 100 bytes
+        config = _make_config(max_outbound_upload_bytes=1000)
+        ch = MatrixChannel(config=config)
+        upload_called = False
+
+        async def fake_upload(data: Any, content_type: str, filename: str, filesize: int) -> Any:
+            nonlocal upload_called
+            upload_called = True
+            return MagicMock(), None
+
+        server_cfg = MagicMock()
+        server_cfg.upload_size = 100  # server limit is 100 bytes
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = AsyncMock(return_value=MagicMock())
+        ch._client.content_repository_config = AsyncMock(return_value=server_cfg)
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=[big_file],
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        await ch.send(msg)
+
+        assert not upload_called, "File exceeds server limit, upload should be skipped"
 
 
 class TestMatrixMediaMetadata:
