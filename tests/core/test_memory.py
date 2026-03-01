@@ -100,7 +100,7 @@ async def test_build_messages_includes_only_last_history_context_messages_labell
     assert len(messages) == 5  # system + 3 history + user
     history_messages = messages[1:-1]
     assert history_messages[0].content == "[cli / alice]\nkeep-1"
-    assert history_messages[1].content == "[cli / assistant]\nkeep-2"
+    assert history_messages[1].content == "keep-2"  # assistant messages are not labelled
     assert history_messages[2].content == "[cli / alice]\nkeep-3"
 
 

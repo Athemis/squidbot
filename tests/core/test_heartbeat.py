@@ -77,7 +77,7 @@ class _FakeChannel:
         self.sent.append(message.text)
         self.sent_messages.append(message)
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         pass
 
 

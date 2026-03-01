@@ -277,6 +277,17 @@ class MatrixChannel:
 
         client.access_token = cfg.access_token
         client.user_id = cfg.user_id
+        if self._e2ee_available:
+            try:
+                client.load_store()
+            except Exception as load_exc:  # noqa: BLE001
+                self._e2ee_available = False
+                self._e2ee_degraded_reason = f"StoreLoad:{type(load_exc).__name__}"
+                logger.warning(
+                    "MatrixChannel: E2EE store load failed ({}); "
+                    "falling back to degraded mode — encrypted messages will be undecryptable.",
+                    load_exc,
+                )
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
         # matrix-nio callback typing does not accept InviteMemberEvent here, even though
@@ -293,25 +304,18 @@ class MatrixChannel:
         assert self._client is not None
         try:
             snapshot = await self._client.sync(timeout=30_000, full_state=True)
-            joined_rooms = 0
             if isinstance(snapshot, nio.SyncError):
                 logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
             else:
-                joined_rooms = self._log_room_membership_snapshot()
+                self._log_room_membership_snapshot()
             if self._e2ee_available:
-                logger.info(
-                    "MatrixChannel: E2EE readiness={} joined_rooms={}",
-                    "enabled",
-                    joined_rooms,
-                )
+                logger.info("MatrixChannel: E2EE readiness=enabled")
             else:
                 logger.warning(
-                    "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-                    "degraded",
-                    joined_rooms,
+                    "MatrixChannel: E2EE readiness=degraded reason={}",
                     self._e2ee_degraded_reason or "unknown",
                 )
-            await self._client.sync_forever(timeout=30_000)
+            await self._client.sync_forever(timeout=30_000, full_state=True)
             logger.warning("MatrixChannel: sync_forever returned unexpectedly")
         except Exception as exc:  # noqa: BLE001
             logger.error("MatrixChannel: sync_forever error: {}", exc)
@@ -348,6 +352,12 @@ class MatrixChannel:
         """Handle m.reaction events — incoming emoji reactions."""
         event_source = getattr(event, "source", {})
         event_type = event_source.get("type", "")
+        logger.debug(
+            "MatrixChannel: _handle_reaction called type={} sender={} room={}",
+            event_type,
+            getattr(event, "sender", "?"),
+            getattr(event, "room_id", getattr(room, "room_id", "?")),
+        )
         if event_type == "m.room.encrypted":
             room_id = getattr(room, "room_id", getattr(event, "room_id", ""))
             sender = getattr(event, "sender", "")
@@ -499,11 +509,10 @@ class MatrixChannel:
         return meta
 
     def _log_room_membership_snapshot(self) -> int:
-        """Log a snapshot of currently joined rooms and missing configured rooms."""
+        """Warn about configured rooms the bot has not joined."""
         assert self._client is not None
         joined_room_ids = set(self._client.rooms)
         joined_count = len(joined_room_ids)
-        logger.info("MatrixChannel: currently joined {} room(s)", joined_count)
 
         configured = self._config.room_ids
         if not configured:
@@ -553,6 +562,7 @@ class MatrixChannel:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,
         )
         if isinstance(resp, nio.RoomSendError):
             logger.error("MatrixChannel: send error in {}: {}", room_id, resp)
@@ -599,6 +609,7 @@ class MatrixChannel:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,
         )
         if isinstance(resp2, nio.RoomSendError):
             logger.error("MatrixChannel: media send error in {}: {}", room_id, resp2)

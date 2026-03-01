@@ -347,9 +347,19 @@ class TestMatrixChannelSend:
         sent: list[dict[str, Any]] = []
 
         async def fake_room_send(
-            room_id: str, message_type: str, content: dict[str, Any]
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
         ) -> MagicMock:
-            sent.append({"room_id": room_id, "type": message_type, "content": content})
+            sent.append(
+                {
+                    "room_id": room_id,
+                    "type": message_type,
+                    "content": content,
+                    "ignore_unverified_devices": ignore_unverified_devices,
+                }
+            )
             return MagicMock()
 
         ch._client = MagicMock()
@@ -368,6 +378,7 @@ class TestMatrixChannelSend:
         assert sent[0]["content"]["msgtype"] == "m.text"
         assert sent[0]["content"]["body"] == "**hello**"
         assert "<strong>hello</strong>" in sent[0]["content"]["formatted_body"]
+        assert sent[0]["ignore_unverified_devices"] is True
 
     @pytest.mark.asyncio
     async def test_send_text_with_thread_root_adds_relates_to(self) -> None:
@@ -380,9 +391,14 @@ class TestMatrixChannelSend:
         sent: list[dict[str, Any]] = []
 
         async def fake_room_send(
-            room_id: str, message_type: str, content: dict[str, Any]
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
         ) -> MagicMock:
-            sent.append(content)
+            sent.append(
+                {"content": content, "ignore_unverified_devices": ignore_unverified_devices}
+            )
             return MagicMock()
 
         ch._client = MagicMock()
@@ -399,9 +415,10 @@ class TestMatrixChannelSend:
         )
         await ch.send(msg)
 
-        assert sent[0]["m.relates_to"]["rel_type"] == "m.thread"
-        assert sent[0]["m.relates_to"]["event_id"] == "$thread_root_456"
-        assert sent[0]["m.relates_to"]["is_falling_back"] is True
+        assert sent[0]["content"]["m.relates_to"]["rel_type"] == "m.thread"
+        assert sent[0]["content"]["m.relates_to"]["event_id"] == "$thread_root_456"
+        assert sent[0]["content"]["m.relates_to"]["is_falling_back"] is True
+        assert sent[0]["ignore_unverified_devices"] is True
 
     @pytest.mark.asyncio
     async def test_send_without_room_id_logs_and_drops(self) -> None:
@@ -442,9 +459,14 @@ class TestMatrixChannelSend:
             return resp, None
 
         async def fake_room_send(
-            room_id: str, message_type: str, content: dict[str, Any]
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
         ) -> MagicMock:
-            sent.append(content)
+            sent.append(
+                {"content": content, "ignore_unverified_devices": ignore_unverified_devices}
+            )
             return MagicMock()
 
         ch._client = MagicMock()
@@ -463,10 +485,11 @@ class TestMatrixChannelSend:
             await ch.send(msg)
 
         # Should have sent one media event
-        media_events = [e for e in sent if e.get("msgtype") == "m.image"]
+        media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
         assert len(media_events) == 1
-        assert media_events[0]["url"] == "mxc://example.org/TestMediaId"
-        assert media_events[0]["filename"] == "test.jpg"
+        assert media_events[0]["content"]["url"] == "mxc://example.org/TestMediaId"
+        assert media_events[0]["content"]["filename"] == "test.jpg"
+        assert media_events[0]["ignore_unverified_devices"] is True
 
 
 class TestMatrixMediaMetadata:
@@ -544,7 +567,7 @@ class TestMatrixRoomMembershipLogging:
         ):
             ch._log_room_membership_snapshot()
 
-        info_log.assert_called_once_with("MatrixChannel: currently joined {} room(s)", 2)
+        info_log.assert_not_called()
         warn_log.assert_called_once_with(
             "MatrixChannel: not joined to configured room(s): {}",
             "!room2:example.org",
@@ -655,6 +678,27 @@ class TestMatrixChannelE2ee:
             "ImportError",
         )
 
+    async def test_connect_degrades_when_load_store_fails(self) -> None:
+        """_connect() sets _e2ee_available=False and records reason when load_store() raises."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_cfg = MagicMock()
+        fake_client = MagicMock()
+        fake_client.add_event_callback = MagicMock()
+        fake_client.load_store = MagicMock(side_effect=RuntimeError("db locked"))
+
+        with (
+            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", True)),
+            patch("squidbot.adapters.channels.matrix.nio.AsyncClientConfig", return_value=fake_cfg),
+            patch("squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client),
+        ):
+            await ch._connect()
+
+        assert ch._e2ee_available is False
+        assert ch._e2ee_degraded_reason == "StoreLoad:RuntimeError"
+
     async def test_logs_encrypted_unknown_event_details(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -727,11 +771,7 @@ class TestMatrixChannelE2ee:
         with patch("squidbot.adapters.channels.matrix.logger.info") as info_log:
             await ch._sync_loop()
 
-        info_log.assert_any_call(
-            "MatrixChannel: E2EE readiness={} joined_rooms={}",
-            "enabled",
-            1,
-        )
+        info_log.assert_any_call("MatrixChannel: E2EE readiness=enabled")
 
     async def test_sync_loop_logs_degraded_readiness_reason(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
@@ -751,9 +791,7 @@ class TestMatrixChannelE2ee:
             await ch._sync_loop()
 
         warn_log.assert_any_call(
-            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-            "degraded",
-            1,
+            "MatrixChannel: E2EE readiness=degraded reason={}",
             "ImportWarning",
         )
 
@@ -774,9 +812,7 @@ class TestMatrixChannelE2ee:
             await ch._sync_loop()
 
         warn_log.assert_any_call(
-            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
-            "degraded",
-            0,
+            "MatrixChannel: E2EE readiness=degraded reason={}",
             "ImportWarning",
         )
 

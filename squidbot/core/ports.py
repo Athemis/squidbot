@@ -81,9 +81,13 @@ class ChannelPort(Protocol):
         """Send a message to the channel."""
         ...
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         """
         Send a typing indicator if the channel supports it.
+
+        Args:
+            session_id: The session to send the indicator for.
+            typing: True to start typing, False to stop. Defaults to True.
 
         Implementations that don't support typing indicators should no-op.
         """

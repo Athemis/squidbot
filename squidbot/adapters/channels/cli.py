@@ -60,7 +60,7 @@ class CliChannel:
         """Print the response to stdout."""
         print(message.text, end="", flush=True)
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         """No typing indicator for CLI."""
         pass
 
@@ -109,6 +109,6 @@ class RichCliChannel:
         console.print("[bold cyan]squidbot ›[/bold cyan]")
         console.print(Markdown(message.text))
 
-    async def send_typing(self, session_id: str) -> None:
+    async def send_typing(self, session_id: str, typing: bool = True) -> None:
         """No typing indicator for Rich CLI."""
         pass
