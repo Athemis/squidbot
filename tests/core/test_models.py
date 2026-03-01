@@ -104,25 +104,19 @@ def test_inbound_message_multimodal_content_default_none() -> None:
     assert cast(Any, msg).multimodal_content is None
 
 
-def test_outbound_message_attachment_default_none():
-    session = Session(channel="test", sender_id="user")
-    msg = OutboundMessage(session=session, text="hi")
-    assert msg.attachment is None
-    assert msg.metadata == {}
-
-
 def test_outbound_message_attachment_defaults_to_empty_list() -> None:
     session = Session(channel="matrix", sender_id="@u:matrix.org")
     msg = OutboundMessage(session=session, text="hi")
     assert msg.attachment == []
+    assert msg.metadata == {}
 
 
 def test_outbound_message_attachment_set():
     from pathlib import Path
 
     session = Session(channel="test", sender_id="user")
-    msg = OutboundMessage(session=session, text="", attachment=Path("/tmp/foo.jpg"))
-    assert msg.attachment == Path("/tmp/foo.jpg")
+    msg = OutboundMessage(session=session, text="", attachment=[Path("/tmp/foo.jpg")])
+    assert msg.attachment == [Path("/tmp/foo.jpg")]
 
 
 class TestSessionInfo:

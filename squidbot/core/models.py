@@ -36,7 +36,7 @@ class Message:
     """A single message in a conversation."""
 
     role: Literal["system", "user", "assistant", "tool"]
-    content: str
+    content: str | list[dict[str, Any]]
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None  # set when role == "tool"
     reasoning_content: str | None = None
@@ -91,6 +91,7 @@ class InboundMessage:
     text: str
     received_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
+    multimodal_content: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -99,7 +100,7 @@ class OutboundMessage:
 
     session: Session
     text: str
-    attachment: Path | None = None
+    attachment: list[Path] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
