@@ -787,7 +787,130 @@ git commit -m "feat: gateway passes multimodal_content to agent when present"
 
 ---
 
-### Task 9: Final integration check + PR
+### Task 9: Add debug logging at all attachment decision points
+
+**Files:**
+- Modify: `squidbot/adapters/channels/matrix.py`
+
+The goal is lightweight, actionable debug output at every branch that determines how an
+attachment is handled. All statements use `logger.debug()` — they are silent in production
+(loguru default level is INFO) and visible when running with `--log-level debug` or
+`LOG_LEVEL=DEBUG`.
+
+**No new tests needed for this task** — logging is a side-effect, not observable behavior.
+Run the existing suite to confirm nothing regressed.
+
+**Outbound: `_send_attachment()`**
+
+Add at the start of the method:
+```python
+logger.debug(
+    "MatrixChannel: uploading attachment path={} mime={} size_bytes={}",
+    path,
+    mime,
+    len(data),
+)
+```
+
+After a successful upload:
+```python
+logger.debug(
+    "MatrixChannel: attachment uploaded mxc_uri={} path={}",
+    mxc_uri,
+    path,
+)
+```
+
+After `room_send` succeeds:
+```python
+logger.debug(
+    "MatrixChannel: attachment sent room={} msgtype={} mxc_uri={}",
+    room_id,
+    msgtype,
+    mxc_uri,
+)
+```
+
+On `UploadError` (replace the existing `logger.error` with a combined error + debug):
+```python
+logger.error("MatrixChannel: upload failed: {}", upload_resp)
+logger.debug("MatrixChannel: upload failed path={} mime={}", path, mime)
+```
+
+**Inbound: `_download_attachment()`**
+
+After resolving the MXC URI:
+```python
+logger.debug("MatrixChannel: downloading attachment mxc={} filename={}", mxc, filename)
+```
+
+After downloading:
+```python
+logger.debug(
+    "MatrixChannel: attachment downloaded mxc={} size_bytes={} mime={}",
+    mxc,
+    len(body),
+    mimetype,
+)
+```
+
+After deciding whether to embed as multimodal:
+```python
+if multimodal is not None:
+    logger.debug(
+        "MatrixChannel: inbound image embedded as multimodal mxc={} size_bytes={}",
+        mxc,
+        len(body),
+    )
+else:
+    logger.debug(
+        "MatrixChannel: inbound attachment passed as text path mxc={} mime={} reason={}",
+        mxc,
+        mimetype,
+        "non-image" if not mimetype.startswith("image/") else "exceeds size limit",
+    )
+```
+
+**Inbound: `_handle_media()`**
+
+After building the InboundMessage:
+```python
+logger.debug(
+    "MatrixChannel: queued inbound media session={} multimodal={}",
+    session.id,
+    multimodal_content is not None,
+)
+```
+
+**Gateway dispatch (`cli/main.py`)**
+
+Where `agent.run()` is called with multimodal or text:
+```python
+logger.debug(
+    "gateway: dispatching session={} multimodal={}",
+    msg.session.id,
+    isinstance(user_message_content, list),
+)
+```
+
+**Step: Run tests after adding logging**
+
+```bash
+uv run pytest tests/ -v --tb=short
+uv run mypy squidbot/adapters/channels/matrix.py squidbot/cli/main.py
+uv run ruff check squidbot/adapters/channels/matrix.py squidbot/cli/main.py
+```
+
+**Step: Commit**
+
+```bash
+git add squidbot/adapters/channels/matrix.py squidbot/cli/main.py
+git commit -m "feat: add debug logging for inbound and outbound Matrix attachment handling"
+```
+
+---
+
+### Task 10: Final integration check + PR
 
 **Step 1: Run full test suite**
 
@@ -812,7 +935,31 @@ uv run ruff check .
 uv run ruff format . --check
 ```
 
-**Step 4: Create PR**
+**Step 4: Manual smoke check (optional but recommended)**
+
+Start the gateway with debug logging enabled and send a test image from Matrix:
+
+```bash
+LOG_LEVEL=DEBUG uv run squidbot gateway 2>&1 | grep -E "MatrixChannel.*attachment|gateway.*multimodal"
+```
+
+Expected output when an image arrives:
+```
+MatrixChannel: downloading attachment mxc=mxc://... filename=photo.jpg
+MatrixChannel: attachment downloaded mxc=mxc://... size_bytes=54321 mime=image/jpeg
+MatrixChannel: inbound image embedded as multimodal mxc=mxc://... size_bytes=54321
+MatrixChannel: queued inbound media session=matrix:@user:... multimodal=True
+gateway: dispatching session=matrix:@user:... multimodal=True
+```
+
+Expected output when the agent sends a file:
+```
+MatrixChannel: uploading attachment path=/tmp/result.png mime=image/png size_bytes=8192
+MatrixChannel: attachment uploaded mxc_uri=mxc://... path=/tmp/result.png
+MatrixChannel: attachment sent room=!room:... msgtype=m.image mxc_uri=mxc://...
+```
+
+**Step 5: Create PR**
 
 ```bash
 git push -u origin matrix-attachment-support
@@ -827,6 +974,7 @@ gh pr create --title "feat: fix Matrix attachment upload bug and add inbound mul
 - Add `max_inbound_media_bytes` config (default 10MB) to control Base64 embedding size limit
 - `Message.content` extended to `str | list[dict[str, Any]]` for OpenAI multimodal format
 - `InboundMessage` gets optional `multimodal_content` field
+- Debug logging at every attachment branch point (visible with `LOG_LEVEL=DEBUG`)
 
 ## Reference
 
