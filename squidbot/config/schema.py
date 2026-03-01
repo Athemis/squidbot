@@ -154,6 +154,9 @@ class MatrixChannelConfig(BaseModel):
     room_ids: list[str] = Field(default_factory=list)
     group_policy: str = "mention"  # "open", "mention", "allowlist"
     allowlist: list[str] = Field(default_factory=list)
+    max_inbound_download_bytes: int = 50 * 1024 * 1024  # 50 MB
+    max_inbound_embed_bytes: int = 2 * 1024 * 1024  # 2 MB encoded payload budget
+    max_outbound_upload_bytes: int = 20 * 1024 * 1024  # 20 MB
 
 
 class EmailChannelConfig(BaseModel):
