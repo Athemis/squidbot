@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import hashlib
 import mimetypes
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
@@ -149,9 +150,14 @@ class MatrixChannel:
 
     streaming: bool = False  # accumulate full response before sending
 
-    def __init__(self, config: MatrixChannelConfig) -> None:
+    def __init__(
+        self,
+        config: MatrixChannelConfig,
+        owner_matrix_ids: set[str] | None = None,
+    ) -> None:
         """Initialize MatrixChannel with the given configuration."""
         self._config = config
+        self._owner_matrix_ids = owner_matrix_ids or set()
         self._queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self._sync_start_ms: int = int(datetime.now().timestamp() * 1000)
         # Typing state per room
@@ -161,6 +167,8 @@ class MatrixChannel:
         self._session_rooms: dict[str, str] = {}
         # nio client (created lazily in _connect)
         self._client: nio.AsyncClient | None = None
+        self._e2ee_available: bool = False
+        self._e2ee_degraded_reason: str | None = None
 
     # ── ChannelPort interface ────────────────────────────────────────────────
 
@@ -218,15 +226,38 @@ class MatrixChannel:
         if self._client is not None:
             return
         cfg = self._config
-        client = nio.AsyncClient(
-            homeserver=cfg.homeserver,
-            user=cfg.user_id,
-            device_id=cfg.device_id,
-        )
+
+        client: nio.AsyncClient
+        store_path = self._crypto_store_path(cfg.user_id)
+        try:
+            e2ee_config = nio.AsyncClientConfig(encryption_enabled=True, store_sync_tokens=True)
+            client = nio.AsyncClient(
+                homeserver=cfg.homeserver,
+                user=cfg.user_id,
+                device_id=cfg.device_id,
+                store_path=store_path,
+                config=e2ee_config,
+            )
+            self._e2ee_available = True
+            self._e2ee_degraded_reason = None
+        except Exception as exc:  # noqa: BLE001
+            self._e2ee_available = False
+            self._e2ee_degraded_reason = type(exc).__name__
+            logger.warning(
+                "MatrixChannel: E2EE unavailable, degrading to unencrypted mode: {}",
+                self._e2ee_degraded_reason,
+            )
+            client = nio.AsyncClient(
+                homeserver=cfg.homeserver,
+                user=cfg.user_id,
+                device_id=cfg.device_id,
+            )
+
         client.access_token = cfg.access_token
         client.user_id = cfg.user_id
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
+        client.add_event_callback(self._handle_invite, nio.InviteMemberEvent)
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
@@ -241,6 +272,13 @@ class MatrixChannel:
                 logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
             else:
                 self._log_room_membership_snapshot()
+                if self._e2ee_available:
+                    logger.info("MatrixChannel: E2EE readiness enabled")
+                else:
+                    logger.warning(
+                        "MatrixChannel: E2EE readiness degraded reason={}",
+                        self._e2ee_degraded_reason or "unknown",
+                    )
             await self._client.sync_forever(timeout=30_000)
             logger.warning("MatrixChannel: sync_forever returned unexpectedly")
         except Exception as exc:  # noqa: BLE001
@@ -276,6 +314,29 @@ class MatrixChannel:
 
     async def _handle_reaction(self, room: Any, event: Any) -> None:
         """Handle m.reaction events — incoming emoji reactions."""
+        event_source = getattr(event, "source", {})
+        event_type = event_source.get("type", "")
+        if event_type == "m.room.encrypted":
+            room_id = getattr(room, "room_id", getattr(event, "room_id", ""))
+            sender = getattr(event, "sender", "")
+            event_id = getattr(event, "event_id", "")
+            algorithm = event_source.get("content", {}).get("algorithm", "")
+            logger.warning(
+                "MatrixChannel: encrypted event received room={} sender={} event={} algorithm={}",
+                room_id,
+                sender,
+                event_id,
+                algorithm,
+            )
+            if not self._e2ee_available:
+                logger.error(
+                    "MatrixChannel: encrypted event while E2EE degraded room={} sender={} event={}",
+                    room_id,
+                    sender,
+                    event_id,
+                )
+            return
+
         content = getattr(event, "source", {}).get("content", {})
         if content.get("type") == "m.reaction" or (
             isinstance(content.get("m.relates_to"), dict)
@@ -295,6 +356,37 @@ class MatrixChannel:
             self._queue.put_nowait(
                 InboundMessage(session=session, text=f"[Reaktion: {key}]", metadata=metadata)
             )
+
+    async def _handle_invite(self, room: Any, event: Any) -> None:
+        """Auto-join invitations from allowlisted owner Matrix IDs."""
+        if self._client is None:
+            return
+
+        membership = getattr(event, "membership", "")
+        if membership != "invite":
+            return
+
+        state_key = getattr(event, "state_key", "")
+        if state_key != self._config.user_id:
+            return
+
+        sender = getattr(event, "sender", "")
+        if sender not in self._owner_matrix_ids:
+            logger.info("MatrixChannel: ignore invite from non-owner {}", sender)
+            return
+
+        room_id = getattr(room, "room_id", getattr(event, "room_id", ""))
+        join_resp = await self._client.join(room_id)
+        if isinstance(join_resp, nio.JoinError):
+            logger.error(
+                "MatrixChannel: auto-join failed room={} inviter={} err={}",
+                room_id,
+                sender,
+                join_resp,
+            )
+            return
+
+        logger.info("MatrixChannel: auto-joined invited room {} from owner {}", room_id, sender)
 
     # ── Filtering helpers ────────────────────────────────────────────────────
 
@@ -376,6 +468,17 @@ class MatrixChannel:
                 "MatrixChannel: not joined to configured room(s): {}",
                 ", ".join(missing),
             )
+
+    def _crypto_store_path(self, user_id: str) -> str:
+        """Build and prepare a persistent crypto-store path for Matrix E2EE state."""
+        sanitized_user_id = re.sub(r"[^A-Za-z0-9._-]", "_", user_id)
+        store_dir = Path.home() / ".squidbot" / "crypto" / "matrix" / sanitized_user_id
+        try:
+            store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            store_dir.chmod(0o700)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MatrixChannel: cannot harden crypto store permissions: {}", exc)
+        return str(store_dir)
 
     # ── Sending helpers ──────────────────────────────────────────────────────
 

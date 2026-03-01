@@ -72,6 +72,24 @@ class GatewayStatusAdapter:
         return self._skills_loader.list_skills()  # type: ignore[no-any-return]
 
 
+def _owner_matrix_ids(settings: Settings) -> set[str]:
+    """Extract owner Matrix IDs from owner aliases configured for matrix/global channels."""
+    owner_cfg = getattr(settings, "owner", None)
+    aliases = getattr(owner_cfg, "aliases", []) if owner_cfg is not None else []
+    owner_ids: set[str] = set()
+
+    for alias in aliases:
+        channel = getattr(alias, "channel", None)
+        address = getattr(alias, "address", None)
+        if channel not in (None, "matrix"):
+            continue
+        if not isinstance(address, str) or not address:
+            continue
+        owner_ids.add(address)
+
+    return owner_ids
+
+
 async def _channel_loop_with_state(
     channel: ChannelPort,
     loop: Any,
@@ -550,7 +568,10 @@ async def _run_gateway(config_path: Path) -> None:
             if settings.channels.matrix.enabled:
                 from squidbot.adapters.channels.matrix import MatrixChannel  # noqa: PLC0415
 
-                matrix_ch = MatrixChannel(config=settings.channels.matrix)
+                matrix_ch = MatrixChannel(
+                    config=settings.channels.matrix,
+                    owner_matrix_ids=_owner_matrix_ids(settings),
+                )
                 channel_registry["matrix"] = matrix_ch
                 state.channel_status.append(
                     ChannelStatus(name="matrix", enabled=True, connected=True)
