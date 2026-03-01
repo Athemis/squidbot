@@ -107,15 +107,17 @@ def _format_matches(matches: list[tuple[Message | None, Message, Message | None]
         for context_message in (before, hit, after):
             if context_message is None:
                 continue
-            if (
-                context_message.role not in SEARCHABLE_ROLES
-                or not isinstance(context_message.content, str)
-                or not context_message.content
-            ):
+            if context_message.role not in SEARCHABLE_ROLES or not context_message.content:
                 continue
 
             role_label = context_message.role.upper()
-            context_text = _truncate_content(context_message.content)
+            if isinstance(context_message.content, str):
+                context_text = _truncate_content(context_message.content)
+            else:
+                # Multimodal content (image blocks etc.) — render a short placeholder
+                # so adjacent context is visible without a silent gap.
+                context_text = "[multimodal message]"
+
             if context_message is hit:
                 lines.append(f"**{role_label}: {context_text}**")
                 continue

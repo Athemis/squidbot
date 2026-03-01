@@ -240,8 +240,8 @@ class MatrixChannel:
                     exc,
                 )
 
-        # Send text (skip if empty and at least one attachment was present in the list).
-        if message.text or not message.attachment:
+        # Send text when non-empty. Text is always delivered regardless of attachment outcome.
+        if message.text:
             await self._send_text(room_id, message.text, thread_root)
 
     async def send_typing(self, session_id: str, typing: bool = True) -> None:
