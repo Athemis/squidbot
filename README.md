@@ -19,6 +19,12 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 
 Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
 
+If your system has a newer CMake, `python-olm` may fail to build unless this is set:
+
+```bash
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+```
+
 ```bash
 uv tool install /path/to/squidbot
 ```
@@ -27,6 +33,12 @@ After code changes:
 
 ```bash
 uv tool install --reinstall /path/to/squidbot
+```
+
+You can also inline it per command:
+
+```bash
+CMAKE_POLICY_VERSION_MINIMUM=3.5 uv tool install --reinstall /path/to/squidbot
 ```
 
 ## Configuration
