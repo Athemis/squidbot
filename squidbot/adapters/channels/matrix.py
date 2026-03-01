@@ -301,14 +301,10 @@ class MatrixChannel:
         """Run nio sync_forever in the background."""
         assert self._client is not None
         try:
-            # Clear stored next_batch so the first sync always requests full state.
-            # This ensures client.rooms is populated correctly at startup and the
-            # "currently joined N room(s)" log is accurate.
-            self._client.next_batch = ""
             snapshot = await self._client.sync(timeout=30_000, full_state=True)
+            joined_rooms = 0
             if isinstance(snapshot, nio.SyncError):
                 logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
-                joined_rooms = 0
             else:
                 joined_rooms = self._log_room_membership_snapshot()
             if self._e2ee_available:
