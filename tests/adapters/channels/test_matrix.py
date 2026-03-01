@@ -439,7 +439,7 @@ class TestMatrixChannelSend:
 
     @pytest.mark.asyncio
     async def test_send_attachment_uploads_and_sends_media_event(self, tmp_path: Path) -> None:
-        """send() with attachment uploads the file and sends a media event."""
+        """send() with attachments uploads the file and sends a media event."""
         import io
 
         from squidbot.adapters.channels.matrix import MatrixChannel
@@ -481,8 +481,8 @@ class TestMatrixChannelSend:
         session = Session(channel="matrix", sender_id="@alice:example.org")
         msg = OutboundMessage(
             session=session,
-            text="",
-            attachment=[jpg],
+            text="done",
+            attachments=[jpg],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
@@ -495,12 +495,20 @@ class TestMatrixChannelSend:
             f"Expected BytesIO but got {type(upload_args[0])}"
         )
 
-        # Should have sent one media event
+        # Should have sent media before text
+        assert len(sent) == 2
+        assert sent[0]["content"]["msgtype"] == "m.image"
+        assert sent[1]["content"]["msgtype"] == "m.text"
+
         media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
         assert len(media_events) == 1
         assert media_events[0]["content"]["url"] == "mxc://example.org/TestMediaId"
         assert media_events[0]["content"]["filename"] == "test.jpg"
         assert media_events[0]["ignore_unverified_devices"] is True
+
+        text_events = [e for e in sent if e["content"].get("msgtype") == "m.text"]
+        assert len(text_events) == 1
+        assert sent.index(media_events[0]) < sent.index(text_events[0])
 
     @pytest.mark.asyncio
     async def test_send_multiple_attachments_uploads_each(self, tmp_path: Path) -> None:
@@ -547,7 +555,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[jpg1, jpg2],
+            attachments=[jpg1, jpg2],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
@@ -588,7 +596,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[big_file],
+            attachments=[big_file],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
@@ -627,7 +635,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[big_file],
+            attachments=[big_file],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 

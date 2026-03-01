@@ -23,6 +23,7 @@ def _build_settings(
         ),
         agents=SimpleNamespace(
             workspace="/tmp/squidbot-test-workspace",
+            restrict_to_workspace=False,
             heartbeat=SimpleNamespace(
                 enabled=False,
                 interval_minutes=30,

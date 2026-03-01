@@ -284,10 +284,10 @@ class EmailChannel:
         Send a reply email via SMTP.
 
         Builds a multipart/alternative message (plain + HTML rendered from Markdown).
-        If message.attachment is set and exists, wraps in multipart/mixed.
+        If message.attachments contains existing files, wraps in multipart/mixed.
 
         Args:
-            message: Outbound message with text, optional attachment, and email metadata.
+            message: Outbound message with text, optional attachments, and email metadata.
         """
         from email import encoders  # noqa: PLC0415
         from email.mime.base import MIMEBase  # noqa: PLC0415
@@ -310,7 +310,7 @@ class EmailChannel:
         alt.attach(plain_part)
         alt.attach(html_part)
 
-        attachments = [p for p in message.attachment if p.is_file()]
+        attachments = [p for p in message.attachments if p.is_file()]
         if attachments:
             outer = MIMEMultipart("mixed")
             outer.attach(alt)

@@ -365,7 +365,7 @@ class TestEmailChannelSend:
     def _make_outbound(
         self,
         text: str = "Response text",
-        attachment: Path | list[Path] | None = None,
+        attachments: list[Path] | None = None,
         subject: str = "Test",
         msg_id: str = "<abc@host>",
         references: str = "",
@@ -374,15 +374,10 @@ class TestEmailChannelSend:
         from squidbot.core.models import OutboundMessage, Session
 
         session = Session(channel="email", sender_id=to_addr)
-        att_list: list[Path] = []
-        if isinstance(attachment, list):
-            att_list = attachment
-        elif attachment is not None:
-            att_list = [attachment]
         return OutboundMessage(
             session=session,
             text=text,
-            attachment=att_list,
+            attachments=attachments or [],
             metadata={
                 "email_from": to_addr,
                 "email_subject": subject,
@@ -468,7 +463,7 @@ class TestEmailChannelSend:
         att.write_bytes(b"pdfdata")
         config = _make_config()
         ch = EmailChannel(config=config, tmp_dir=tmp_path)
-        outbound = self._make_outbound(attachment=att)
+        outbound = self._make_outbound(attachments=[att])
 
         to_thread_calls: list[str] = []
 
@@ -506,7 +501,7 @@ class TestEmailChannelSend:
         att2.write_bytes(b"\xff\xd8data2")
         config = _make_config()
         ch = EmailChannel(config=config, tmp_dir=tmp_path)
-        outbound = self._make_outbound(attachment=[att1, att2])
+        outbound = self._make_outbound(attachments=[att1, att2])
 
         async def fake_to_thread(func: object, *args: object, **kwargs: object) -> object:
             method = func
