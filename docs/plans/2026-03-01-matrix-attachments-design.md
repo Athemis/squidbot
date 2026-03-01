@@ -111,8 +111,12 @@ agent.run(user_message=msg.multimodal_content or msg.text, ...)
   ↓
 Message(role="user", content=multimodal_content or text)
   ↓
-LLM API: {"role": "user", "content": [...]}
+LLM API: {"role": "user", "content": [...]} 
 ```
+
+**Propagation requirement:** `_handle_media()` MUST forward the exact `multimodal_content`
+returned by `_download_attachment()` into `InboundMessage.multimodal_content` without
+dropping or rewriting it.
 
 ### Outbound Upload Fix
 
@@ -143,7 +147,7 @@ resp = await self._client.upload(
 | Threshold | Default | Purpose |
 |-----------|---------|---------|
 | `max_inbound_download_bytes` | 50 MB | Preflight and post-fetch guard for inbound media processing |
-| `max_inbound_embed_bytes` | 2 MB | Cap for Base64 embedding (LLM request budget) |
+| `max_inbound_embed_bytes` | 2 MB | Cap for encoded payload budget (Base64 + data URL wrapper) |
 | `max_outbound_upload_bytes` | 20 MB | Local cap for outbound upload attempts |
 
 **MIME Allowlist for Embedding:**
@@ -177,6 +181,13 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset({
 - Preflight check: if event-declared size is available and exceeds `max_inbound_download_bytes`, skip download.
 - Post-fetch guard: if downloaded byte length exceeds `max_inbound_download_bytes`, discard payload and fallback to text warning.
 - This is still not byte-stream hard-capping; true streaming hard-cap can be added later.
+
+**Embed-limit enforcement semantics:**
+- Embedding decision uses encoded-size estimate, not only raw bytes.
+- Compute `estimated_encoded_bytes = (raw_bytes * 4 / 3) + data_url_overhead` and compare
+  against `max_inbound_embed_bytes`.
+- This prevents near-threshold files from passing raw-byte checks but failing provider request
+  size limits after Base64 expansion.
 
 **Fallback reasons logged at DEBUG level:**
 - `non-image` — MIME not in allowlist
