@@ -253,7 +253,8 @@ class MatrixChannel:
                 self._e2ee_available = False
                 self._e2ee_degraded_reason = type(exc).__name__
                 logger.warning(
-                    "MatrixChannel: E2EE unavailable, degrading to unencrypted mode: {}",
+                    "MatrixChannel: E2EE unavailable ({}). "
+                    "Install matrix-nio[e2e] to enable encrypted DMs.",
                     self._e2ee_degraded_reason,
                 )
                 client = nio.AsyncClient(
