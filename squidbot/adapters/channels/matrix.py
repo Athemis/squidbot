@@ -311,6 +311,7 @@ class MatrixChannel:
                     joined_rooms,
                     self._e2ee_degraded_reason or "unknown",
                 )
+            logger.debug("MatrixChannel: sync_forever starting")
             await self._client.sync_forever(timeout=30_000)
             logger.warning("MatrixChannel: sync_forever returned unexpectedly")
         except Exception as exc:  # noqa: BLE001
@@ -320,6 +321,12 @@ class MatrixChannel:
 
     async def _handle_text(self, room: Any, event: Any) -> None:
         """Handle an incoming m.room.message (m.text) event."""
+        logger.debug(
+            "MatrixChannel: _handle_text called sender={} room={} ts={}",
+            getattr(event, "sender", "?"),
+            getattr(event, "room_id", getattr(room, "room_id", "?")),
+            getattr(event, "server_timestamp", "?"),
+        )
         if not self._accept_event(room, event):
             return
         text: str = getattr(event, "body", "")
@@ -348,6 +355,12 @@ class MatrixChannel:
         """Handle m.reaction events — incoming emoji reactions."""
         event_source = getattr(event, "source", {})
         event_type = event_source.get("type", "")
+        logger.debug(
+            "MatrixChannel: _handle_reaction called type={} sender={} room={}",
+            event_type,
+            getattr(event, "sender", "?"),
+            getattr(event, "room_id", getattr(room, "room_id", "?")),
+        )
         if event_type == "m.room.encrypted":
             room_id = getattr(room, "room_id", getattr(event, "room_id", ""))
             sender = getattr(event, "sender", "")
