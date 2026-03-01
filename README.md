@@ -25,6 +25,18 @@ If your system has a newer CMake, `python-olm` may fail to build unless this is 
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 ```
 
+`python-olm` also requires a C++ compiler (`g++`). If `g++-12` is not found but you have another version:
+
+```bash
+CXX=/usr/bin/g++ CMAKE_POLICY_VERSION_MINIMUM=3.5 uv tool install /path/to/squidbot
+```
+
+Or create a symlink (requires root):
+
+```bash
+sudo ln -s /usr/bin/g++ /usr/bin/g++-12
+```
+
 ```bash
 uv tool install /path/to/squidbot
 ```

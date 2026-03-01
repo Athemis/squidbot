@@ -35,6 +35,9 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5 uv sync
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 uv sync
 
+# If g++-12 is missing but you have another g++ version:
+CXX=/usr/bin/g++ CMAKE_POLICY_VERSION_MINIMUM=3.5 uv sync
+
 # Run all tests
 uv run pytest
 
