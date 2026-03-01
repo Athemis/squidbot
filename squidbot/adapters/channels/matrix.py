@@ -257,7 +257,7 @@ class MatrixChannel:
         client.user_id = cfg.user_id
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
-        client.add_event_callback(self._handle_invite, nio.InviteMemberEvent)
+        client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
@@ -271,12 +271,18 @@ class MatrixChannel:
             if isinstance(snapshot, nio.SyncError):
                 logger.warning("MatrixChannel: initial sync failed: {}", snapshot)
             else:
-                self._log_room_membership_snapshot()
+                joined_rooms = self._log_room_membership_snapshot()
                 if self._e2ee_available:
-                    logger.info("MatrixChannel: E2EE readiness enabled")
+                    logger.info(
+                        "MatrixChannel: E2EE readiness={} joined_rooms={}",
+                        "enabled",
+                        joined_rooms,
+                    )
                 else:
                     logger.warning(
-                        "MatrixChannel: E2EE readiness degraded reason={}",
+                        "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
+                        "degraded",
+                        joined_rooms,
                         self._e2ee_degraded_reason or "unknown",
                     )
             await self._client.sync_forever(timeout=30_000)
@@ -452,15 +458,16 @@ class MatrixChannel:
             meta["matrix_thread_root"] = relates_to["event_id"]
         return meta
 
-    def _log_room_membership_snapshot(self) -> None:
+    def _log_room_membership_snapshot(self) -> int:
         """Log a snapshot of currently joined rooms and missing configured rooms."""
         assert self._client is not None
         joined_room_ids = set(self._client.rooms)
-        logger.info("MatrixChannel: currently joined {} room(s)", len(joined_room_ids))
+        joined_count = len(joined_room_ids)
+        logger.info("MatrixChannel: currently joined {} room(s)", joined_count)
 
         configured = self._config.room_ids
         if not configured:
-            return
+            return joined_count
 
         missing = [room_id for room_id in configured if room_id not in joined_room_ids]
         if missing:
@@ -468,6 +475,8 @@ class MatrixChannel:
                 "MatrixChannel: not joined to configured room(s): {}",
                 ", ".join(missing),
             )
+
+        return joined_count
 
     def _crypto_store_path(self, user_id: str) -> str:
         """Build and prepare a persistent crypto-store path for Matrix E2EE state."""

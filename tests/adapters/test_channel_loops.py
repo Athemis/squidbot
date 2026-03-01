@@ -89,7 +89,10 @@ async def test_channel_loop_with_state_forwards_metadata_to_agent_loop() -> None
     await _channel_loop_with_state(channel, loop, state, storage)
 
     loop.run.assert_awaited_once()
-    _, kwargs = loop.run.call_args
+    args, kwargs = loop.run.call_args
+    assert args[0].channel == "matrix"
+    assert args[0].sender_id == "@alice:example.org"
+    assert args[1] == "decrypted encrypted message"
     assert kwargs["outbound_metadata"] == {
         "matrix_room_id": "!room1:example.org",
         "matrix_event_id": "$evt1",

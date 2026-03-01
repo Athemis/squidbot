@@ -669,7 +669,11 @@ class TestMatrixChannelE2ee:
         with patch("squidbot.adapters.channels.matrix.logger.info") as info_log:
             await ch._sync_loop()
 
-        info_log.assert_any_call("MatrixChannel: E2EE readiness enabled")
+        info_log.assert_any_call(
+            "MatrixChannel: E2EE readiness={} joined_rooms={}",
+            "enabled",
+            1,
+        )
 
     @pytest.mark.asyncio
     async def test_sync_loop_logs_degraded_readiness_reason(self) -> None:
@@ -690,7 +694,9 @@ class TestMatrixChannelE2ee:
             await ch._sync_loop()
 
         warn_log.assert_any_call(
-            "MatrixChannel: E2EE readiness degraded reason={}",
+            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
+            "degraded",
+            1,
             "ImportWarning",
         )
 
