@@ -1884,22 +1884,22 @@ class TestMatrixEncryptedMediaIntake:
                 f"Got:\n{log_output}"
             )
 
-            # Boundary 2: event classification
-            assert "MatrixChannel: classify event=" in log_output, (
-                f"Expected 'MatrixChannel: classify event=' in log output.\nGot:\n{log_output}"
-            )
-            assert "class=" in log_output
-            assert "msgtype=" in log_output
-            assert "has_url=" in log_output
-            assert "has_file_url=" in log_output
-            assert "has_key_material=" in log_output
+            # Boundary 2: event classification — assert all fields appear on one line
+            assert any(
+                "MatrixChannel: classify event=" in line
+                and " class=" in line
+                and " msgtype=" in line
+                and " has_url=" in line
+                and " has_file_url=" in line
+                and " has_key_material=" in line
+                for line in log_output.splitlines()
+            ), f"classify log line missing expected fields. Log output:\n{log_output}"
 
-            # Boundary 3: policy decision
-            assert "MatrixChannel: policy event=" in log_output, (
-                f"Expected 'MatrixChannel: policy event=' in log output.\nGot:\n{log_output}"
-            )
-            assert "result=" in log_output
-            assert "reason=" in log_output
+            # Boundary 3: policy decision — assert result= and reason= appear on one line
+            assert any(
+                "MatrixChannel: policy event=" in line and " result=" in line and " reason=" in line
+                for line in log_output.splitlines()
+            ), f"policy log line missing expected fields. Log output:\n{log_output}"
 
             # Boundary 4: download/decrypt branch
             assert "MatrixChannel: download event=" in log_output, (

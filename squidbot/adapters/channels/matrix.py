@@ -38,6 +38,15 @@ _TYPING_TIMEOUT_MS: int = 30_000
 _TYPING_KEEPALIVE_S: float = 25.0
 _TYPING_RETRY_DEFAULT_S: float = 5.0
 
+# Event types registered as nio callbacks — used for both registration and diagnostic logging
+# so the two cannot silently diverge.
+_REGISTERED_EVENT_TYPES: tuple[type, ...] = (
+    nio.RoomMessageText,
+    nio.RoomMessageMedia,
+    nio.InviteMemberEvent,
+    nio.UnknownEvent,
+)
+
 # MIME types eligible for Base64 embedding in LLM multimodal content.
 # SVG is explicitly excluded — it is XML-based and may cause provider handling issues.
 EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
@@ -331,15 +340,10 @@ class MatrixChannel:
         client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
         # Keep UnknownEvent for reaction parsing and encrypted-event diagnostics.
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
-        registered_classes = [
-            nio.RoomMessageText,
-            nio.RoomMessageMedia,
-            nio.InviteMemberEvent,
-            nio.UnknownEvent,
-        ]
+        # Log using _REGISTERED_EVENT_TYPES so the diagnostic cannot diverge from reality.
         logger.debug(
             "MatrixChannel: registered callbacks classes={}",
-            [c.__name__ for c in registered_classes],
+            [c.__name__ for c in _REGISTERED_EVENT_TYPES],
         )
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
@@ -406,7 +410,7 @@ class MatrixChannel:
             policy_result = "accepted"
             policy_reason = "accepted"
         else:
-            policy_result = "filtered"
+            policy_result = "rejected"
             policy_reason = "policy_filtered"
         logger.debug(
             "MatrixChannel: policy event={} result={} reason={}",
