@@ -184,7 +184,7 @@ class AgentLoop:
     async def run(
         self,
         session: Session,
-        user_message: str,
+        user_message: str | list[dict[str, Any]],
         channel: ChannelPort,
         *,
         llm: LLMPort | None = None,
@@ -198,9 +198,14 @@ class AgentLoop:
         - If building the full message context fails, it falls back to system+user only.
         - If persisting the exchange fails, the user-visible reply is still delivered.
 
+        When user_message is a multimodal list, the text portion is extracted as a
+        fallback for memory context and persistence. The full multimodal payload is
+        substituted into the last user message before the LLM call.
+
         Args:
             session: The conversation session (carries channel + sender identity).
-            user_message: The user's input text.
+            user_message: The user's input — either plain text or an OpenAI multimodal
+                          content list (with text and image_url blocks).
             channel: The channel to deliver the response to.
             llm: Optional LLM override for this single run. If provided,
                  replaces self._llm for the duration of this call only.
@@ -212,19 +217,43 @@ class AgentLoop:
         """
         selected_llm = llm if llm is not None else self._llm
 
+        # Derive a plain-text fallback for memory operations when input is multimodal.
+        if isinstance(user_message, list):
+            text_blocks = [
+                block["text"]
+                for block in user_message
+                if block.get("type") == "text" and isinstance(block.get("text"), str)
+            ]
+            text_fallback: str = " ".join(text_blocks) if text_blocks else "[multimodal message]"
+        else:
+            text_fallback = user_message
+
         await channel.send_typing(session.id)
 
         try:
             messages = await self._memory.build_messages(
-                user_message=user_message,
+                user_message=text_fallback,
                 system_prompt=self._system_prompt,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: build_messages failed, fallback to minimal context: {}", exc)
             messages = [
                 Message(role="system", content=self._system_prompt),
-                Message(role="user", content=user_message),
+                Message(role="user", content=text_fallback),
             ]
+
+        # Replace the last user message content with the full multimodal payload when present.
+        if isinstance(user_message, list):
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].role == "user":
+                    messages[i] = Message(
+                        role="user",
+                        content=user_message,
+                        channel=messages[i].channel,
+                        sender_id=messages[i].sender_id,
+                    )
+                    break
+
         tool_definitions, extra_tool_map = self._build_tool_definitions(extra_tools)
 
         final_text = ""
@@ -277,12 +306,12 @@ class AgentLoop:
         await channel.send_typing(session.id, typing=False)
         await self._deliver_final_text(channel, session, final_text, outbound_metadata)
 
-        # Persist the exchange
+        # Persist the exchange — use text_fallback to avoid storing base64 payloads.
         try:
             await self._memory.persist_exchange(
                 channel=session.channel,
                 sender_id=session.sender_id,
-                user_message=user_message,
+                user_message=text_fallback,
                 assistant_reply=final_text,
             )
         except Exception as exc:  # noqa: BLE001
