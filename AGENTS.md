@@ -28,7 +28,15 @@
 
 ```bash
 # Install dependencies (including dev)
+# NOTE: Needed on systems with newer CMake when python-olm is built
+CMAKE_POLICY_VERSION_MINIMUM=3.5 uv sync
+
+# or set once per shell session
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 uv sync
+
+# If g++-12 is missing but you have another g++ version:
+CXX=/usr/bin/g++ CMAKE_POLICY_VERSION_MINIMUM=3.5 uv sync
 
 # Run all tests
 uv run pytest
@@ -52,7 +60,7 @@ uv run ruff format .
 uv run mypy squidbot/
 
 # Install/update CLI tool after code changes (--reinstall required; --force is not enough)
-uv tool install --reinstall /home/alex/git/squidbot
+CMAKE_POLICY_VERSION_MINIMUM=3.5 uv tool install --reinstall /home/alex/git/squidbot
 ```
 
 **Always run `uv run ruff check .`, `uv run ruff format . --check`, and `uv run pytest` before committing.**
