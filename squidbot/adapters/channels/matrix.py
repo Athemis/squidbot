@@ -640,6 +640,12 @@ class MatrixChannel:
         if self._config.room_ids and room_id not in self._config.room_ids:
             logger.debug("MatrixChannel: drop room filter event={} room={}", event_id, room_id)
             return False
+        # Media events have filenames (e.g. "photo.jpg") as their body, which never contains
+        # an @mention. Skip the mention check for all media msgtypes so they are not silently
+        # dropped in "mention" policy rooms.
+        msgtype: str = event.source.get("content", {}).get("msgtype", "")
+        if msgtype in MEDIA_MSGTYPES:
+            return True  # skip mention check for all media uploads
         body: str = getattr(event, "body", "")
         policy = self._config.group_policy
         if policy == "open":
