@@ -102,7 +102,7 @@ class TestMessageToolCurrentContext:
         sent = matrix.sent[0]
         assert sent.session == session
         assert sent.text == "Here"
-        assert sent.attachment == [path]
+        assert sent.attachments == [path]
 
     async def test_mixed_valid_invalid_attachments_fails_atomically(self, tmp_path: Path) -> None:
         matrix = _CollectingChannel()

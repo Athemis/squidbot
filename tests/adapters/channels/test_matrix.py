@@ -439,7 +439,7 @@ class TestMatrixChannelSend:
 
     @pytest.mark.asyncio
     async def test_send_attachment_uploads_and_sends_media_event(self, tmp_path: Path) -> None:
-        """send() with attachment uploads the file and sends a media event."""
+        """send() with attachments uploads the file and sends a media event."""
         import io
 
         from squidbot.adapters.channels.matrix import MatrixChannel
@@ -482,7 +482,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[jpg],
+            attachments=[jpg],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
@@ -547,7 +547,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[jpg1, jpg2],
+            attachments=[jpg1, jpg2],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
@@ -588,7 +588,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[big_file],
+            attachments=[big_file],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
@@ -627,7 +627,7 @@ class TestMatrixChannelSend:
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=[big_file],
+            attachments=[big_file],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 

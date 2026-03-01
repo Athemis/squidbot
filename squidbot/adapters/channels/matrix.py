@@ -213,7 +213,7 @@ class MatrixChannel:
         effective_limit = await self._effective_outbound_limit()
 
         # Send each attachment first; text reply follows regardless of attachment outcome.
-        for path in message.attachment:
+        for path in message.attachments:
             if not path.exists():
                 continue
             try:
