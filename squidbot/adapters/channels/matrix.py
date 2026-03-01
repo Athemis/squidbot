@@ -314,8 +314,13 @@ class MatrixChannel:
                     self._e2ee_degraded_reason or "unknown",
                 )
             logger.debug("MatrixChannel: sync_forever starting")
-            await self._client.sync_forever(timeout=30_000)
-            logger.warning("MatrixChannel: sync_forever returned unexpectedly")
+            while True:
+                resp = await self._client.sync(timeout=30_000)
+                if isinstance(resp, nio.SyncError):
+                    logger.warning("MatrixChannel: sync error: {}", resp)
+                else:
+                    rooms = list(getattr(getattr(resp, "rooms", None), "join", {}).keys())
+                    logger.debug("MatrixChannel: sync poll ok joined_rooms={}", rooms)
         except Exception as exc:  # noqa: BLE001
             logger.error("MatrixChannel: sync_forever error: {}", exc)
 
