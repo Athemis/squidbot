@@ -331,6 +331,16 @@ class MatrixChannel:
         client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
         # Keep UnknownEvent for reaction parsing and encrypted-event diagnostics.
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
+        registered_classes = [
+            nio.RoomMessageText,
+            nio.RoomMessageMedia,
+            nio.InviteMemberEvent,
+            nio.UnknownEvent,
+        ]
+        logger.debug(
+            "MatrixChannel: registered callbacks classes={}",
+            [c.__name__ for c in registered_classes],
+        )
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
         logger.info("MatrixChannel: connected as {}", cfg.user_id)
@@ -371,7 +381,40 @@ class MatrixChannel:
 
     async def _handle_media(self, room: Any, event: Any) -> None:
         """Handle an incoming m.room.message with a media msgtype."""
-        if not self._accept_event(room, event):
+        event_id = getattr(event, "event_id", "?")
+        event_class = type(event).__name__
+        content = getattr(event, "source", {}).get("content", {})
+        msgtype = content.get("msgtype") or getattr(event, "msgtype", "")
+        has_url = bool(getattr(event, "url", None))
+        enc_file = getattr(event, "file", None)
+        has_file_url = bool(enc_file and getattr(enc_file, "url", None))
+        has_key_material = bool(
+            enc_file and getattr(enc_file, "key", None) and getattr(enc_file.key, "k", None)
+        )
+        logger.debug(
+            "MatrixChannel: classify event={} class={} msgtype={} has_url={}"
+            " has_file_url={} has_key_material={}",
+            event_id,
+            event_class,
+            msgtype,
+            has_url,
+            has_file_url,
+            has_key_material,
+        )
+        accepted = self._accept_event(room, event)
+        if accepted:
+            policy_result = "accepted"
+            policy_reason = "accepted"
+        else:
+            policy_result = "filtered"
+            policy_reason = "policy_filtered"
+        logger.debug(
+            "MatrixChannel: policy event={} result={} reason={}",
+            event_id,
+            policy_result,
+            policy_reason,
+        )
+        if not accepted:
             return
         assert self._client is not None
         try:
@@ -745,6 +788,14 @@ class MatrixChannel:
                     )
                     return f"[Anhang: {filename} — zu groß]", None
 
+        event_id_val = getattr(event, "event_id", "?")
+        is_encrypted = enc_file is not None
+        logger.debug(
+            "MatrixChannel: download event={} encrypted={} url={}",
+            event_id_val,
+            is_encrypted,
+            mxc,
+        )
         logger.debug("MatrixChannel: downloading mxc={} filename={}", mxc, filename)
         resp = await self._client.download(server_name=server, media_id=media_id)
         if isinstance(resp, nio.DownloadError):
@@ -804,6 +855,12 @@ class MatrixChannel:
                 mxc,
                 mimetype,
             )
+            logger.debug(
+                "MatrixChannel: embed mxc={} embedded={} reason={}",
+                mxc,
+                False,
+                "not_embedded",
+            )
             return text, None
 
         # Encode-size estimate: 4 * ceil(raw / 3) + data-URL header length.
@@ -817,6 +874,12 @@ class MatrixChannel:
                 max_embed,
                 "exceeds_embed_limit",
             )
+            logger.debug(
+                "MatrixChannel: embed mxc={} embedded={} reason={}",
+                mxc,
+                False,
+                "size_exceeded",
+            )
             return text, None
 
         # Build multimodal content: text description + image_url block.
@@ -827,6 +890,12 @@ class MatrixChannel:
             {"type": "image_url", "image_url": {"url": data_url}},
         ]
         logger.debug("MatrixChannel: embedded mxc={} size={} mime={}", mxc, raw_bytes, mimetype)
+        logger.debug(
+            "MatrixChannel: embed mxc={} embedded={} reason={}",
+            mxc,
+            True,
+            "embedded",
+        )
         return text, multimodal_content
 
     # ── Typing keepalive ─────────────────────────────────────────────────────

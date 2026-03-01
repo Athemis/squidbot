@@ -1804,6 +1804,119 @@ class TestMatrixEncryptedMediaIntake:
             f"Expected iv='bad_base64iv', got: {positional[3]!r}"
         )
 
+    async def test_debug_logs_include_event_class_and_media_shape(self) -> None:
+        """DEBUG log lines at five boundaries include required fields.
+
+        Captures loguru output at DEBUG level and asserts that:
+        - callback registration log contains 'MatrixChannel: registered callbacks classes='
+        - event classification log contains 'MatrixChannel: classify event=' with
+          class, msgtype, has_url, has_file_url, has_key_material fields
+        - policy decision log contains 'MatrixChannel: policy event=' with result and reason
+        - download/decrypt branch log contains 'MatrixChannel: download event=' with
+          encrypted and url fields
+        - embed decision log contains 'MatrixChannel: embed mxc=' with embedded and reason fields
+        """
+        import io
+
+        from loguru import logger
+
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        # Capture loguru output at DEBUG level
+        output = io.StringIO()
+        sink_id = logger.add(output, level="DEBUG", format="{message}")
+
+        try:
+            # --- Test classify + policy + download + embed logs via _handle_media ---
+            config = _make_config(group_policy="open")
+            ch = MatrixChannel(config=config)
+
+            image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+            download_resp = MagicMock()
+            download_resp.body = image_bytes
+            download_resp.content_type = "image/jpeg"
+
+            ch._client = MagicMock()
+            ch._client.download = AsyncMock(return_value=download_resp)
+
+            event = MagicMock()
+            event.sender = "@alice:example.org"
+            event.room_id = "!room1:example.org"
+            event.event_id = "$diag1"
+            event.url = "mxc://example.org/diagmedia"
+            event.file = None
+            event.body = "photo.jpg"
+            event.source = {"content": {}}
+            event.server_timestamp = int(datetime.now().timestamp() * 1000)
+            info = MagicMock()
+            info.mimetype = "image/jpeg"
+            del info.size
+            event.info = info
+
+            await ch._handle_media(MagicMock(), event)
+
+            # --- Test callback registration log via _connect ---
+            config2 = _make_config(user_id="@bot:example.org")
+            ch2 = MatrixChannel(config=config2)
+            fake_cfg = MagicMock()
+            fake_client = MagicMock()
+            fake_client.add_event_callback = MagicMock()
+            fake_client.load_store = MagicMock()
+
+            with (
+                patch.object(ch2, "_crypto_store_path", return_value=("/tmp/store", True)),
+                patch(
+                    "squidbot.adapters.channels.matrix.nio.AsyncClientConfig",
+                    return_value=fake_cfg,
+                ),
+                patch(
+                    "squidbot.adapters.channels.matrix.nio.AsyncClient",
+                    return_value=fake_client,
+                ),
+            ):
+                await ch2._connect()
+
+            log_output = output.getvalue()
+
+            # Boundary 1: callback registration
+            assert "MatrixChannel: registered callbacks classes=" in log_output, (
+                f"Expected 'MatrixChannel: registered callbacks classes=' in log output.\n"
+                f"Got:\n{log_output}"
+            )
+
+            # Boundary 2: event classification
+            assert "MatrixChannel: classify event=" in log_output, (
+                f"Expected 'MatrixChannel: classify event=' in log output.\nGot:\n{log_output}"
+            )
+            assert "class=" in log_output
+            assert "msgtype=" in log_output
+            assert "has_url=" in log_output
+            assert "has_file_url=" in log_output
+            assert "has_key_material=" in log_output
+
+            # Boundary 3: policy decision
+            assert "MatrixChannel: policy event=" in log_output, (
+                f"Expected 'MatrixChannel: policy event=' in log output.\nGot:\n{log_output}"
+            )
+            assert "result=" in log_output
+            assert "reason=" in log_output
+
+            # Boundary 4: download/decrypt branch
+            assert "MatrixChannel: download event=" in log_output, (
+                f"Expected 'MatrixChannel: download event=' in log output.\nGot:\n{log_output}"
+            )
+            assert "encrypted=" in log_output
+            assert "url=" in log_output
+
+            # Boundary 5: embed decision
+            assert "MatrixChannel: embed mxc=" in log_output, (
+                f"Expected 'MatrixChannel: embed mxc=' in log output.\nGot:\n{log_output}"
+            )
+            assert "embedded=" in log_output
+
+        finally:
+            logger.remove(sink_id)
+
     async def test_malformed_declared_size_does_not_block_download(self) -> None:
         """When a BadEvent has a malformed info.size, the preflight guard is skipped
         and the download is still attempted through _handle_bad_event."""
