@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from loguru import logger
+
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
     Message,
@@ -215,7 +217,8 @@ class AgentLoop:
                 user_message=user_message,
                 system_prompt=self._system_prompt,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent.run: build_messages failed, fallback to minimal context: {}", exc)
             messages = [
                 Message(role="system", content=self._system_prompt),
                 Message(role="user", content=user_message),
@@ -244,6 +247,7 @@ class AgentLoop:
                         metadata=dict(outbound_metadata or {}),
                     )
                 )
+                logger.error("agent.run: llm failed for session={}: {}", session.id, e)
                 return
 
             if text_response:
@@ -278,5 +282,6 @@ class AgentLoop:
                 user_message=user_message,
                 assistant_reply=final_text,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent.run: persist_exchange failed for session={}: {}", session.id, exc)
             return

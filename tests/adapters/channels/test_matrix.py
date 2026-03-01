@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import nio
 import pytest
 
 from squidbot.config.schema import MatrixChannelConfig
@@ -520,3 +522,376 @@ class TestMatrixMediaMetadata:
 
         source = Path(matrix_mod.__file__).read_text(encoding="utf-8")
         assert "subprocess.run(" not in source
+
+
+class TestMatrixRoomMembershipLogging:
+    """Room-membership observability logs cover joined and missing rooms."""
+
+    def test_logs_joined_and_missing_configured_rooms(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(room_ids=["!room1:example.org", "!room2:example.org"])
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.rooms = {
+            "!room1:example.org": MagicMock(),
+            "!other:example.org": MagicMock(),
+        }
+
+        with (
+            patch("squidbot.adapters.channels.matrix.logger.info") as info_log,
+            patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log,
+        ):
+            ch._log_room_membership_snapshot()
+
+        info_log.assert_called_once_with("MatrixChannel: currently joined {} room(s)", 2)
+        warn_log.assert_called_once_with(
+            "MatrixChannel: not joined to configured room(s): {}",
+            "!room2:example.org",
+        )
+
+    def test_logs_all_configured_rooms_joined(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(room_ids=["!room1:example.org"])
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.rooms = {"!room1:example.org": MagicMock()}
+
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
+            ch._log_room_membership_snapshot()
+
+        warn_log.assert_not_called()
+
+
+class TestMatrixChannelE2ee:
+    """MatrixChannel E2EE initialization and encrypted-event diagnostics."""
+
+    async def test_connect_enables_e2ee_with_persistent_store_path(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_client = MagicMock()
+        fake_client.add_event_callback = MagicMock()
+        fake_cfg = MagicMock()
+        fake_cfg.encryption_enabled = True
+        fake_cfg.store_sync_tokens = True
+
+        with (
+            patch("squidbot.adapters.channels.matrix.nio.AsyncClientConfig", return_value=fake_cfg),
+            patch(
+                "squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client
+            ) as ctor,
+        ):
+            await ch._connect()
+
+        kwargs = ctor.call_args.kwargs
+        assert "/.squidbot/crypto/matrix/" in kwargs["store_path"]
+        assert kwargs["config"].encryption_enabled is True
+        assert kwargs["config"].store_sync_tokens is True
+
+    async def test_connect_degrades_when_crypto_store_permissions_fail(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_client = MagicMock()
+        fake_client.add_event_callback = MagicMock()
+
+        with (
+            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", False)),
+            patch(
+                "squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client
+            ) as ctor,
+        ):
+            await ch._connect()
+
+        kwargs = ctor.call_args.kwargs
+        assert "store_path" not in kwargs
+        assert ch._e2ee_available is False
+        assert ch._e2ee_degraded_reason == "CryptoStorePermissions"
+
+    async def test_connect_does_not_swallow_unexpected_e2ee_errors(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_cfg = MagicMock()
+
+        with (
+            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", True)),
+            patch("squidbot.adapters.channels.matrix.nio.AsyncClientConfig", return_value=fake_cfg),
+            patch(
+                "squidbot.adapters.channels.matrix.nio.AsyncClient",
+                side_effect=TypeError("boom"),
+            ),
+            pytest.raises(TypeError, match="boom"),
+        ):
+            await ch._connect()
+
+    async def test_logs_encrypted_unknown_event_details(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+
+        room = MagicMock()
+        room.room_id = "!room1:example.org"
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.event_id = "$enc1"
+        event.source = {
+            "type": "m.room.encrypted",
+            "content": {
+                "algorithm": "m.megolm.v1.aes-sha2",
+            },
+        }
+
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
+            await ch._handle_reaction(room, event)
+
+        warn_log.assert_any_call(
+            "MatrixChannel: encrypted event received room={} sender={} event={} algorithm={}",
+            "!room1:example.org",
+            "@alice:example.org",
+            "$enc1",
+            "m.megolm.v1.aes-sha2",
+        )
+
+    async def test_logs_error_for_encrypted_event_when_degraded(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._e2ee_available = False
+
+        room = MagicMock()
+        room.room_id = "!room1:example.org"
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.event_id = "$enc2"
+        event.source = {
+            "type": "m.room.encrypted",
+            "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+        }
+
+        with patch("squidbot.adapters.channels.matrix.logger.error") as error_log:
+            await ch._handle_reaction(room, event)
+
+        error_log.assert_any_call(
+            "MatrixChannel: encrypted event while E2EE degraded room={} sender={} event={}",
+            "!room1:example.org",
+            "@alice:example.org",
+            "$enc2",
+        )
+
+    async def test_sync_loop_logs_enabled_readiness(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._e2ee_available = True
+
+        client = MagicMock()
+        client.rooms = {"!room1:example.org": MagicMock()}
+        client.sync = AsyncMock(return_value=MagicMock())
+        client.sync_forever = AsyncMock(side_effect=RuntimeError("stop"))
+        ch._client = client
+
+        with patch("squidbot.adapters.channels.matrix.logger.info") as info_log:
+            await ch._sync_loop()
+
+        info_log.assert_any_call(
+            "MatrixChannel: E2EE readiness={} joined_rooms={}",
+            "enabled",
+            1,
+        )
+
+    async def test_sync_loop_logs_degraded_readiness_reason(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._e2ee_available = False
+        ch._e2ee_degraded_reason = "ImportWarning"
+
+        client = MagicMock()
+        client.rooms = {"!room1:example.org": MagicMock()}
+        client.sync = AsyncMock(return_value=MagicMock())
+        client.sync_forever = AsyncMock(side_effect=RuntimeError("stop"))
+        ch._client = client
+
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
+            await ch._sync_loop()
+
+        warn_log.assert_any_call(
+            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
+            "degraded",
+            1,
+            "ImportWarning",
+        )
+
+    async def test_sync_loop_logs_readiness_when_initial_sync_errors(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._e2ee_available = False
+        ch._e2ee_degraded_reason = "ImportWarning"
+
+        client = MagicMock()
+        client.sync = AsyncMock(return_value=nio.SyncError("sync failed"))
+        client.sync_forever = AsyncMock(side_effect=RuntimeError("stop"))
+        ch._client = client
+
+        with patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log:
+            await ch._sync_loop()
+
+        warn_log.assert_any_call(
+            "MatrixChannel: E2EE readiness={} joined_rooms={} reason={}",
+            "degraded",
+            0,
+            "ImportWarning",
+        )
+
+    def test_crypto_store_path_applies_owner_only_permissions(self, tmp_path: Path) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+
+        with patch("squidbot.adapters.channels.matrix.Path.home", return_value=tmp_path):
+            store_path_raw, hardened = ch._crypto_store_path("@bot:example.org")
+
+        store_path = Path(store_path_raw)
+        assert hardened is True
+
+        mode = stat.S_IMODE(store_path.stat().st_mode)
+        assert mode == 0o700
+
+
+class TestMatrixChannelInvites:
+    """Owner-only invite auto-join behavior."""
+
+    async def test_invite_from_owner_triggers_join(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids={"@owner:example.org"})
+        ch._client = MagicMock()
+        ch._client.join = AsyncMock(return_value=MagicMock())
+
+        room = MagicMock()
+        room.room_id = "!dm:example.org"
+        event = MagicMock()
+        event.membership = "invite"
+        event.state_key = "@bot:example.org"
+        event.sender = "@owner:example.org"
+
+        await ch._handle_invite(room, event)
+
+        ch._client.join.assert_awaited_once_with("!dm:example.org")
+
+    async def test_invite_from_non_owner_is_ignored(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids={"@owner:example.org"})
+        ch._client = MagicMock()
+        ch._client.join = AsyncMock(return_value=MagicMock())
+
+        room = MagicMock()
+        room.room_id = "!group:example.org"
+        event = MagicMock()
+        event.membership = "invite"
+        event.state_key = "@bot:example.org"
+        event.sender = "@someone:example.org"
+
+        await ch._handle_invite(room, event)
+
+        ch._client.join.assert_not_awaited()
+
+    def test_owner_matrix_ids_are_copied_defensively(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        provided = {"@owner:example.org"}
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids=provided)
+
+        provided.clear()
+
+        assert "@owner:example.org" in ch._owner_matrix_ids
+
+    async def test_invite_with_non_matching_state_key_is_ignored(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids={"@owner:example.org"})
+        ch._client = MagicMock()
+        ch._client.join = AsyncMock(return_value=MagicMock())
+
+        room = MagicMock()
+        room.room_id = "!group:example.org"
+        event = MagicMock()
+        event.membership = "invite"
+        event.state_key = "@other-bot:example.org"
+        event.sender = "@owner:example.org"
+
+        await ch._handle_invite(room, event)
+
+        ch._client.join.assert_not_awaited()
+
+    async def test_invite_join_error_is_logged(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids={"@owner:example.org"})
+
+        room = MagicMock()
+        room.room_id = "!group:example.org"
+        event = MagicMock()
+        event.membership = "invite"
+        event.state_key = "@bot:example.org"
+        event.sender = "@owner:example.org"
+
+        join_error = MagicMock(spec=nio.JoinError)
+        ch._client = MagicMock()
+        ch._client.join = AsyncMock(return_value=join_error)
+
+        with patch("squidbot.adapters.channels.matrix.logger.error") as error_log:
+            await ch._handle_invite(room, event)
+
+        error_log.assert_any_call(
+            "MatrixChannel: auto-join failed room={} inviter={} err={}",
+            "!group:example.org",
+            "@owner:example.org",
+            join_error,
+        )
+
+    async def test_invite_join_exception_is_logged(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config, owner_matrix_ids={"@owner:example.org"})
+
+        room = MagicMock()
+        room.room_id = "!group:example.org"
+        event = MagicMock()
+        event.membership = "invite"
+        event.state_key = "@bot:example.org"
+        event.sender = "@owner:example.org"
+
+        boom = RuntimeError("boom")
+        ch._client = MagicMock()
+        ch._client.join = AsyncMock(side_effect=boom)
+
+        with patch("squidbot.adapters.channels.matrix.logger.error") as error_log:
+            await ch._handle_invite(room, event)
+
+        error_log.assert_any_call(
+            "MatrixChannel: auto-join exception room={} inviter={} err={}",
+            "!group:example.org",
+            "@owner:example.org",
+            boom,
+        )
