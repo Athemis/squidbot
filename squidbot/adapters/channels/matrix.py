@@ -12,8 +12,10 @@ Attachments are uploaded via the Matrix content repository and sent as typed med
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
+import io
 import mimetypes
 import re
 from collections.abc import AsyncIterator
@@ -35,6 +37,12 @@ if TYPE_CHECKING:
 _TYPING_TIMEOUT_MS: int = 30_000
 _TYPING_KEEPALIVE_S: float = 25.0
 _TYPING_RETRY_DEFAULT_S: float = 5.0
+
+# MIME types eligible for Base64 embedding in LLM multimodal content.
+# SVG is explicitly excluded — it is XML-based and may cause provider handling issues.
+EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "image/gif"}
+)
 
 _md = mistune.create_markdown(escape=True)
 
@@ -177,6 +185,7 @@ class MatrixChannel:
         self._client: nio.AsyncClient | None = None
         self._e2ee_available: bool = False
         self._e2ee_degraded_reason: str | None = None
+        self._server_upload_limit: int | None = None  # cached homeserver cap
 
     # ── ChannelPort interface ────────────────────────────────────────────────
 
@@ -200,14 +209,39 @@ class MatrixChannel:
         thread_root_raw = message.metadata.get("matrix_thread_root")
         thread_root: str | None = thread_root_raw if isinstance(thread_root_raw, str) else None
 
-        existing_attachments = [
-            attachment for attachment in message.attachments if attachment.exists()
-        ]
-        for attachment in existing_attachments:
-            await self._send_attachment(room_id, attachment, thread_root)
+        # Resolve effective outbound upload limit (min of local and homeserver cap).
+        effective_limit = await self._effective_outbound_limit()
 
-        # Send text (skip if empty and at least one attachment exists)
-        if message.text or not existing_attachments:
+        # Send each attachment first; text reply follows regardless of attachment outcome.
+        for path in message.attachment:
+            if not path.exists():
+                continue
+            try:
+                file_size = path.stat().st_size
+            except OSError as exc:
+                logger.error("MatrixChannel: cannot stat attachment path={} err={}", path, exc)
+                continue
+            if file_size > effective_limit:
+                logger.debug(
+                    "MatrixChannel: skip outbound path={} size={} limit={} reason={}",
+                    path,
+                    file_size,
+                    effective_limit,
+                    "exceeds_outbound_limit",
+                )
+                continue
+            try:
+                await self._send_attachment(room_id, path, thread_root)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "MatrixChannel: attachment send failed path={} room={} err={}",
+                    path,
+                    room_id,
+                    exc,
+                )
+
+        # Send text when non-empty. Text is always delivered regardless of attachment outcome.
+        if message.text:
             await self._send_text(room_id, message.text, thread_root)
 
     async def send_typing(self, session_id: str, typing: bool = True) -> None:
@@ -341,14 +375,22 @@ class MatrixChannel:
             return
         assert self._client is not None
         try:
-            text = await self._download_attachment(event)
+            text, multimodal_content = await self._download_attachment(event)
         except Exception as exc:  # noqa: BLE001
             text = f"[Anhang nicht verfügbar: {exc}]"
+            multimodal_content = None
         metadata = self._extract_metadata(event)
         session = Session(channel="matrix", sender_id=event.sender)
         room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
         self._session_rooms[session.id] = room_id
-        self._queue.put_nowait(InboundMessage(session=session, text=text, metadata=metadata))
+        self._queue.put_nowait(
+            InboundMessage(
+                session=session,
+                text=text,
+                metadata=metadata,
+                multimodal_content=multimodal_content,
+            )
+        )
 
     async def _handle_reaction(self, room: Any, event: Any) -> None:
         """Handle m.reaction events — incoming emoji reactions."""
@@ -543,6 +585,28 @@ class MatrixChannel:
 
     # ── Sending helpers ──────────────────────────────────────────────────────
 
+    async def _effective_outbound_limit(self) -> int:
+        """Return effective outbound upload limit (min of local config and homeserver cap).
+
+        Fetches the homeserver's upload limit once and caches it for subsequent calls.
+        If the homeserver limit is unavailable or raises, only the local threshold applies.
+
+        Returns:
+            Effective upload size limit in bytes.
+        """
+        assert self._client is not None
+        local_limit = self._config.max_outbound_upload_bytes
+        if self._server_upload_limit is None:
+            try:
+                resp = await self._client.content_repository_config()
+                server_cap = getattr(resp, "upload_size", None)
+                self._server_upload_limit = (
+                    int(server_cap) if server_cap is not None else local_limit
+                )
+            except Exception:  # noqa: BLE001
+                self._server_upload_limit = local_limit
+        return min(local_limit, self._server_upload_limit)
+
     async def _send_text(self, room_id: str, text: str, thread_root: str | None) -> None:
         """Send a text message to Matrix with optional thread context."""
         assert self._client is not None
@@ -577,8 +641,9 @@ class MatrixChannel:
         info = await _media_metadata(path, mime)
 
         data = await asyncio.to_thread(path.read_bytes)
+        logger.debug("MatrixChannel: uploading path={} mime={} size={}", path, mime, len(data))
         resp = await self._client.upload(
-            data_provider=lambda *_: data,
+            io.BytesIO(data),
             content_type=mime,
             filename=path.name,
             filesize=len(data),
@@ -588,9 +653,10 @@ class MatrixChannel:
         else:
             upload_resp = resp
         if isinstance(upload_resp, nio.UploadError):
-            logger.error("MatrixChannel: upload failed: {}", upload_resp)
+            logger.error("MatrixChannel: upload failed path={} err={}", path, upload_resp)
             return
         mxc_uri: str = upload_resp.content_uri
+        logger.debug("MatrixChannel: uploaded path={} mxc={}", path, mxc_uri)
 
         content: dict[str, Any] = {
             "msgtype": msgtype,
@@ -615,14 +681,31 @@ class MatrixChannel:
         )
         if isinstance(resp2, nio.RoomSendError):
             logger.error("MatrixChannel: media send error in {}: {}", room_id, resp2)
+            return
+        logger.debug(
+            "MatrixChannel: sent media room={} msgtype={} mxc={}", room_id, msgtype, mxc_uri
+        )
 
     # ── Attachment download ──────────────────────────────────────────────────
 
-    async def _download_attachment(self, event: Any) -> str:
+    async def _download_attachment(self, event: Any) -> tuple[str, list[dict[str, Any]] | None]:
         """
-        Download an incoming media attachment and return a text description.
+        Download an incoming media attachment, apply guardrails, and optionally embed.
 
-        Saves the file to /tmp/squidbot-<sha256[:8]>.<ext>.
+        For image types in EMBEDDABLE_IMAGE_MIMES whose encoded size fits within
+        max_inbound_embed_bytes, returns a multimodal content list (text + image_url).
+        All other files are downloaded, persisted locally, and returned as text-path only.
+
+        Size guardrails:
+        - Preflight: skip download if declared size exceeds max_inbound_download_bytes.
+        - Post-fetch: discard payload if downloaded size exceeds max_inbound_download_bytes.
+        - Embed gate: estimated Base64-encoded size must be <= max_inbound_embed_bytes.
+
+        Args:
+            event: nio RoomMessageMedia event (or compatible mock).
+
+        Returns:
+            Tuple of (text_description, multimodal_content_or_None).
         """
         assert self._client is not None
         mxc: str = getattr(event, "url", "") or ""
@@ -632,13 +715,40 @@ class MatrixChannel:
 
         # Parse mxc://server/mediaid
         if not mxc.startswith("mxc://"):
-            return "[Anhang: ungültige mxc URI]"
+            return "[Anhang: ungültige mxc URI]", None
         mxc_body = mxc[len("mxc://") :]
         server, _, media_id = mxc_body.partition("/")
 
+        filename: str = getattr(event, "body", "attachment")
+        info_obj = getattr(event, "info", None)
+        declared_mime: str = (
+            (getattr(info_obj, "mimetype", None) or "") if info_obj is not None else ""
+        )
+        max_download = self._config.max_inbound_download_bytes
+        max_embed = self._config.max_inbound_embed_bytes
+
+        # Preflight: check declared size against download limit.
+        if info_obj is not None:
+            declared_size = getattr(info_obj, "size", None)
+            if declared_size is not None:
+                try:
+                    ds = int(declared_size)
+                except TypeError, ValueError:
+                    ds = 0
+                if ds > max_download:
+                    logger.debug(
+                        "MatrixChannel: skip download mxc={} file={} size={} reason={}",
+                        mxc,
+                        filename,
+                        ds,
+                        "exceeds_download_limit_preflight",
+                    )
+                    return f"[Anhang: {filename} — zu groß]", None
+
+        logger.debug("MatrixChannel: downloading mxc={} filename={}", mxc, filename)
         resp = await self._client.download(server_name=server, media_id=media_id)
         if isinstance(resp, nio.DownloadError):
-            return f"[Anhang nicht verfügbar: {resp.message}]"
+            return f"[Anhang nicht verfügbar: {resp.message}]", None
 
         body = cast(bytes, resp.body)
 
@@ -662,18 +772,62 @@ class MatrixChannel:
             decrypt_attachment_fn: Any = decrypt_attachment
             body = decrypt_attachment_fn(body, key_info)
 
-        # Determine extension
-        info = getattr(event, "info", None)
-        mimetype = (info.mimetype if info else None) or resp.content_type or ""
+        raw_bytes = len(body)
+        logger.debug(
+            "MatrixChannel: downloaded mxc={} size={} mime={}", mxc, raw_bytes, declared_mime
+        )
+
+        # Post-fetch guard: discard if downloaded size exceeds download limit.
+        if raw_bytes > max_download:
+            logger.debug(
+                "MatrixChannel: discard mxc={} size={} reason=exceeds_download_limit_postfetch",
+                mxc,
+                raw_bytes,
+            )
+            return f"[Anhang: {filename} — zu groß]", None
+
+        # Determine MIME and extension.
+        mimetype = declared_mime or getattr(resp, "content_type", "") or ""
         ext = mimetypes.guess_extension(mimetype) or ""
 
-        # Save to temp file
+        # Save to temp file.
         sha = hashlib.sha256(body).hexdigest()[:8]
         tmp_path = Path(f"/tmp/squidbot-{sha}{ext}")
         await asyncio.to_thread(tmp_path.write_bytes, body)
+        text = f"[Anhang: {filename} ({mimetype})] → {tmp_path}"
 
-        filename: str = getattr(event, "body", "attachment")
-        return f"[Anhang: {filename} ({mimetype})] → {tmp_path}"
+        # Decide whether to embed as multimodal content.
+        multimodal_content: list[dict[str, Any]] | None = None
+        if mimetype not in EMBEDDABLE_IMAGE_MIMES:
+            logger.debug(
+                "MatrixChannel: text_fallback mxc={} mime={} reason=non-image",
+                mxc,
+                mimetype,
+            )
+            return text, None
+
+        # Encode-size estimate: 4 * ceil(raw / 3) + data-URL header length.
+        estimated_encoded_bytes = 4 * ((raw_bytes + 2) // 3) + len(f"data:{mimetype};base64,")
+        if estimated_encoded_bytes > max_embed:
+            logger.debug(
+                "MatrixChannel: text_fallback mxc={} mime={} encoded={} limit={} reason={}",
+                mxc,
+                mimetype,
+                estimated_encoded_bytes,
+                max_embed,
+                "exceeds_embed_limit",
+            )
+            return text, None
+
+        # Build multimodal content: text description + image_url block.
+        b64_data = base64.b64encode(body).decode("ascii")
+        data_url = f"data:{mimetype};base64,{b64_data}"
+        multimodal_content = [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
+        logger.debug("MatrixChannel: embedded mxc={} size={} mime={}", mxc, raw_bytes, mimetype)
+        return text, multimodal_content
 
     # ── Typing keepalive ─────────────────────────────────────────────────────
 

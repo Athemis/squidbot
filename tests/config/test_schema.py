@@ -71,3 +71,10 @@ def test_owner_config_model_validate_coerces_aliases() -> None:
 def test_owner_config_model_validate_empty_aliases() -> None:
     cfg = OwnerConfig.model_validate({"aliases": []})
     assert cfg.aliases == []
+
+
+def test_matrix_media_limits_defaults() -> None:
+    s = Settings()
+    assert s.channels.matrix.max_inbound_download_bytes == 50 * 1024 * 1024
+    assert s.channels.matrix.max_inbound_embed_bytes == 2 * 1024 * 1024
+    assert s.channels.matrix.max_outbound_upload_bytes == 20 * 1024 * 1024

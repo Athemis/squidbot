@@ -235,7 +235,7 @@ class MessageTool:
         outbound = OutboundMessage(
             session=Session(channel=target_channel, sender_id=resolved_sender),
             text=content_raw,
-            attachments=attachments,
+            attachment=attachments,
             metadata=outbound_metadata,
         )
 

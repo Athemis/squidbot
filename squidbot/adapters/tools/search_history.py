@@ -77,6 +77,7 @@ def _scan_history(
 
             if (
                 message.role in SEARCHABLE_ROLES
+                and isinstance(message.content, str)
                 and message.content
                 and normalized_query in message.content.lower()
             ):
@@ -110,7 +111,13 @@ def _format_matches(matches: list[tuple[Message | None, Message, Message | None]
                 continue
 
             role_label = context_message.role.upper()
-            context_text = _truncate_content(context_message.content)
+            if isinstance(context_message.content, str):
+                context_text = _truncate_content(context_message.content)
+            else:
+                # Multimodal content (image blocks etc.) — render a short placeholder
+                # so adjacent context is visible without a silent gap.
+                context_text = "[multimodal message]"
+
             if context_message is hit:
                 lines.append(f"**{role_label}: {context_text}**")
                 continue
