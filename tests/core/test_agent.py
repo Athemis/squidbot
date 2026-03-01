@@ -8,6 +8,7 @@ in-memory test doubles. No network calls, no filesystem I/O.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
@@ -317,3 +318,56 @@ async def test_run_degrades_when_persist_exchange_fails(storage) -> None:
     await loop.run(SESSION, "Hello!", channel)
 
     assert [message.text for message in channel.sent] == ["still replies"]
+
+
+async def test_agent_run_multimodal_user_message_forwarded_to_llm(storage, memory) -> None:
+    """AgentLoop.run() accepts list-typed multimodal user_message and forwards it to LLM."""
+
+    class CapturingLLM:
+        def __init__(self) -> None:
+            self.received_messages: list[Message] = []
+
+        async def chat(self, messages, tools, *, stream=True) -> AsyncIterator:
+            self.received_messages = list(messages)
+
+            async def _gen():
+                yield "ok"
+
+            return _gen()
+
+    multimodal: list[dict[str, Any]] = [
+        {"type": "text", "text": "describe this image"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+    ]
+
+    llm = CapturingLLM()
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="test")
+
+    await loop.run(SESSION, multimodal, channel)
+
+    user_msgs = [m for m in llm.received_messages if m.role == "user"]
+    assert user_msgs, "No user message forwarded to LLM"
+    last_user = user_msgs[-1]
+    assert last_user.content == multimodal, "Multimodal content not forwarded as-is to LLM"
+
+
+async def test_agent_run_multimodal_persists_text_fallback(storage, memory) -> None:
+    """History persistence uses text fallback string, not base64 payload."""
+    llm = ScriptedLLM(["yes"])
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="test")
+
+    multimodal: list[dict[str, Any]] = [
+        {"type": "text", "text": "what is in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,BIGPAYLOAD"}},
+    ]
+
+    await loop.run(SESSION, multimodal, channel)
+
+    history = await storage.load_history()
+    user_hist = [m for m in history if m.role == "user"]
+    assert user_hist, "No user message persisted"
+    # Must not persist base64 payload
+    assert isinstance(user_hist[0].content, str)
+    assert "BIGPAYLOAD" not in user_hist[0].content

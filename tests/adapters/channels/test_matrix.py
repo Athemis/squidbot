@@ -440,6 +440,8 @@ class TestMatrixChannelSend:
     @pytest.mark.asyncio
     async def test_send_attachment_uploads_and_sends_media_event(self, tmp_path: Path) -> None:
         """send() with attachment uploads the file and sends a media event."""
+        import io
+
         from squidbot.adapters.channels.matrix import MatrixChannel
         from squidbot.core.models import OutboundMessage, Session
 
@@ -450,10 +452,12 @@ class TestMatrixChannelSend:
         config = _make_config()
         ch = MatrixChannel(config=config)
         sent: list[dict[str, Any]] = []
+        upload_args: list[Any] = []
 
         async def fake_upload(
-            data_provider: Any, content_type: str, filename: str, filesize: int
+            data: Any, content_type: str, filename: str, filesize: int
         ) -> tuple[MagicMock, Any]:
+            upload_args.append(data)
             resp = MagicMock()
             resp.content_uri = "mxc://example.org/TestMediaId"
             return resp, None
@@ -472,17 +476,24 @@ class TestMatrixChannelSend:
         ch._client = MagicMock()
         ch._client.upload = fake_upload
         ch._client.room_send = fake_room_send
+        ch._client.content_repository_config = AsyncMock(return_value=MagicMock(upload_size=None))
 
         session = Session(channel="matrix", sender_id="@alice:example.org")
         msg = OutboundMessage(
             session=session,
             text="",
-            attachment=jpg,
+            attachment=[jpg],
             metadata={"matrix_room_id": "!room1:example.org"},
         )
 
         with patch("squidbot.adapters.channels.matrix._detect_mime", return_value="image/jpeg"):
             await ch.send(msg)
+
+        # Upload must receive io.BytesIO, not a lambda
+        assert len(upload_args) == 1
+        assert isinstance(upload_args[0], io.BytesIO), (
+            f"Expected BytesIO but got {type(upload_args[0])}"
+        )
 
         # Should have sent one media event
         media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
@@ -490,6 +501,139 @@ class TestMatrixChannelSend:
         assert media_events[0]["content"]["url"] == "mxc://example.org/TestMediaId"
         assert media_events[0]["content"]["filename"] == "test.jpg"
         assert media_events[0]["ignore_unverified_devices"] is True
+
+    @pytest.mark.asyncio
+    async def test_send_multiple_attachments_uploads_each(self, tmp_path: Path) -> None:
+        """send() with multiple attachments uploads and sends each as a separate media event."""
+        import io
+
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        jpg1 = tmp_path / "photo1.jpg"
+        jpg1.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\xd9")
+        jpg2 = tmp_path / "photo2.jpg"
+        jpg2.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9")
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        upload_calls: list[Any] = []
+        sent: list[dict[str, Any]] = []
+        media_id = 0
+
+        async def fake_upload(data: Any, content_type: str, filename: str, filesize: int) -> Any:
+            nonlocal media_id
+            upload_calls.append(data)
+            media_id += 1
+            resp = MagicMock()
+            resp.content_uri = f"mxc://example.org/Media{media_id}"
+            return resp, None
+
+        async def fake_room_send(
+            room_id: str,
+            message_type: str,
+            content: dict[str, Any],
+            ignore_unverified_devices: bool = False,
+        ) -> MagicMock:
+            sent.append({"content": content})
+            return MagicMock()
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = fake_room_send
+        ch._client.content_repository_config = AsyncMock(return_value=MagicMock(upload_size=None))
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=[jpg1, jpg2],
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        with patch("squidbot.adapters.channels.matrix._detect_mime", return_value="image/jpeg"):
+            await ch.send(msg)
+
+        assert len(upload_calls) == 2
+        assert all(isinstance(a, io.BytesIO) for a in upload_calls)
+        media_events = [e for e in sent if e["content"].get("msgtype") == "m.image"]
+        assert len(media_events) == 2
+
+    @pytest.mark.asyncio
+    async def test_send_skips_attachment_exceeding_effective_outbound_limit(
+        self, tmp_path: Path
+    ) -> None:
+        """Attachment larger than effective outbound limit is skipped."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        big_file = tmp_path / "big.bin"
+        big_file.write_bytes(b"x" * 100)  # small content, but we'll fake a tiny limit
+
+        config = _make_config(max_outbound_upload_bytes=50)  # only 50 bytes allowed
+        ch = MatrixChannel(config=config)
+        upload_called = False
+
+        async def fake_upload(data: Any, content_type: str, filename: str, filesize: int) -> Any:
+            nonlocal upload_called
+            upload_called = True
+            return MagicMock(), None
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = AsyncMock(return_value=MagicMock())
+        ch._client.content_repository_config = AsyncMock(return_value=MagicMock(upload_size=None))
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=[big_file],
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        await ch.send(msg)
+
+        assert not upload_called, "Upload should have been skipped"
+
+    @pytest.mark.asyncio
+    async def test_send_uses_min_of_local_and_server_upload_limit(self, tmp_path: Path) -> None:
+        """Effective outbound limit uses min(local, server) when server limit is available."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        big_file = tmp_path / "medium.bin"
+        big_file.write_bytes(b"x" * 200)
+
+        # Local limit is 1000 bytes but server allows only 100 bytes
+        config = _make_config(max_outbound_upload_bytes=1000)
+        ch = MatrixChannel(config=config)
+        upload_called = False
+
+        async def fake_upload(data: Any, content_type: str, filename: str, filesize: int) -> Any:
+            nonlocal upload_called
+            upload_called = True
+            return MagicMock(), None
+
+        server_cfg = MagicMock()
+        server_cfg.upload_size = 100  # server limit is 100 bytes
+
+        ch._client = MagicMock()
+        ch._client.upload = fake_upload
+        ch._client.room_send = AsyncMock(return_value=MagicMock())
+        ch._client.content_repository_config = AsyncMock(return_value=server_cfg)
+
+        session = Session(channel="matrix", sender_id="@alice:example.org")
+        msg = OutboundMessage(
+            session=session,
+            text="",
+            attachment=[big_file],
+            metadata={"matrix_room_id": "!room1:example.org"},
+        )
+
+        await ch.send(msg)
+
+        assert not upload_called, "File exceeds server limit, upload should be skipped"
 
 
 class TestMatrixMediaMetadata:
@@ -928,6 +1072,325 @@ class TestMatrixChannelInvites:
             "!group:example.org",
             "@owner:example.org",
             join_error,
+        )
+
+
+class TestMatrixInboundGuardrails:
+    """Inbound attachment download, embedding, and guardrail tests."""
+
+    def _make_media_event(
+        self,
+        mxc: str = "mxc://example.org/abc123",
+        filename: str = "photo.jpg",
+        mime: str = "image/jpeg",
+        declared_size: int | None = None,
+    ) -> MagicMock:
+        """Build a minimal media event mock."""
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.room_id = "!room1:example.org"
+        event.event_id = "$media1"
+        event.url = mxc
+        event.file = None  # not encrypted
+        event.body = filename
+        event.source = {"content": {}}
+        event.server_timestamp = int(datetime.now().timestamp() * 1000)
+        info = MagicMock()
+        info.mimetype = mime
+        if declared_size is not None:
+            info.size = declared_size
+        else:
+            del info.size  # Absent attribute raises AttributeError
+        event.info = info
+        return event
+
+    def _make_download_resp(self, body: bytes, mime: str) -> MagicMock:
+        resp = MagicMock()
+        resp.body = body
+        resp.content_type = mime
+        return resp
+
+    async def test_jpeg_under_embed_limit_produces_multimodal_content(self, tmp_path: Path) -> None:
+        """JPEG under embed limit embeds as Base64 image_url block."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # ~100 bytes, well under 2MB
+
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg")
+        event.info.mimetype = "image/jpeg"
+
+        text, multimodal = await ch._download_attachment(event)
+
+        assert multimodal is not None, "Expected multimodal content for JPEG under embed limit"
+        assert any(b.get("type") == "image_url" for b in multimodal), (
+            "Expected image_url block in multimodal content"
+        )
+        assert any(b.get("type") == "text" for b in multimodal), "Expected text block"
+
+    async def test_svg_produces_no_multimodal_content(self, tmp_path: Path) -> None:
+        """SVG (non-allowlist MIME) does not embed — text path only."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        svg_bytes = b"<svg><circle r='10'/></svg>"
+
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(svg_bytes, "image/svg+xml")
+        )
+
+        event = self._make_media_event(mime="image/svg+xml", filename="icon.svg")
+        event.info.mimetype = "image/svg+xml"
+
+        text, multimodal = await ch._download_attachment(event)
+
+        assert multimodal is None, "SVG must not be embedded"
+        assert "icon.svg" in text
+
+    async def test_declared_size_above_download_limit_skips_download(self) -> None:
+        """If declared size exceeds max_inbound_download_bytes, skip download."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        limit = 50 * 1024 * 1024
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        download_mock = AsyncMock()
+        ch._client.download = download_mock
+
+        event = self._make_media_event(
+            declared_size=limit + 1, mime="image/jpeg", filename="huge.jpg"
+        )
+
+        text, multimodal = await ch._download_attachment(event)
+
+        download_mock.assert_not_awaited()
+        assert multimodal is None
+        assert "zu groß" in text or "huge.jpg" in text
+
+    async def test_downloaded_size_above_embed_limit_produces_no_embedding(self) -> None:
+        """Downloaded content > max_inbound_embed_bytes: text path only, no embedding."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        # 1.6MB raw bytes → encoded > 2.1MB → exceeds 2MB embed limit
+        image_bytes = b"\xff\xd8" + b"\x00" * (1_600_000)
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg")
+        event.info.mimetype = "image/jpeg"
+
+        text, multimodal = await ch._download_attachment(event)
+
+        assert multimodal is None, "Oversized image should not be embedded"
+
+    async def test_downloaded_size_above_download_limit_post_fetch_fallback(self) -> None:
+        """Downloaded content > max_inbound_download_bytes triggers post-fetch fallback."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        download_limit = 50 * 1024 * 1024  # 50 MB
+        image_bytes = b"\x00" * (download_limit + 100)
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg", filename="toobig.jpg")
+        event.info.mimetype = "image/jpeg"
+
+        text, multimodal = await ch._download_attachment(event)
+
+        assert multimodal is None
+        assert "zu groß" in text
+
+    async def test_non_allowlist_file_downloaded_and_text_path_returned(
+        self, tmp_path: Path
+    ) -> None:
+        """Non-allowlist file (PDF) is still downloaded, persisted, text path returned."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        pdf_bytes = b"%PDF-1.4 content here"
+
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(pdf_bytes, "application/pdf")
+        )
+
+        event = self._make_media_event(mime="application/pdf", filename="doc.pdf")
+        event.info.mimetype = "application/pdf"
+
+        text, multimodal = await ch._download_attachment(event)
+
+        assert multimodal is None, "PDF must not be embedded"
+        assert "doc.pdf" in text
+        # Text should contain a path to the saved file
+        assert "/tmp" in text or "squidbot" in text.lower()
+
+    async def test_multimodal_propagated_from_download_to_inbound_message(self) -> None:
+        """_handle_media propagates multimodal_content exactly as returned by
+        _download_attachment."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(group_policy="open")
+        ch = MatrixChannel(config=config)
+        image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg", filename="photo.jpg")
+        event.info.mimetype = "image/jpeg"
+
+        await ch._handle_media(MagicMock(), event)
+
+        assert not ch._queue.empty()
+        msg = ch._queue.get_nowait()
+        assert msg.multimodal_content is not None
+        assert any(b.get("type") == "image_url" for b in msg.multimodal_content)
+
+    async def test_encoded_size_boundary_just_below_embeds(self) -> None:
+        """Image whose encoded size is exactly at embed limit is embedded."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        # Find raw size such that estimated_encoded_bytes == max_inbound_embed_bytes
+        # Formula: 4 * ((raw + 2) // 3) + len("data:image/jpeg;base64,") = 2097152
+        header = len("data:image/jpeg;base64,")
+        target_encoded = 2 * 1024 * 1024  # exactly at embed limit
+        # work backward: encoded_data_part = target_encoded - header
+        encoded_data_part = target_encoded - header
+        # 4 * ((raw + 2) // 3) = encoded_data_part → raw ≈ encoded_data_part * 3 / 4
+        raw_bytes_count = (encoded_data_part * 3) // 4 - 2
+
+        image_bytes = b"\xff\xd8" + b"\x00" * max(0, raw_bytes_count - 2)
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg")
+        event.info.mimetype = "image/jpeg"
+
+        text, multimodal = await ch._download_attachment(event)
+
+        # A file right at or below the boundary should embed.
+        # Assert precondition first so the test fails if fixture math drifts.
+        estimated = 4 * ((len(image_bytes) + 2) // 3) + header
+        assert estimated <= target_encoded, (
+            f"Fixture miscomputed boundary: estimated={estimated}, target={target_encoded}"
+        )
+        assert multimodal is not None
+
+    async def test_fallback_reason_non_image_logged(self) -> None:
+        """non-image MIME emits debug log with reason=non-image."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(b"<svg/>", "image/svg+xml")
+        )
+
+        event = self._make_media_event(mime="image/svg+xml", filename="icon.svg")
+        event.info.mimetype = "image/svg+xml"
+
+        with patch("squidbot.adapters.channels.matrix.logger.debug") as dbg:
+            await ch._download_attachment(event)
+
+        debug_calls = [str(c) for c in dbg.call_args_list]
+        assert any("non-image" in c for c in debug_calls), (
+            f"Expected 'non-image' in debug calls, got: {debug_calls}"
+        )
+
+    async def test_fallback_reason_exceeds_embed_limit_logged(self) -> None:
+        """Oversized image emits debug log with reason=exceeds_embed_limit."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        image_bytes = b"\xff\xd8" + b"\x00" * 1_600_000
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg")
+        event.info.mimetype = "image/jpeg"
+
+        with patch("squidbot.adapters.channels.matrix.logger.debug") as dbg:
+            await ch._download_attachment(event)
+
+        debug_calls = [str(c) for c in dbg.call_args_list]
+        assert any("exceeds_embed_limit" in c for c in debug_calls), (
+            f"Expected 'exceeds_embed_limit' in debug calls, got: {debug_calls}"
+        )
+
+    async def test_fallback_reason_exceeds_download_limit_preflight_logged(self) -> None:
+        """Declared size exceeds download limit emits preflight reason."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        limit = 50 * 1024 * 1024
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock()
+
+        event = self._make_media_event(declared_size=limit + 1, mime="image/jpeg")
+        event.info.mimetype = "image/jpeg"
+
+        with patch("squidbot.adapters.channels.matrix.logger.debug") as dbg:
+            await ch._download_attachment(event)
+
+        debug_calls = [str(c) for c in dbg.call_args_list]
+        assert any("exceeds_download_limit_preflight" in c for c in debug_calls), (
+            f"Expected 'exceeds_download_limit_preflight' in debug calls, got: {debug_calls}"
+        )
+
+    async def test_fallback_reason_exceeds_download_limit_postfetch_logged(self) -> None:
+        """Downloaded content exceeds download limit emits postfetch reason."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        limit = 50 * 1024 * 1024
+        image_bytes = b"\x00" * (limit + 100)
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=self._make_download_resp(image_bytes, "image/jpeg")
+        )
+
+        event = self._make_media_event(mime="image/jpeg")
+        event.info.mimetype = "image/jpeg"
+
+        with patch("squidbot.adapters.channels.matrix.logger.debug") as dbg:
+            await ch._download_attachment(event)
+
+        debug_calls = [str(c) for c in dbg.call_args_list]
+        assert any("exceeds_download_limit_postfetch" in c for c in debug_calls), (
+            f"Expected 'exceeds_download_limit_postfetch' in debug calls, got: {debug_calls}"
         )
 
     async def test_invite_join_exception_is_logged(self) -> None:

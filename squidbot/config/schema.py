@@ -143,6 +143,13 @@ class ToolsConfig(BaseModel):
     spawn: SpawnSettings = Field(default_factory=SpawnSettings)
 
 
+# Default byte-budget thresholds for Matrix media handling.
+# Named constants prevent magic numbers from appearing in schema defaults.
+MATRIX_MAX_INBOUND_DOWNLOAD_BYTES_DEFAULT: int = 50 * 1024 * 1024  # 50 MB
+MATRIX_MAX_INBOUND_EMBED_BYTES_DEFAULT: int = 2 * 1024 * 1024  # 2 MB encoded payload budget
+MATRIX_MAX_OUTBOUND_UPLOAD_BYTES_DEFAULT: int = 20 * 1024 * 1024  # 20 MB
+
+
 class MatrixChannelConfig(BaseModel):
     """Configuration for the Matrix channel adapter."""
 
@@ -154,6 +161,9 @@ class MatrixChannelConfig(BaseModel):
     room_ids: list[str] = Field(default_factory=list)
     group_policy: str = "mention"  # "open", "mention", "allowlist"
     allowlist: list[str] = Field(default_factory=list)
+    max_inbound_download_bytes: int = Field(default=MATRIX_MAX_INBOUND_DOWNLOAD_BYTES_DEFAULT, gt=0)
+    max_inbound_embed_bytes: int = Field(default=MATRIX_MAX_INBOUND_EMBED_BYTES_DEFAULT, gt=0)
+    max_outbound_upload_bytes: int = Field(default=MATRIX_MAX_OUTBOUND_UPLOAD_BYTES_DEFAULT, gt=0)
 
 
 class EmailChannelConfig(BaseModel):

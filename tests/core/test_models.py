@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, cast
 
 from squidbot.core.models import (
     ChannelStatus,
@@ -37,6 +38,15 @@ def test_message_to_openai_dict_includes_reasoning_content() -> None:
     # With flag: reasoning_content included
     payload = msg.to_openai_dict(include_reasoning_content=True)
     assert payload["reasoning_content"] == "internal reasoning"
+
+
+def test_message_to_openai_dict_multimodal_content() -> None:
+    content = [
+        {"type": "text", "text": "hello"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+    ]
+    msg = Message(role="user", content=cast(Any, content))
+    assert msg.to_openai_dict()["content"] == content
 
 
 # BH|
@@ -88,10 +98,16 @@ def test_inbound_message_metadata_custom():
     assert msg.metadata["matrix_event_id"] == "$abc"
 
 
-def test_outbound_message_attachment_default_none():
-    session = Session(channel="test", sender_id="user")
+def test_inbound_message_multimodal_content_default_none() -> None:
+    session = Session(channel="matrix", sender_id="@u:matrix.org")
+    msg = InboundMessage(session=session, text="x")
+    assert cast(Any, msg).multimodal_content is None
+
+
+def test_outbound_message_attachment_defaults_to_empty_list() -> None:
+    session = Session(channel="matrix", sender_id="@u:matrix.org")
     msg = OutboundMessage(session=session, text="hi")
-    assert msg.attachment is None
+    assert msg.attachment == []
     assert msg.metadata == {}
 
 
@@ -99,8 +115,8 @@ def test_outbound_message_attachment_set():
     from pathlib import Path
 
     session = Session(channel="test", sender_id="user")
-    msg = OutboundMessage(session=session, text="", attachment=Path("/tmp/foo.jpg"))
-    assert msg.attachment == Path("/tmp/foo.jpg")
+    msg = OutboundMessage(session=session, text="", attachment=[Path("/tmp/foo.jpg")])
+    assert msg.attachment == [Path("/tmp/foo.jpg")]
 
 
 class TestSessionInfo:
