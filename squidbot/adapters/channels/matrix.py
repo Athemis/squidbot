@@ -249,14 +249,6 @@ class MatrixChannel:
                 )
                 self._e2ee_available = True
                 self._e2ee_degraded_reason = None
-                try:
-                    client.load_store()
-                except Exception as load_exc:  # noqa: BLE001
-                    logger.warning(
-                        "MatrixChannel: E2EE store load failed ({}); "
-                        "encrypted messages may be undecryptable until keys are re-established.",
-                        load_exc,
-                    )
             except (AttributeError, ImportError, ImportWarning) as exc:
                 self._e2ee_available = False
                 self._e2ee_degraded_reason = type(exc).__name__
@@ -285,6 +277,16 @@ class MatrixChannel:
 
         client.access_token = cfg.access_token
         client.user_id = cfg.user_id
+        client.device_id = cfg.device_id
+        if self._e2ee_available:
+            try:
+                client.load_store()
+            except Exception as load_exc:  # noqa: BLE001
+                logger.warning(
+                    "MatrixChannel: E2EE store load failed ({}); "
+                    "encrypted messages may be undecryptable until keys are re-established.",
+                    load_exc,
+                )
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
         # matrix-nio callback typing does not accept InviteMemberEvent here, even though
