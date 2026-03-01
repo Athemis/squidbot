@@ -284,6 +284,8 @@ class MatrixChannel:
         client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
         # Keep UnknownEvent for reaction parsing and encrypted-event diagnostics.
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
+        # Temporary diagnostic: log every sync response to confirm server contact.
+        client.add_response_callback(self._handle_sync_response, nio.SyncResponse)
         self._client = client
         self._sync_start_ms = int(datetime.now().timestamp() * 1000)
         logger.info("MatrixChannel: connected as {}", cfg.user_id)
@@ -318,6 +320,12 @@ class MatrixChannel:
             logger.error("MatrixChannel: sync_forever error: {}", exc)
 
     # ── Event handlers ───────────────────────────────────────────────────────
+
+    async def _handle_sync_response(self, response: Any) -> None:
+        """Temporary diagnostic: log each sync response from the server."""
+        rooms = getattr(response, "rooms", None)
+        joined = list(getattr(rooms, "join", {}).keys()) if rooms else []
+        logger.debug("MatrixChannel: sync response received joined_rooms={}", joined)
 
     async def _handle_text(self, room: Any, event: Any) -> None:
         """Handle an incoming m.room.message (m.text) event."""
