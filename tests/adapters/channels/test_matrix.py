@@ -1180,8 +1180,7 @@ class TestMatrixInboundGuardrails:
         """Downloaded content > max_inbound_embed_bytes: text path only, no embedding."""
         from squidbot.adapters.channels.matrix import MatrixChannel
 
-        embed_limit = 2 * 1024 * 1024  # 2 MB
-        # 1.6MB raw bytes → encoded > 2.1MB → exceeds embed limit
+        # 1.6MB raw bytes → encoded > 2.1MB → exceeds 2MB embed limit
         image_bytes = b"\xff\xd8" + b"\x00" * (1_600_000)
 
         config = _make_config()
@@ -1246,7 +1245,8 @@ class TestMatrixInboundGuardrails:
         assert "/tmp" in text or "squidbot" in text.lower()
 
     async def test_multimodal_propagated_from_download_to_inbound_message(self) -> None:
-        """_handle_media propagates multimodal_content exactly as returned by _download_attachment."""
+        """_handle_media propagates multimodal_content exactly as returned by
+        _download_attachment."""
         from squidbot.adapters.channels.matrix import MatrixChannel
 
         config = _make_config(group_policy="open")
@@ -1270,8 +1270,6 @@ class TestMatrixInboundGuardrails:
 
     async def test_encoded_size_boundary_just_below_embeds(self) -> None:
         """Image whose encoded size is exactly at embed limit is embedded."""
-        import base64
-
         from squidbot.adapters.channels.matrix import MatrixChannel
 
         # Find raw size such that estimated_encoded_bytes == max_inbound_embed_bytes

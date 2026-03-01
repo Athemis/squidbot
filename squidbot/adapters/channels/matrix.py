@@ -219,10 +219,11 @@ class MatrixChannel:
             file_size = path.stat().st_size
             if file_size > effective_limit:
                 logger.debug(
-                    "MatrixChannel: skip outbound path={} size={} limit={} reason=exceeds_outbound_limit",
+                    "MatrixChannel: skip outbound path={} size={} limit={} reason={}",
                     path,
                     file_size,
                     effective_limit,
+                    "exceeds_outbound_limit",
                 )
                 continue
             await self._send_attachment(room_id, path, thread_root)
@@ -722,10 +723,11 @@ class MatrixChannel:
                     ds = 0
                 if ds > max_download:
                     logger.debug(
-                        "MatrixChannel: skip download mxc={} filename={} declared_size={} reason=exceeds_download_limit_preflight",
+                        "MatrixChannel: skip download mxc={} file={} size={} reason={}",
                         mxc,
                         filename,
                         ds,
+                        "exceeds_download_limit_preflight",
                     )
                     return f"[Anhang: {filename} — zu groß]", None
 
@@ -794,11 +796,12 @@ class MatrixChannel:
         estimated_encoded_bytes = 4 * ((raw_bytes + 2) // 3) + len(f"data:{mimetype};base64,")
         if estimated_encoded_bytes > max_embed:
             logger.debug(
-                "MatrixChannel: text_fallback mxc={} mime={} estimated_encoded={} limit={} reason=exceeds_embed_limit",
+                "MatrixChannel: text_fallback mxc={} mime={} encoded={} limit={} reason={}",
                 mxc,
                 mimetype,
                 estimated_encoded_bytes,
                 max_embed,
+                "exceeds_embed_limit",
             )
             return text, None
 

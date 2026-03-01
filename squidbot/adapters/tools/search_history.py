@@ -77,6 +77,7 @@ def _scan_history(
 
             if (
                 message.role in SEARCHABLE_ROLES
+                and isinstance(message.content, str)
                 and message.content
                 and normalized_query in message.content.lower()
             ):
@@ -106,7 +107,11 @@ def _format_matches(matches: list[tuple[Message | None, Message, Message | None]
         for context_message in (before, hit, after):
             if context_message is None:
                 continue
-            if context_message.role not in SEARCHABLE_ROLES or not context_message.content:
+            if (
+                context_message.role not in SEARCHABLE_ROLES
+                or not isinstance(context_message.content, str)
+                or not context_message.content
+            ):
                 continue
 
             role_label = context_message.role.upper()
