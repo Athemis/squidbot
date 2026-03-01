@@ -630,6 +630,31 @@ class TestMatrixChannelE2ee:
         ):
             await ch._connect()
 
+    async def test_connect_logs_install_hint_when_e2ee_support_missing(self) -> None:
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(user_id="@bot:example.org")
+        ch = MatrixChannel(config=config)
+        fake_client = MagicMock()
+        fake_client.add_event_callback = MagicMock()
+
+        with (
+            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", True)),
+            patch(
+                "squidbot.adapters.channels.matrix.nio.AsyncClientConfig",
+                side_effect=ImportError("missing e2e extras"),
+            ),
+            patch("squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client),
+            patch("squidbot.adapters.channels.matrix.logger.warning") as warn_log,
+        ):
+            await ch._connect()
+
+        warn_log.assert_any_call(
+            "MatrixChannel: E2EE unavailable ({}). "
+            "Install matrix-nio[e2e] to enable encrypted DMs.",
+            "ImportError",
+        )
+
     async def test_logs_encrypted_unknown_event_details(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
