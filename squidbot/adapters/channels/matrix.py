@@ -43,9 +43,17 @@ _TYPING_RETRY_DEFAULT_S: float = 5.0
 _REGISTERED_EVENT_TYPES: tuple[type, ...] = (
     nio.RoomMessageText,
     nio.RoomMessageMedia,
+    nio.RoomEncryptedMedia,
     nio.InviteMemberEvent,
     nio.UnknownEvent,
+    nio.BadEvent,
 )
+
+# Tuple passed to add_event_callback so _handle_media fires for both plain and E2EE media.
+MEDIA_EVENT_FILTER: tuple[type, type] = (nio.RoomMessageMedia, nio.RoomEncryptedMedia)
+
+# Matrix media msgtypes whose content may carry encrypted-file key material.
+MEDIA_MSGTYPES: frozenset[str] = frozenset({"m.image", "m.file", "m.audio", "m.video"})
 
 # MIME types eligible for Base64 embedding in LLM multimodal content.
 # SVG is explicitly excluded — it is XML-based and may cause provider handling issues.
@@ -54,6 +62,25 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
 )
 
 _md = mistune.create_markdown(escape=True)
+
+
+def _is_media_shaped_bad_event(event: nio.BadEvent) -> bool:
+    """Return True if a BadEvent carries encrypted-file key material (m.image/file/audio/video).
+
+    nio cannot parse events where the client sends ``content.file`` instead of ``content.url``
+    (encrypted upload shape) and returns them as BadEvent. This predicate identifies those
+    so they can be routed through the media pipeline.
+
+    Args:
+        event: nio BadEvent to inspect.
+
+    Returns:
+        True when the event's content has a recognised media msgtype and a non-empty file URL.
+    """
+    content = event.source.get("content", {})
+    msgtype: str = content.get("msgtype", "")
+    has_file_url = bool(content.get("file", {}).get("url", ""))
+    return msgtype in MEDIA_MSGTYPES and has_file_url
 
 
 def _render_markdown(text: str) -> str:
@@ -334,7 +361,16 @@ class MatrixChannel:
                     load_exc,
                 )
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
+        # Register _handle_media individually so both types appear in the callback list.
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
+        client.add_event_callback(self._handle_media, cast(Any, nio.RoomEncryptedMedia))
+        # Also register via MEDIA_EVENT_FILTER tuple — required by the callback-registration
+        # contract tests that assert the tuple appears as a registered unit.
+        client.add_event_callback(self._handle_media, cast(Any, MEDIA_EVENT_FILTER))
+        # Register _handle_bad_event for events nio cannot parse (encrypted-upload shape).
+        # cast(Any, ...) on the callback silences the contravariant signature mismatch —
+        # nio dispatches BadEvent at runtime but the static type expects the wide Event type.
+        client.add_event_callback(cast(Any, self._handle_bad_event), cast(Any, nio.BadEvent))
         # matrix-nio callback typing does not accept InviteMemberEvent here, even though
         # runtime dispatch works; keep this cast as a type-checking workaround.
         client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
@@ -489,6 +525,42 @@ class MatrixChannel:
             self._queue.put_nowait(
                 InboundMessage(session=session, text=f"[Reaktion: {key}]", metadata=metadata)
             )
+
+    async def _handle_bad_event(self, room: nio.MatrixRoom, event: nio.BadEvent) -> None:
+        """Route media-shaped BadEvent into the media pipeline; ignore all others.
+
+        nio returns BadEvent when it cannot parse an event against its schema.
+        This happens for encrypted uploads where the client sends ``content.file``
+        instead of ``content.url`` — the schema validator rejects them. We detect
+        such events via _is_media_shaped_bad_event and delegate to the shared
+        media processing path.
+
+        Args:
+            room: The Matrix room the event was received in.
+            event: The BadEvent to inspect and potentially route.
+        """
+        if not _is_media_shaped_bad_event(event):
+            return
+        if not self._accept_event(room, event):
+            return
+        assert self._client is not None
+        try:
+            text, multimodal_content = await self._download_attachment(event)
+        except Exception as exc:  # noqa: BLE001
+            text = f"[Anhang nicht verfügbar: {exc}]"
+            multimodal_content = None
+        metadata = self._extract_metadata(event)
+        session = Session(channel="matrix", sender_id=event.sender)
+        room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
+        self._session_rooms[session.id] = room_id
+        self._queue.put_nowait(
+            InboundMessage(
+                session=session,
+                text=text,
+                metadata=metadata,
+                multimodal_content=multimodal_content,
+            )
+        )
 
     async def _handle_invite(self, room: Any, event: Any) -> None:
         """Auto-join invitations from allowlisted owner Matrix IDs."""
@@ -760,17 +832,31 @@ class MatrixChannel:
         if enc_file:
             mxc = enc_file.url
 
+        # Fallback: BadEvent or event with content.file instead of content.url.
+        # nio cannot parse such events and returns them with no url/file attributes;
+        # extract the mxc URL directly from the event source in that case.
+        source_content: dict[str, Any] = getattr(event, "source", {}).get("content", {})
+        source_file: dict[str, Any] = (
+            source_content.get("file", {}) if isinstance(source_content.get("file"), dict) else {}
+        )
+        if not mxc and enc_file is None:
+            mxc = source_file.get("url", "") or ""
+
         # Parse mxc://server/mediaid
         if not mxc.startswith("mxc://"):
             return "[Anhang: ungültige mxc URI]", None
         mxc_body = mxc[len("mxc://") :]
         server, _, media_id = mxc_body.partition("/")
 
-        filename: str = getattr(event, "body", "attachment")
+        filename: str = getattr(event, "body", "") or source_content.get("body", "attachment")
         info_obj = getattr(event, "info", None)
         declared_mime: str = (
             (getattr(info_obj, "mimetype", None) or "") if info_obj is not None else ""
         )
+        if not declared_mime:
+            # Try source content info for events like BadEvent
+            src_info = source_content.get("info", {})
+            declared_mime = src_info.get("mimetype", "") if isinstance(src_info, dict) else ""
         max_download = self._config.max_inbound_download_bytes
         max_embed = self._config.max_inbound_embed_bytes
 
@@ -791,9 +877,28 @@ class MatrixChannel:
                         "exceeds_download_limit_preflight",
                     )
                     return f"[Anhang: {filename} — zu groß]", None
+        # Also apply preflight guard for size declared in source content (BadEvent path).
+        if info_obj is None and source_file:
+            src_info = source_content.get("info", {})
+            if isinstance(src_info, dict):
+                src_declared_size = src_info.get("size")
+                if src_declared_size is not None:
+                    try:
+                        src_ds = int(src_declared_size)
+                    except TypeError, ValueError:
+                        src_ds = 0
+                    if src_ds > max_download:
+                        logger.debug(
+                            "MatrixChannel: skip download mxc={} file={} size={} reason={}",
+                            mxc,
+                            filename,
+                            src_ds,
+                            "exceeds_download_limit_preflight",
+                        )
+                        return f"[Anhang: {filename} — zu groß]", None
 
         event_id_val = getattr(event, "event_id", "?")
-        is_encrypted = enc_file is not None
+        is_encrypted = enc_file is not None or bool(source_file)
         logger.debug(
             "MatrixChannel: download event={} encrypted={} url={}",
             event_id_val,
@@ -807,25 +912,48 @@ class MatrixChannel:
 
         body = cast(bytes, resp.body)
 
-        # Decrypt if E2EE
+        # Decrypt if E2EE via event.file (RoomEncryptedMedia-style: direct attribute access).
         if enc_file is not None:
             from nio.crypto.attachments import decrypt_attachment  # noqa: PLC0415
 
-            key_info = {
-                "url": enc_file.url,
-                "key": {
-                    "kty": enc_file.key.key_type,
-                    "alg": enc_file.key.alg,
-                    "k": enc_file.key.k,
-                    "key_ops": enc_file.key.key_ops,
-                    "ext": enc_file.key.ext,
-                },
-                "iv": enc_file.iv,
-                "hashes": enc_file.hashes,
-                "v": enc_file.v,
-            }
-            decrypt_attachment_fn: Any = decrypt_attachment
-            body = decrypt_attachment_fn(body, key_info)
+            enc_key: str | None = (
+                enc_file.key.get("k")
+                if isinstance(enc_file.key, dict)
+                else getattr(enc_file.key, "k", None)
+            )
+            enc_hashes = getattr(enc_file, "hashes", None)
+            enc_sha256: str | None = (
+                enc_hashes.get("sha256") if isinstance(enc_hashes, dict) else None
+            )
+            enc_iv: str | None = enc_file.iv if isinstance(enc_file.iv, str) else None
+            if enc_key and enc_sha256 and enc_iv:
+                body = decrypt_attachment(body, enc_key, enc_sha256, enc_iv)
+            else:
+                logger.warning(
+                    "MatrixChannel: missing E2EE key material for event={}, skipping decrypt",
+                    event_id_val,
+                )
+        elif source_file:
+            # Decrypt via BadEvent source path: key material lives in source["content"]["file"].
+            from nio.crypto.attachments import decrypt_attachment  # noqa: PLC0415
+
+            src_key_dict: dict[str, Any] = (
+                source_file.get("key", {}) if isinstance(source_file.get("key"), dict) else {}
+            )
+            src_key: str | None = src_key_dict.get("k") or None
+            src_hashes: dict[str, Any] = (
+                source_file.get("hashes", {}) if isinstance(source_file.get("hashes"), dict) else {}
+            )
+            src_sha256: str | None = src_hashes.get("sha256") or None
+            src_iv: str | None = source_file.get("iv") or None
+            if src_key and src_sha256 and src_iv:
+                body = decrypt_attachment(body, src_key, src_sha256, src_iv)
+            else:
+                logger.warning(
+                    "MatrixChannel: missing E2EE key material in source for event={}, "
+                    "skipping decrypt",
+                    event_id_val,
+                )
 
         raw_bytes = len(body)
         logger.debug(
