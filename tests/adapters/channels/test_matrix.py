@@ -527,8 +527,7 @@ class TestMatrixMediaMetadata:
 class TestMatrixRoomMembershipLogging:
     """Room-membership observability logs cover joined and missing rooms."""
 
-    @pytest.mark.asyncio
-    async def test_logs_joined_and_missing_configured_rooms(self) -> None:
+    def test_logs_joined_and_missing_configured_rooms(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
         config = _make_config(room_ids=["!room1:example.org", "!room2:example.org"])
@@ -551,8 +550,7 @@ class TestMatrixRoomMembershipLogging:
             "!room2:example.org",
         )
 
-    @pytest.mark.asyncio
-    async def test_logs_all_configured_rooms_joined(self) -> None:
+    def test_logs_all_configured_rooms_joined(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
         config = _make_config(room_ids=["!room1:example.org"])
@@ -569,7 +567,6 @@ class TestMatrixRoomMembershipLogging:
 class TestMatrixChannelE2ee:
     """MatrixChannel E2EE initialization and encrypted-event diagnostics."""
 
-    @pytest.mark.asyncio
     async def test_connect_enables_e2ee_with_persistent_store_path(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -594,7 +591,6 @@ class TestMatrixChannelE2ee:
         assert kwargs["config"].encryption_enabled is True
         assert kwargs["config"].store_sync_tokens is True
 
-    @pytest.mark.asyncio
     async def test_connect_degrades_when_crypto_store_permissions_fail(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -616,7 +612,6 @@ class TestMatrixChannelE2ee:
         assert ch._e2ee_available is False
         assert ch._e2ee_degraded_reason == "CryptoStorePermissions"
 
-    @pytest.mark.asyncio
     async def test_connect_does_not_swallow_unexpected_e2ee_errors(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -635,7 +630,6 @@ class TestMatrixChannelE2ee:
         ):
             await ch._connect()
 
-    @pytest.mark.asyncio
     async def test_logs_encrypted_unknown_event_details(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -665,7 +659,6 @@ class TestMatrixChannelE2ee:
             "m.megolm.v1.aes-sha2",
         )
 
-    @pytest.mark.asyncio
     async def test_logs_error_for_encrypted_event_when_degraded(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -693,7 +686,6 @@ class TestMatrixChannelE2ee:
             "$enc2",
         )
 
-    @pytest.mark.asyncio
     async def test_sync_loop_logs_enabled_readiness(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -716,7 +708,6 @@ class TestMatrixChannelE2ee:
             1,
         )
 
-    @pytest.mark.asyncio
     async def test_sync_loop_logs_degraded_readiness_reason(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -741,7 +732,6 @@ class TestMatrixChannelE2ee:
             "ImportWarning",
         )
 
-    @pytest.mark.asyncio
     async def test_sync_loop_logs_readiness_when_initial_sync_errors(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -784,7 +774,6 @@ class TestMatrixChannelE2ee:
 class TestMatrixChannelInvites:
     """Owner-only invite auto-join behavior."""
 
-    @pytest.mark.asyncio
     async def test_invite_from_owner_triggers_join(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -804,7 +793,6 @@ class TestMatrixChannelInvites:
 
         ch._client.join.assert_awaited_once_with("!dm:example.org")
 
-    @pytest.mark.asyncio
     async def test_invite_from_non_owner_is_ignored(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -835,7 +823,6 @@ class TestMatrixChannelInvites:
 
         assert "@owner:example.org" in ch._owner_matrix_ids
 
-    @pytest.mark.asyncio
     async def test_invite_with_non_matching_state_key_is_ignored(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 
@@ -855,7 +842,6 @@ class TestMatrixChannelInvites:
 
         ch._client.join.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_invite_join_error_is_logged(self) -> None:
         from squidbot.adapters.channels.matrix import MatrixChannel
 

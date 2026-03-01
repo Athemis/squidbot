@@ -278,7 +278,8 @@ class MatrixChannel:
         client.user_id = cfg.user_id
         client.add_event_callback(self._handle_text, nio.RoomMessageText)
         client.add_event_callback(self._handle_media, nio.RoomMessageMedia)
-        # matrix-nio's callback typing rejects InviteMemberEvent without widening.
+        # matrix-nio callback typing does not accept InviteMemberEvent here, even though
+        # runtime dispatch works; keep this cast as a type-checking workaround.
         client.add_event_callback(self._handle_invite, cast(Any, nio.InviteMemberEvent))
         # Keep UnknownEvent for reaction parsing and encrypted-event diagnostics.
         client.add_event_callback(self._handle_reaction, nio.UnknownEvent)
