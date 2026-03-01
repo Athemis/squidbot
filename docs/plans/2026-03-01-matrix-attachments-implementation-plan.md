@@ -2,984 +2,481 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Fix Matrix outbound attachment upload bug and add inbound multimodal image support for vision LLMs.
+**Goal:** Fix Matrix outbound attachment upload, add safe inbound image multimodal support, and keep cross-channel attachment behavior compatible.
 
-**Architecture:** `Message.content` becomes `str | list[dict]`; `OutboundMessage.attachment` becomes `list[Path]`; Matrix channel embeds downloaded images as Base64 `image_url` blocks; outbound upload uses `io.BytesIO` instead of a broken lambda.
+**Architecture:** Extend core message models for multimodal user content and multi-attachment outbound payloads. Update Matrix adapter for BytesIO upload and guarded image embedding, update Email adapter for list-attachment compatibility, and wire gateway dispatch in the real runtime loops (`cli/gateway.py`). Add lightweight debug logs at attachment decision points.
 
-**Tech Stack:** matrix-nio, Python `io.BytesIO`, `base64` stdlib, OpenAI multimodal message format, pytest + unittest.mock
+**Tech Stack:** Python 3.14, matrix-nio, OpenAI chat multimodal payload format, Loguru, pytest, mypy --strict, ruff
 
 ---
 
-### Task 1: Extend `Message.content` and `OutboundMessage.attachment` in models.py
+### Task 1: Add failing tests for model contract changes
 
 **Files:**
-- Modify: `squidbot/core/models.py`
-- Test: `tests/core/test_models.py`
+- Modify: `tests/core/test_models.py`
 
-**Step 1: Write the failing test**
+**Step 1: Write the failing tests**
 
-In `tests/core/test_models.py`, add:
+Add tests for:
 
 ```python
 def test_message_to_openai_dict_multimodal_content() -> None:
-    """Message with list content serializes correctly for OpenAI API."""
-    content: list[dict[str, Any]] = [
+    content = [
         {"type": "text", "text": "hello"},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
     ]
     msg = Message(role="user", content=content)
-    d = msg.to_openai_dict()
-    assert d["content"] == content
+    assert msg.to_openai_dict()["content"] == content
 
 
 def test_outbound_message_attachment_defaults_to_empty_list() -> None:
-    """OutboundMessage.attachment is [] by default."""
-    session = Session(channel="test", sender_id="u1")
+    session = Session(channel="matrix", sender_id="@u:matrix.org")
     msg = OutboundMessage(session=session, text="hi")
     assert msg.attachment == []
 
 
-def test_outbound_message_attachment_accepts_list() -> None:
-    """OutboundMessage.attachment accepts a list of Path objects."""
-    session = Session(channel="test", sender_id="u1")
-    paths = [Path("/tmp/a.jpg"), Path("/tmp/b.pdf")]
-    msg = OutboundMessage(session=session, text="hi", attachment=paths)
-    assert msg.attachment == paths
+def test_inbound_message_multimodal_content_default_none() -> None:
+    session = Session(channel="matrix", sender_id="@u:matrix.org")
+    msg = InboundMessage(session=session, text="x")
+    assert msg.multimodal_content is None
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run tests to confirm failures**
+
+Run:
+`uv run pytest tests/core/test_models.py -k "multimodal_content or attachment_defaults" -v`
+
+Expected: FAIL (fields/types not yet updated).
+
+**Step 3: Commit test-only red phase**
 
 ```bash
-uv run pytest tests/core/test_models.py::test_message_to_openai_dict_multimodal_content tests/core/test_models.py::test_outbound_message_attachment_defaults_to_empty_list tests/core/test_models.py::test_outbound_message_attachment_accepts_list -v
-```
-
-Expected: FAIL (type annotation mismatch, default wrong)
-
-**Step 3: Modify `squidbot/core/models.py`**
-
-Change `Message.content`:
-```python
-# Before:
-content: str
-# After:
-content: str | list[dict[str, Any]]
-```
-
-Change `OutboundMessage.attachment`:
-```python
-# Before:
-attachment: Path | None = None
-# After:
-attachment: list[Path] = field(default_factory=list)
-```
-
-Remove the `Path` import if no longer used elsewhere (check first — `Path` may still be used in other fields). Add `field` import if missing from `dataclasses`.
-
-**Step 4: Run tests to verify they pass**
-
-```bash
-uv run pytest tests/core/test_models.py -v
-```
-
-**Step 5: Run mypy and ruff**
-
-```bash
-uv run mypy squidbot/core/models.py
-uv run ruff check squidbot/core/models.py
-```
-
-Fix any type errors. The `Message.content` change may require updating `to_openai_dict()` — check that `d["content"] = self.content` still works (it does; dict serializes correctly).
-
-**Step 6: Commit**
-
-```bash
-git add squidbot/core/models.py tests/core/test_models.py
-git commit -m "feat: extend Message.content to support multimodal list and OutboundMessage.attachment to list"
+git add tests/core/test_models.py
+git commit -m "test: add failing model contract tests for matrix attachment rework"
 ```
 
 ---
 
-### Task 2: Update `InboundMessage` with optional `multimodal_content` field
+### Task 2: Implement core model changes
 
 **Files:**
 - Modify: `squidbot/core/models.py`
-- Test: `tests/core/test_models.py`
+- Modify: `tests/core/test_models.py` (if minor fixture/type adjustments needed)
 
-**Step 1: Write the failing test**
+**Step 1: Implement minimal changes**
 
-```python
-def test_inbound_message_multimodal_content_default_none() -> None:
-    """InboundMessage.multimodal_content defaults to None."""
-    session = Session(channel="matrix", sender_id="@user:matrix.org")
-    msg = InboundMessage(session=session, text="[Anhang: foo.jpg]")
-    assert msg.multimodal_content is None
-
-
-def test_inbound_message_multimodal_content_set() -> None:
-    """InboundMessage.multimodal_content can be set to a list."""
-    session = Session(channel="matrix", sender_id="@user:matrix.org")
-    blocks: list[dict[str, Any]] = [
-        {"type": "text", "text": "[Anhang: foo.jpg]"},
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,xyz"}},
-    ]
-    msg = InboundMessage(session=session, text="[Anhang: foo.jpg]", multimodal_content=blocks)
-    assert msg.multimodal_content == blocks
-```
-
-**Step 2: Run to verify FAIL**
-
-```bash
-uv run pytest tests/core/test_models.py::test_inbound_message_multimodal_content_default_none tests/core/test_models.py::test_inbound_message_multimodal_content_set -v
-```
-
-**Step 3: Add field to `InboundMessage`**
+Update dataclasses:
 
 ```python
-@dataclass
+class Message:
+    content: str | list[dict[str, Any]]
+
+
 class InboundMessage:
-    """A message received from a channel."""
-    session: Session
-    text: str
-    received_at: datetime = field(default_factory=datetime.now)
-    metadata: dict[str, Any] = field(default_factory=dict)
-    multimodal_content: list[dict[str, Any]] | None = None  # ← add this
-```
-
-**Step 4: Run tests to verify PASS**
-
-```bash
-uv run pytest tests/core/test_models.py -v
-```
-
-**Step 5: Commit**
-
-```bash
-git add squidbot/core/models.py tests/core/test_models.py
-git commit -m "feat: add multimodal_content field to InboundMessage"
-```
-
----
-
-### Task 3: Update `AgentLoop.run()` to pass multimodal content to LLM
-
-**Files:**
-- Modify: `squidbot/core/agent.py`
-- Test: `tests/core/test_agent.py`
-
-**Step 1: Read existing agent tests to understand the test double pattern**
-
-Read `tests/core/test_agent.py` to understand `ScriptedLLM` and `CollectingChannel`.
-
-**Step 2: Write a failing test**
-
-Add to `tests/core/test_agent.py`:
-
-```python
-async def test_multimodal_user_message_sent_to_llm() -> None:
-    """AgentLoop passes multimodal content list as Message.content to LLM."""
-    # ScriptedLLM records what messages it received
-    captured: list[list[Message]] = []
-
-    class CapturingLLM:
-        async def chat(
-            self,
-            messages: list[Message],
-            tools: list[ToolDefinition],
-            *,
-            stream: bool = True,
-        ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
-            captured.append(messages)
-            async def _gen() -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
-                yield "ok"
-            return _gen()
-
-    # Build a minimal agent
-    memory = InMemoryMemory()  # use existing test double
-    registry = ToolRegistry()
-    agent = AgentLoop(CapturingLLM(), MemoryManager(memory), registry, "system")
-    channel = CollectingChannel()
-
-    multimodal: list[dict[str, Any]] = [
-        {"type": "text", "text": "what is in this image?"},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-    ]
-    await agent.run(
-        session=Session(channel="matrix", sender_id="@user:matrix.org"),
-        user_message=multimodal,
-        channel=channel,
-    )
-
-    # Find the user message in captured
-    user_msgs = [m for m in captured[0] if m.role == "user"]
-    assert len(user_msgs) == 1
-    assert user_msgs[0].content == multimodal
-```
-
-**Step 3: Run to verify FAIL**
-
-```bash
-uv run pytest tests/core/test_agent.py::test_multimodal_user_message_sent_to_llm -v
-```
-
-**Step 4: Update `agent.run()` signature**
-
-In `squidbot/core/agent.py`:
-
-```python
-async def run(
-    self,
-    session: Session,
-    user_message: str | list[dict[str, Any]],  # ← change from str
-    channel: ChannelPort,
-    *,
-    llm: LLMPort | None = None,
-    extra_tools: Sequence[ToolPort] | None = None,
-    outbound_metadata: dict[str, Any] | None = None,
-) -> None:
-```
-
-In `_memory.build_messages()` the `user_message` is a str. When multimodal, we need to extract the text portion for memory storage. Update the call:
-
-```python
-# Extract text for memory (multimodal → use first text block or repr)
-user_text_for_memory: str
-if isinstance(user_message, str):
-    user_text_for_memory = user_message
-else:
-    text_blocks = [b["text"] for b in user_message if b.get("type") == "text"]
-    user_text_for_memory = " ".join(text_blocks) if text_blocks else "[multimodal message]"
-
-try:
-    messages = await self._memory.build_messages(
-        user_message=user_text_for_memory,
-        system_prompt=self._system_prompt,
-    )
-except Exception as exc:
     ...
+    multimodal_content: list[dict[str, Any]] | None = None
 
-# Replace the last user message content with multimodal if needed
-if isinstance(user_message, list) and messages:
-    last_user = messages[-1]
-    if last_user.role == "user":
-        messages[-1] = Message(
-            role="user",
-            content=user_message,
-            timestamp=last_user.timestamp,
-            channel=last_user.channel,
-            sender_id=last_user.sender_id,
-        )
+
+class OutboundMessage:
+    ...
+    attachment: list[Path] = field(default_factory=list)
 ```
 
-Also update `persist_exchange`:
-```python
-await self._memory.persist_exchange(
-    channel=session.channel,
-    sender_id=session.sender_id,
-    user_message=user_text_for_memory,  # ← use text-only for storage
-    assistant_reply=final_text,
-)
-```
+Keep `to_openai_dict()` behavior unchanged except typing compatibility.
 
-**Step 5: Run tests to verify PASS**
+**Step 2: Run focused tests**
 
-```bash
-uv run pytest tests/core/test_agent.py -v
-uv run mypy squidbot/core/agent.py
-```
+Run:
+`uv run pytest tests/core/test_models.py -v`
 
-**Step 6: Commit**
+Expected: PASS.
 
-```bash
-git add squidbot/core/agent.py tests/core/test_agent.py
-git commit -m "feat: agent.run() accepts multimodal list as user_message"
-```
+**Step 3: Run strict checks**
 
----
+Run:
+`uv run mypy squidbot/core/models.py`
 
-### Task 4: Fix Matrix outbound upload bug
-
-**Files:**
-- Modify: `squidbot/adapters/channels/matrix.py`
-- Test: `tests/adapters/channels/test_matrix.py`
-
-**Step 1: Read existing matrix tests**
-
-Read `tests/adapters/channels/test_matrix.py` to understand existing mock structure.
-
-**Step 2: Write failing test for upload**
-
-```python
-async def test_send_attachment_uses_bytesio(tmp_path: Path) -> None:
-    """_send_attachment passes BytesIO to client.upload(), not a lambda."""
-    import io
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    test_file = tmp_path / "test.jpg"
-    test_file.write_bytes(b"fake-jpeg-data")
-
-    mock_client = AsyncMock()
-    mock_upload_response = MagicMock()
-    mock_upload_response.content_uri = "mxc://matrix.org/abc123"
-    mock_client.upload = AsyncMock(return_value=(mock_upload_response, None))
-    mock_client.room_send = AsyncMock(return_value=MagicMock(spec=[]))  # not RoomSendError
-
-    config = MatrixChannelConfig(
-        enabled=True,
-        homeserver="https://matrix.org",
-        user_id="@bot:matrix.org",
-        access_token="tok",
-    )
-    channel = MatrixChannel(config)
-    channel._client = mock_client
-
-    await channel._send_attachment("!room:matrix.org", test_file, None)
-
-    # Assert upload was called with BytesIO, not a lambda
-    call_args = mock_client.upload.call_args
-    first_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("data_provider")
-    assert isinstance(first_arg, io.BytesIO), f"Expected BytesIO, got {type(first_arg)}"
-```
-
-**Step 3: Run to verify FAIL**
-
-```bash
-uv run pytest tests/adapters/channels/test_matrix.py::test_send_attachment_uses_bytesio -v
-```
-
-Expected: FAIL (currently uses lambda)
-
-**Step 4: Fix `_send_attachment()` in `matrix.py`**
-
-Change lines 577-583:
-```python
-# Before:
-data = await asyncio.to_thread(path.read_bytes)
-resp = await self._client.upload(
-    data_provider=lambda *_: data,
-    content_type=mime,
-    filename=path.name,
-    filesize=len(data),
-)
-
-# After:
-import io  # add to top-of-file imports (stdlib)
-data = await asyncio.to_thread(path.read_bytes)
-resp = await self._client.upload(
-    io.BytesIO(data),
-    content_type=mime,
-    filename=path.name,
-    filesize=len(data),
-)
-```
-
-Add `import io` to the top-level imports in `matrix.py` (keep with stdlib block).
-
-**Step 5: Run tests to verify PASS**
-
-```bash
-uv run pytest tests/adapters/channels/test_matrix.py -v
-uv run mypy squidbot/adapters/channels/matrix.py
-```
-
-**Step 6: Commit**
-
-```bash
-git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
-git commit -m "fix: matrix upload uses io.BytesIO instead of broken lambda data_provider"
-```
-
----
-
-### Task 5: Support multiple outbound attachments in Matrix channel
-
-**Files:**
-- Modify: `squidbot/adapters/channels/matrix.py`
-- Modify: `squidbot/adapters/channels/cli.py` (check for `attachment` references)
-- Modify: `squidbot/adapters/channels/email.py` (check for `attachment` references)
-- Test: `tests/adapters/channels/test_matrix.py`
-
-**Step 1: Check all attachment references**
-
-Search for `message.attachment` or `.attachment` across channel adapters:
-```bash
-uv run rg "\.attachment" squidbot/adapters/channels/
-```
-
-**Step 2: Write failing test for multiple attachments**
-
-```python
-async def test_send_multiple_attachments(tmp_path: Path) -> None:
-    """send() uploads and sends each attachment as a separate Matrix media event."""
-    file1 = tmp_path / "a.jpg"
-    file2 = tmp_path / "b.png"
-    file1.write_bytes(b"jpeg")
-    file2.write_bytes(b"png")
-
-    mock_client = AsyncMock()
-    upload_resp = MagicMock()
-    upload_resp.content_uri = "mxc://matrix.org/xyz"
-    mock_client.upload = AsyncMock(return_value=(upload_resp, None))
-    mock_client.room_send = AsyncMock(return_value=MagicMock(spec=[]))
-
-    config = MatrixChannelConfig(enabled=True, homeserver="https://matrix.org",
-                                  user_id="@bot:matrix.org", access_token="tok")
-    channel = MatrixChannel(config)
-    channel._client = mock_client
-
-    session = Session(channel="matrix", sender_id="@user:matrix.org")
-    msg = OutboundMessage(
-        session=session,
-        text="here are two images",
-        attachment=[file1, file2],
-        metadata={"matrix_room_id": "!room:matrix.org"},
-    )
-    await channel.send(msg)
-
-    assert mock_client.upload.call_count == 2
-```
-
-**Step 3: Run to verify FAIL**
-
-```bash
-uv run pytest tests/adapters/channels/test_matrix.py::test_send_multiple_attachments -v
-```
-
-**Step 4: Update `MatrixChannel.send()` to iterate attachment list**
-
-```python
-async def send(self, message: OutboundMessage) -> None:
-    """Send a message (and optional attachments) to Matrix."""
-    assert self._client is not None
-    room_id = message.metadata.get("matrix_room_id", "")
-    if not isinstance(room_id, str) or not room_id:
-        logger.warning("MatrixChannel.send: no matrix_room_id in metadata, dropping")
-        return
-
-    thread_root_raw = message.metadata.get("matrix_thread_root")
-    thread_root: str | None = thread_root_raw if isinstance(thread_root_raw, str) else None
-
-    # Send each attachment
-    for attachment_path in message.attachment:
-        if attachment_path.exists():
-            await self._send_attachment(room_id, attachment_path, thread_root)
-
-    # Send text (skip if empty and attachments were sent)
-    if message.text or not message.attachment:
-        await self._send_text(room_id, message.text, thread_root)
-```
-
-Also update CLI and Email channels: if they accessed `message.attachment` as `Path | None`, update to handle `list[Path]`. Likely they ignore it — confirm and add a `# attachment field ignored` comment.
-
-**Step 5: Run all tests**
-
-```bash
-uv run pytest tests/ -v
-uv run mypy squidbot/adapters/channels/
-```
-
-**Step 6: Commit**
-
-```bash
-git add squidbot/adapters/channels/matrix.py squidbot/adapters/channels/cli.py squidbot/adapters/channels/email.py tests/adapters/channels/test_matrix.py
-git commit -m "feat: matrix channel sends multiple attachments per outbound message"
-```
-
----
-
-### Task 6: Add size limit config to MatrixChannelConfig
-
-**Files:**
-- Modify: `squidbot/config/schema.py`
-- Test: `tests/test_config.py` (or wherever config tests live)
-
-**Step 1: Write failing test**
-
-```python
-def test_matrix_channel_config_defaults() -> None:
-    """MatrixChannelConfig has a max_inbound_media_bytes field defaulting to 10MB."""
-    config = MatrixChannelConfig()
-    assert config.max_inbound_media_bytes == 10 * 1024 * 1024  # 10 MB
-```
-
-**Step 2: Run to verify FAIL**
-
-```bash
-uv run pytest tests/ -k "matrix_channel_config_defaults" -v
-```
-
-**Step 3: Add field**
-
-```python
-class MatrixChannelConfig(BaseModel):
-    """Configuration for the Matrix channel adapter."""
-    enabled: bool = False
-    homeserver: str = "https://matrix.org"
-    user_id: str = ""
-    access_token: str = ""
-    device_id: str = "SQUIDBOT01"
-    room_ids: list[str] = Field(default_factory=list)
-    group_policy: str = "mention"
-    allowlist: list[str] = Field(default_factory=list)
-    max_inbound_media_bytes: int = 10 * 1024 * 1024  # ← add this (10 MB)
-```
-
-**Step 4: Run tests**
-
-```bash
-uv run pytest tests/ -v
-```
-
-**Step 5: Commit**
-
-```bash
-git add squidbot/config/schema.py
-git commit -m "feat: add max_inbound_media_bytes to MatrixChannelConfig (default 10MB)"
-```
-
----
-
-### Task 7: Add inbound image-to-multimodal conversion in Matrix channel
-
-**Files:**
-- Modify: `squidbot/adapters/channels/matrix.py`
-- Test: `tests/adapters/channels/test_matrix.py`
-
-**Step 1: Write failing test for image multimodal conversion**
-
-```python
-async def test_download_attachment_image_returns_multimodal(tmp_path: Path) -> None:
-    """_download_attachment returns multimodal_content for images."""
-    import base64
-    fake_jpeg = b"\\xff\\xd8\\xff" + b"x" * 100  # fake JPEG header
-
-    mock_client = AsyncMock()
-    mock_download = MagicMock()
-    mock_download.body = fake_jpeg
-    mock_download.content_type = "image/jpeg"
-    mock_client.download = AsyncMock(return_value=mock_download)
-
-    config = MatrixChannelConfig(enabled=True, homeserver="https://matrix.org",
-                                  user_id="@bot:matrix.org", access_token="tok",
-                                  max_inbound_media_bytes=10 * 1024 * 1024)
-    channel = MatrixChannel(config)
-    channel._client = mock_client
-
-    # Create a fake event
-    event = MagicMock()
-    event.url = "mxc://matrix.org/fakemediaid"
-    event.file = None
-    event.body = "photo.jpg"
-    event.info = MagicMock()
-    event.info.mimetype = "image/jpeg"
-
-    text, multimodal = await channel._download_attachment(event)
-
-    assert "photo.jpg" in text
-    assert multimodal is not None
-    assert len(multimodal) == 2
-    assert multimodal[0]["type"] == "text"
-    assert multimodal[1]["type"] == "image_url"
-    assert multimodal[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
-    # Verify base64 content is correct
-    expected_b64 = base64.b64encode(fake_jpeg).decode("ascii")
-    assert expected_b64 in multimodal[1]["image_url"]["url"]
-
-
-async def test_download_attachment_non_image_returns_no_multimodal() -> None:
-    """_download_attachment returns None multimodal_content for non-image files."""
-    fake_pdf = b"%PDF-1.4" + b"x" * 100
-
-    mock_client = AsyncMock()
-    mock_download = MagicMock()
-    mock_download.body = fake_pdf
-    mock_download.content_type = "application/pdf"
-    mock_client.download = AsyncMock(return_value=mock_download)
-
-    config = MatrixChannelConfig(enabled=True, homeserver="https://matrix.org",
-                                  user_id="@bot:matrix.org", access_token="tok")
-    channel = MatrixChannel(config)
-    channel._client = mock_client
-
-    event = MagicMock()
-    event.url = "mxc://matrix.org/fakemediaid"
-    event.file = None
-    event.body = "document.pdf"
-    event.info = MagicMock()
-    event.info.mimetype = "application/pdf"
-
-    text, multimodal = await channel._download_attachment(event)
-
-    assert "document.pdf" in text
-    assert multimodal is None
-
-
-async def test_download_attachment_image_too_large_returns_no_multimodal() -> None:
-    """Images exceeding max_inbound_media_bytes get text-path only, no Base64."""
-    # 1 byte over limit
-    small_limit = 10
-    fake_jpeg = b"\\xff\\xd8" + b"x" * small_limit  # 12 bytes > 10 limit
-
-    mock_client = AsyncMock()
-    mock_download = MagicMock()
-    mock_download.body = fake_jpeg
-    mock_download.content_type = "image/jpeg"
-    mock_client.download = AsyncMock(return_value=mock_download)
-
-    config = MatrixChannelConfig(enabled=True, homeserver="https://matrix.org",
-                                  user_id="@bot:matrix.org", access_token="tok",
-                                  max_inbound_media_bytes=small_limit)
-    channel = MatrixChannel(config)
-    channel._client = mock_client
-
-    event = MagicMock()
-    event.url = "mxc://matrix.org/fakemediaid"
-    event.file = None
-    event.body = "big_photo.jpg"
-    event.info = MagicMock()
-    event.info.mimetype = "image/jpeg"
-
-    text, multimodal = await channel._download_attachment(event)
-
-    assert "big_photo.jpg" in text
-    assert multimodal is None
-```
-
-**Step 2: Run to verify FAIL**
-
-```bash
-uv run pytest tests/adapters/channels/test_matrix.py::test_download_attachment_image_returns_multimodal tests/adapters/channels/test_matrix.py::test_download_attachment_non_image_returns_no_multimodal tests/adapters/channels/test_matrix.py::test_download_attachment_image_too_large_returns_no_multimodal -v
-```
-
-**Step 3: Refactor `_download_attachment()` to return `(str, list[dict] | None)`**
-
-The current signature is:
-```python
-async def _download_attachment(self, event: Any) -> str:
-```
-
-Change to:
-```python
-async def _download_attachment(self, event: Any) -> tuple[str, list[dict[str, Any]] | None]:
-```
-
-Add `import base64` to stdlib imports at the top of `matrix.py`.
-
-New implementation logic (after saving to tmp_path):
-
-```python
-# Build text description (always)
-text = f"[Anhang: {filename} ({mimetype})] → {tmp_path}"
-
-# Build multimodal image block if MIME is an image and size within limit
-multimodal: list[dict[str, Any]] | None = None
-if mimetype.startswith("image/") and len(body) <= self._config.max_inbound_media_bytes:
-    try:
-        b64 = base64.b64encode(body).decode("ascii")
-        multimodal = [
-            {"type": "text", "text": text},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mimetype};base64,{b64}"},
-            },
-        ]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MatrixChannel: base64 encoding failed: {}", exc)
-
-return text, multimodal
-```
-
-**Step 4: Update `_handle_media()` to use the new return value**
-
-```python
-async def _handle_media(self, room: Any, event: Any) -> None:
-    """Handle an incoming m.room.message with a media msgtype."""
-    if not self._accept_event(room, event):
-        return
-    assert self._client is not None
-    try:
-        text, multimodal_content = await self._download_attachment(event)
-    except Exception as exc:  # noqa: BLE001
-        text = f"[Anhang nicht verfügbar: {exc}]"
-        multimodal_content = None
-    metadata = self._extract_metadata(event)
-    session = Session(channel="matrix", sender_id=event.sender)
-    room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
-    self._session_rooms[session.id] = room_id
-    self._queue.put_nowait(
-        InboundMessage(
-            session=session,
-            text=text,
-            metadata=metadata,
-            multimodal_content=multimodal_content,
-        )
-    )
-```
-
-**Step 5: Run all tests**
-
-```bash
-uv run pytest tests/ -v
-uv run mypy squidbot/adapters/channels/matrix.py
-```
-
-**Step 6: Commit**
-
-```bash
-git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
-git commit -m "feat: matrix inbound images embedded as Base64 multimodal blocks"
-```
-
----
-
-### Task 8: Wire multimodal_content through gateway → agent.run()
-
-**Files:**
-- Modify: `squidbot/cli/main.py` (gateway message handling loop)
-- Test: Integration check via existing gateway tests if any
-
-**Step 1: Find where `InboundMessage` is consumed and `agent.run()` is called**
-
-```bash
-uv run rg "agent.run\|inbound\.text\|msg\.text" squidbot/cli/main.py squidbot/core/
-```
-
-Read the relevant section of `squidbot/cli/main.py` to understand the dispatch loop.
-
-**Step 2: Update dispatch to pass `multimodal_content or text`**
-
-Find the `agent.run()` call in the gateway loop. Change:
-
-```python
-# Before:
-await agent.run(
-    session=msg.session,
-    user_message=msg.text,
-    channel=channel,
-    outbound_metadata=outbound_metadata,
-)
-
-# After:
-await agent.run(
-    session=msg.session,
-    user_message=msg.multimodal_content if msg.multimodal_content else msg.text,
-    channel=channel,
-    outbound_metadata=outbound_metadata,
-)
-```
-
-**Step 3: Run full test suite + mypy + ruff**
-
-```bash
-uv run pytest tests/ -v
-uv run mypy squidbot/
-uv run ruff check .
-uv run ruff format . --check
-```
-
-Fix any issues.
+Expected: PASS.
 
 **Step 4: Commit**
 
 ```bash
-git add squidbot/cli/main.py
-git commit -m "feat: gateway passes multimodal_content to agent when present"
+git add squidbot/core/models.py tests/core/test_models.py
+git commit -m "feat: support multimodal inbound content and list-based attachments in models"
 ```
 
 ---
 
-### Task 9: Add debug logging at all attachment decision points
+### Task 3: Update agent loop to accept multimodal user payloads
+
+**Files:**
+- Modify: `squidbot/core/agent.py`
+- Modify: `tests/core/test_agent.py`
+
+**Step 1: Write failing test**
+
+Add a test asserting `AgentLoop.run()` can receive `user_message` as multimodal list and forwards it into the LLM message list as user content.
+
+**Step 2: Run to verify failure**
+
+Run:
+`uv run pytest tests/core/test_agent.py -k "multimodal" -v`
+
+Expected: FAIL.
+
+**Step 3: Implement minimal fix**
+
+- Change `run(..., user_message: str | list[dict[str, Any]], ...)`.
+- Build memory context with a text fallback string when input is multimodal.
+- Replace the last user message content with multimodal payload before LLM call.
+- Persist text-only fallback in history (not base64 payload).
+
+**Step 4: Re-run tests**
+
+Run:
+`uv run pytest tests/core/test_agent.py -v`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add squidbot/core/agent.py tests/core/test_agent.py
+git commit -m "feat: allow agent loop to handle multimodal user messages"
+```
+
+---
+
+### Task 4: Add config defaults for safe media handling
+
+**Files:**
+- Modify: `squidbot/config/schema.py`
+- Modify: `tests/config/test_schema.py`
+
+**Step 1: Write failing config tests**
+
+Add tests in `tests/config/test_schema.py` for Matrix config defaults:
+
+```python
+def test_matrix_media_limits_defaults() -> None:
+    s = Settings()
+    assert s.channels.matrix.max_inbound_download_bytes == 50 * 1024 * 1024
+    assert s.channels.matrix.max_inbound_embed_bytes == 2 * 1024 * 1024
+```
+
+**Step 2: Run to verify failure**
+
+Run:
+`uv run pytest tests/config/test_schema.py -k "matrix_media_limits_defaults" -v`
+
+Expected: FAIL.
+
+**Step 3: Implement schema fields**
+
+In `MatrixChannelConfig` add:
+
+```python
+max_inbound_download_bytes: int = 50 * 1024 * 1024
+max_inbound_embed_bytes: int = 2 * 1024 * 1024
+```
+
+**Step 4: Re-run tests**
+
+Run:
+`uv run pytest tests/config/test_schema.py -v`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add squidbot/config/schema.py tests/config/test_schema.py
+git commit -m "feat: add matrix inbound download and embed size limits"
+```
+
+---
+
+### Task 5: Fix Matrix outbound upload and add multiple attachment support
 
 **Files:**
 - Modify: `squidbot/adapters/channels/matrix.py`
+- Modify: `tests/adapters/channels/test_matrix.py`
 
-The goal is lightweight, actionable debug output at every branch that determines how an
-attachment is handled. All statements use `logger.debug()` — they are silent in production
-(loguru default level is INFO) and visible when running with `--log-level debug` or
-`LOG_LEVEL=DEBUG`.
+**Step 1: Write failing tests**
 
-**No new tests needed for this task** — logging is a side-effect, not observable behavior.
-Run the existing suite to confirm nothing regressed.
+Add tests:
+- upload call receives `io.BytesIO` as first argument
+- `send()` uploads each attachment in `message.attachment`
 
-**Outbound: `_send_attachment()`**
+**Step 2: Run to verify failure**
 
-Add at the start of the method:
-```python
-logger.debug(
-    "MatrixChannel: uploading attachment path={} mime={} size_bytes={}",
-    path,
-    mime,
-    len(data),
-)
-```
+Run:
+`uv run pytest tests/adapters/channels/test_matrix.py -k "bytesio or multiple_attachments" -v`
 
-After a successful upload:
-```python
-logger.debug(
-    "MatrixChannel: attachment uploaded mxc_uri={} path={}",
-    mxc_uri,
-    path,
-)
-```
+Expected: FAIL.
 
-After `room_send` succeeds:
-```python
-logger.debug(
-    "MatrixChannel: attachment sent room={} msgtype={} mxc_uri={}",
-    room_id,
-    msgtype,
-    mxc_uri,
-)
-```
+**Step 3: Implement minimal changes**
 
-On `UploadError` (replace the existing `logger.error` with a combined error + debug):
-```python
-logger.error("MatrixChannel: upload failed: {}", upload_resp)
-logger.debug("MatrixChannel: upload failed path={} mime={}", path, mime)
-```
+- Add `import io`.
+- Replace broken lambda upload argument with `io.BytesIO(data)`.
+- Update `send()` to iterate `for path in message.attachment:`.
+- Preserve existing behavior: send text even if attachment send fails.
 
-**Inbound: `_download_attachment()`**
+**Step 4: Re-run tests**
 
-After resolving the MXC URI:
-```python
-logger.debug("MatrixChannel: downloading attachment mxc={} filename={}", mxc, filename)
-```
+Run:
+`uv run pytest tests/adapters/channels/test_matrix.py -v`
 
-After downloading:
-```python
-logger.debug(
-    "MatrixChannel: attachment downloaded mxc={} size_bytes={} mime={}",
-    mxc,
-    len(body),
-    mimetype,
-)
-```
+Expected: PASS.
 
-After deciding whether to embed as multimodal:
-```python
-if multimodal is not None:
-    logger.debug(
-        "MatrixChannel: inbound image embedded as multimodal mxc={} size_bytes={}",
-        mxc,
-        len(body),
-    )
-else:
-    logger.debug(
-        "MatrixChannel: inbound attachment passed as text path mxc={} mime={} reason={}",
-        mxc,
-        mimetype,
-        "non-image" if not mimetype.startswith("image/") else "exceeds size limit",
-    )
-```
-
-**Inbound: `_handle_media()`**
-
-After building the InboundMessage:
-```python
-logger.debug(
-    "MatrixChannel: queued inbound media session={} multimodal={}",
-    session.id,
-    multimodal_content is not None,
-)
-```
-
-**Gateway dispatch (`cli/main.py`)**
-
-Where `agent.run()` is called with multimodal or text:
-```python
-logger.debug(
-    "gateway: dispatching session={} multimodal={}",
-    msg.session.id,
-    isinstance(user_message_content, list),
-)
-```
-
-**Step: Run tests after adding logging**
+**Step 5: Commit**
 
 ```bash
-uv run pytest tests/ -v --tb=short
-uv run mypy squidbot/adapters/channels/matrix.py squidbot/cli/main.py
-uv run ruff check squidbot/adapters/channels/matrix.py squidbot/cli/main.py
-```
-
-**Step: Commit**
-
-```bash
-git add squidbot/adapters/channels/matrix.py squidbot/cli/main.py
-git commit -m "feat: add debug logging for inbound and outbound Matrix attachment handling"
+git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
+git commit -m "fix(matrix): use BytesIO for uploads and support multiple outbound attachments"
 ```
 
 ---
 
-### Task 10: Final integration check + PR
+### Task 6: Add inbound embedding guardrails (allowlist + size gates)
+
+**Files:**
+- Modify: `squidbot/adapters/channels/matrix.py`
+- Modify: `tests/adapters/channels/test_matrix.py`
+
+**Step 1: Write failing tests for guardrails**
+
+Add tests for:
+- jpeg/png/webp/gif under embed limit -> `multimodal_content` present
+- svg -> no embedding (text-only fallback)
+- declared size above download limit -> skip download and fallback text
+- downloaded size above embed limit -> no embedding
+
+**Step 2: Run to verify failure**
+
+Run:
+`uv run pytest tests/adapters/channels/test_matrix.py -k "embed or svg or download_limit" -v`
+
+Expected: FAIL.
+
+**Step 3: Implement minimal guardrails**
+
+In `matrix.py`:
+- Define `EMBEDDABLE_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"})`
+- Check declared size first (if available) against `max_inbound_download_bytes`
+- Only embed when MIME in allowlist and bytes <= `max_inbound_embed_bytes`
+- Fallback to text path otherwise
+
+**Step 4: Re-run tests**
+
+Run:
+`uv run pytest tests/adapters/channels/test_matrix.py -v`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add squidbot/adapters/channels/matrix.py tests/adapters/channels/test_matrix.py
+git commit -m "feat(matrix): add inbound image embedding guardrails and MIME allowlist"
+```
+
+---
+
+### Task 7: Preserve Email channel behavior with new attachment list contract
+
+**Files:**
+- Modify: `squidbot/adapters/channels/email.py`
+- Modify: `tests/adapters/channels/test_email.py`
+
+**Step 1: Write failing test**
+
+Add test: when `OutboundMessage.attachment` contains two files, Email channel uses the first file as MIME attachment.
+
+**Step 2: Run to verify failure**
+
+Run:
+`uv run pytest tests/adapters/channels/test_email.py -k "first_attachment" -v`
+
+Expected: FAIL.
+
+**Step 3: Implement compatibility behavior**
+
+In `email.py`:
+- Replace `if message.attachment and message.attachment.exists():`
+- With first-element contract:
+
+```python
+attachment = message.attachment[0] if message.attachment else None
+if attachment and attachment.exists():
+    ...
+```
+
+Keep MIME creation unchanged.
+
+**Step 4: Re-run tests**
+
+Run:
+`uv run pytest tests/adapters/channels/test_email.py -v`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add squidbot/adapters/channels/email.py tests/adapters/channels/test_email.py
+git commit -m "fix(email): support list attachment contract by using first item"
+```
+
+---
+
+### Task 8: Wire multimodal dispatch in the actual gateway runtime loops
+
+**Files:**
+- Modify: `squidbot/cli/gateway.py`
+- Modify: `tests/core/test_agent.py` or existing gateway-focused tests (create if missing)
+
+**Step 1: Write failing test**
+
+Add a focused test for dispatch behavior: when `InboundMessage.multimodal_content` exists, gateway passes list payload to `loop.run()`; otherwise passes `inbound.text`.
+
+**Step 2: Run to verify failure**
+
+Run:
+`uv run pytest tests -k "gateway and multimodal" -v`
+
+Expected: FAIL.
+
+**Step 3: Implement in both loops**
+
+Update both call sites in `gateway.py`:
+- `_channel_loop_with_state()`
+- `_channel_loop()`
+
+Change:
+
+```python
+inbound.text
+```
+
+to:
+
+```python
+inbound.multimodal_content if inbound.multimodal_content else inbound.text
+```
+
+**Step 4: Re-run tests**
+
+Run:
+`uv run pytest tests -k "gateway and multimodal" -v`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add squidbot/cli/gateway.py tests
+git commit -m "feat(gateway): forward multimodal inbound payloads to agent loop"
+```
+
+---
+
+### Task 9: Add lightweight debug logging for observability
+
+**Files:**
+- Modify: `squidbot/adapters/channels/matrix.py`
+- Modify: `squidbot/cli/gateway.py`
+
+**Step 1: Add debug logs at decision points**
+
+Outbound (`matrix.py`):
+- before upload: path, mime, size
+- after upload: mxc URI
+- after send: room + msgtype
+
+Inbound (`matrix.py`):
+- before download: mxc + filename
+- after download: size + mime
+- embedding decision: `embedded` vs `text_fallback` + reason (`non_image`, `embed_limit`, `download_limit`)
+
+Gateway (`gateway.py`):
+- before `loop.run()`: session id + `multimodal=True/False`
+
+Use brace-style logging only:
+
+```python
+logger.debug("Matrix inbound decision: mxc={} embedded={} reason={}", mxc, embedded, reason)
+```
+
+**Step 2: Run targeted tests**
+
+Run:
+`uv run pytest tests/adapters/channels/test_matrix.py tests/adapters/channels/test_email.py -v`
+
+Expected: PASS.
+
+**Step 3: Commit**
+
+```bash
+git add squidbot/adapters/channels/matrix.py squidbot/cli/gateway.py
+git commit -m "feat(matrix): add debug logs for attachment flow decisions"
+```
+
+---
+
+### Task 10: Full verification and PR
+
+**Files:**
+- Modify: none (verification + release task)
 
 **Step 1: Run full test suite**
 
-```bash
-uv run pytest tests/ -v --tb=short
-```
+Run:
+`uv run pytest -v --tb=short`
 
-All tests must pass.
+Expected: PASS.
 
-**Step 2: Run mypy on entire package**
+**Step 2: Run type-checking**
 
-```bash
-uv run mypy squidbot/
-```
+Run:
+`uv run mypy squidbot/`
 
-No errors allowed.
+Expected: PASS.
 
-**Step 3: Run ruff**
+**Step 3: Run lint + format check**
 
-```bash
-uv run ruff check .
-uv run ruff format . --check
-```
+Run:
+`uv run ruff check . && uv run ruff format . --check`
 
-**Step 4: Manual smoke check (optional but recommended)**
+Expected: PASS.
 
-Start the gateway with debug logging enabled and send a test image from Matrix:
+**Step 4: Optional runtime smoke check with debug logs**
 
-```bash
-LOG_LEVEL=DEBUG uv run squidbot gateway 2>&1 | grep -E "MatrixChannel.*attachment|gateway.*multimodal"
-```
+Run gateway with debug enabled and send one image + one non-image over Matrix:
 
-Expected output when an image arrives:
-```
-MatrixChannel: downloading attachment mxc=mxc://... filename=photo.jpg
-MatrixChannel: attachment downloaded mxc=mxc://... size_bytes=54321 mime=image/jpeg
-MatrixChannel: inbound image embedded as multimodal mxc=mxc://... size_bytes=54321
-MatrixChannel: queued inbound media session=matrix:@user:... multimodal=True
-gateway: dispatching session=matrix:@user:... multimodal=True
-```
+`LOG_LEVEL=DEBUG uv run squidbot gateway`
 
-Expected output when the agent sends a file:
-```
-MatrixChannel: uploading attachment path=/tmp/result.png mime=image/png size_bytes=8192
-MatrixChannel: attachment uploaded mxc_uri=mxc://... path=/tmp/result.png
-MatrixChannel: attachment sent room=!room:... msgtype=m.image mxc_uri=mxc://...
-```
+Expected: debug lines show upload/download decisions and multimodal dispatch flag.
 
-**Step 5: Create PR**
+**Step 5: Create branch, push, PR**
 
 ```bash
-git push -u origin matrix-attachment-support
-gh pr create --title "feat: fix Matrix attachment upload bug and add inbound multimodal image support" \
-  --body "$(cat <<'EOF'
+git checkout -b feat/matrix-attachment-multimodal
+git push -u origin feat/matrix-attachment-multimodal
+gh pr create --title "feat(matrix): fix attachment upload and add safe inbound multimodal images" --body "$(cat <<'EOF'
 ## Summary
 
-- Fix outbound attachment upload: use `io.BytesIO` instead of broken lambda `data_provider`
-- Support multiple outbound attachments (`OutboundMessage.attachment: list[Path]`)
-- Add inbound multimodal support: images from Matrix are Base64-encoded and embedded as `image_url` blocks in the user message context, enabling vision LLMs to directly see the image
-- Non-image attachments (PDF, audio, video) continue to use text file-path approach
-- Add `max_inbound_media_bytes` config (default 10MB) to control Base64 embedding size limit
-- `Message.content` extended to `str | list[dict[str, Any]]` for OpenAI multimodal format
-- `InboundMessage` gets optional `multimodal_content` field
-- Debug logging at every attachment branch point (visible with `LOG_LEVEL=DEBUG`)
+- fix matrix outbound upload by using `io.BytesIO`
+- support multiple outbound attachments in Matrix
+- add safe inbound image embedding with MIME allowlist and size guardrails
+- forward multimodal inbound payloads via `cli/gateway.py`
+- keep Email behavior compatible with list-based attachment contract
+- add lightweight debug logs for attachment decisions
 
-## Reference
+## Docs
 
-Design: `docs/plans/2026-03-01-matrix-attachments-design.md`
-Reference implementation: Athemis/nanobot-redux `nanobot/channels/matrix.py`
+- `docs/plans/2026-03-01-matrix-attachments-design.md`
+- `docs/plans/2026-03-01-matrix-attachments-implementation-plan.md`
 EOF
 )"
 ```
