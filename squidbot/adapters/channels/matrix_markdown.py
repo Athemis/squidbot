@@ -136,11 +136,14 @@ def plugin_mx_block_spoiler(md: Markdown) -> None:
                 lines.append(line[3:])
             elif line.rstrip() == ">!":
                 lines.append("")
+            elif line.startswith(">!"):
+                lines.append(line[2:])  # bare ">!" with no separator
             else:
                 lines.append(line)
         content = "\n".join(lines)
-        # Store as "text" so mistune's _iter_render processes it via the inline
-        # parser automatically before the renderer is called.
+        # Use "text" key (not "raw") so mistune's _iter_render passes the content
+        # through the inline parser before calling the renderer. Tokens with "raw"
+        # bypass inline parsing entirely.
         state.append_token({"type": "mx_block_spoiler", "text": content})
         return int(m.end())
 

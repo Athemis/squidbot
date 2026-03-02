@@ -504,6 +504,15 @@ class TestMatrixSpoilerPlugin:
         assert "<blockquote>" in result
         assert "data-mx-spoiler" not in result
 
+    def test_block_spoiler_no_separator_still_works(self) -> None:
+        """>!content with no space separator is still recognized."""
+        from squidbot.adapters.channels.matrix import _render_markdown
+
+        result = _render_markdown(">!hidden")
+        assert "data-mx-spoiler" in result
+        assert "hidden" in result
+        assert ">!" not in result
+
 
 class TestSanitizeForMatrix:
     """Test nh3-based HTML sanitizer enforces Matrix spec v1.17 allowlist.
