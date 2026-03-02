@@ -136,18 +136,30 @@ class AgentLoop:
 
         return "".join(text_chunks), tool_calls, reasoning_content
 
+    def _is_concurrent(self, tool_call: ToolCall, extra_tools: dict[str, ToolPort]) -> bool:
+        """Return True if the tool for this call declares concurrent-safe execution.
+
+        Defaults to True when the tool does not declare a ``concurrent`` attribute.
+        LLM-batched tool calls are assumed to be independent; set ``concurrent = False``
+        on tools that must not run alongside other tools in the same batch.
+        """
+        tool = extra_tools.get(tool_call.name) or self._registry.get(tool_call.name)
+        return bool(getattr(tool, "concurrent", True))
+
     async def _append_tool_results(
         self,
         messages: list[Message],
         tool_calls: list[ToolCall],
         extra_tools: dict[str, ToolPort],
     ) -> None:
-        """Execute all tool calls concurrently and append results to messages.
+        """Execute tool calls and append results to messages.
 
-        Uses asyncio.gather with return_exceptions=True so that a failing tool
-        does not cancel sibling tasks — threads started by asyncio.to_thread
-        cannot be interrupted mid-execution, so cancellation would only corrupt
-        state without stopping the thread.
+        When every tool in the batch has ``concurrent = True`` (the default),
+        all calls are executed in parallel via asyncio.gather with
+        return_exceptions=True — a failing tool does not cancel sibling tasks.
+
+        When any tool declares ``concurrent = False`` the entire batch is executed
+        sequentially in call order to avoid unintended side-effect interleaving.
 
         Args:
             messages: Message list to append tool result messages to.
@@ -176,11 +188,23 @@ class AgentLoop:
                 tool_call_id=tool_call.id,
             )
 
-        results = await asyncio.gather(
-            *[_execute_one(tc) for tc in tool_calls],
-            return_exceptions=True,
-        )
-        for tool_call, result_or_exc in zip(tool_calls, results, strict=True):
+        run_parallel = all(self._is_concurrent(tc, extra_tools) for tc in tool_calls)
+
+        if run_parallel:
+            raw_results: list[Message | BaseException] = list(
+                await asyncio.gather(
+                    *[_execute_one(tc) for tc in tool_calls], return_exceptions=True
+                )
+            )
+        else:
+            raw_results = []
+            for tc in tool_calls:
+                try:
+                    raw_results.append(await _execute_one(tc))
+                except Exception as exc:
+                    raw_results.append(exc)
+
+        for tool_call, result_or_exc in zip(tool_calls, raw_results, strict=True):
             if isinstance(result_or_exc, BaseException):
                 messages.append(
                     Message(

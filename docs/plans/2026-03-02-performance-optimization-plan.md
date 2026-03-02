@@ -12,7 +12,7 @@ MemoryManager and AgentLoop. Adapter optimizations are adapter-internal. No prot
 
 ---
 
-### Task 1: Write design document and implementation plan
+## Task 1: Write design document and implementation plan
 
 **Files:**
 - Create: `docs/plans/2026-03-02-performance-optimization-design.md`
@@ -32,7 +32,7 @@ git commit -m "docs(plans): add performance optimization design and implementati
 
 ---
 
-### Task 2: P0 Bug — heartbeat blocking I/O
+## Task 2: P0 Bug — heartbeat blocking I/O
 
 **Files:**
 - Modify: `squidbot/core/heartbeat.py`
@@ -115,11 +115,11 @@ git commit -m "fix(heartbeat): use asyncio.to_thread for HEARTBEAT.md read"
 
 ---
 
-### Task 3: JsonlMemory — move mkdir to `__init__`, clean up path helpers
+## Task 3: JsonlMemory — move mkdir to `__init__`, clean up path helpers
 
 **Files:**
 - Modify: `squidbot/adapters/persistence/jsonl.py`
-- Test: `tests/adapters/test_jsonl_memory.py`
+- Test: `tests/adapters/persistence/test_jsonl.py`
 
 **Step 1: Write the failing test**
 
@@ -150,7 +150,7 @@ async def test_no_mkdir_after_init(tmp_path: Path) -> None:
 
 **Step 2: Run test to verify it fails**
 ```bash
-uv run pytest tests/adapters/test_jsonl_memory.py::test_no_mkdir_after_init -v
+uv run pytest tests/adapters/persistence/test_jsonl.py::test_no_mkdir_after_init -v
 ```
 
 **Step 3: Implement**
@@ -187,7 +187,7 @@ Keep `mkdir` in `_atomic_write_text` as a safety net (it is called by
 
 **Step 4: Run tests to verify they pass**
 ```bash
-uv run pytest tests/adapters/test_jsonl_memory.py -v
+uv run pytest tests/adapters/persistence/test_jsonl.py -v
 ```
 
 **Step 5: Lint, type-check, full suite**
@@ -199,13 +199,13 @@ uv run pytest
 
 **Step 6: Commit**
 ```bash
-git add squidbot/adapters/persistence/jsonl.py tests/adapters/test_jsonl_memory.py
+git add squidbot/adapters/persistence/jsonl.py tests/adapters/persistence/test_jsonl.py
 git commit -m "perf(persistence): move mkdir to JsonlMemory.__init__"
 ```
 
 ---
 
-### Task 4: asyncio.gather in MemoryManager.build_messages
+## Task 4: asyncio.gather in MemoryManager.build_messages
 
 **Files:**
 - Modify: `squidbot/core/memory.py`
@@ -284,7 +284,7 @@ git commit -m "perf(memory): load history and global memory in parallel with asy
 
 ---
 
-### Task 5: Skills-XML cache in MemoryManager
+## Task 5: Skills-XML cache in MemoryManager
 
 **Files:**
 - Modify: `squidbot/core/memory.py`
@@ -402,11 +402,11 @@ git commit -m "perf(memory): cache skills XML assembly; use list-join for system
 
 ---
 
-### Task 6: In-memory ring-buffer cache in JsonlMemory
+## Task 6: In-memory ring-buffer cache in JsonlMemory
 
 **Files:**
 - Modify: `squidbot/adapters/persistence/jsonl.py`
-- Test: `tests/adapters/test_jsonl_memory.py`
+- Test: `tests/adapters/persistence/test_jsonl.py`
 
 **Step 1: Write the failing test**
 
@@ -438,7 +438,7 @@ async def test_load_history_uses_cache_after_first_load(tmp_path: Path) -> None:
 
 **Step 2: Run test to verify it fails**
 ```bash
-uv run pytest tests/adapters/test_jsonl_memory.py::test_load_history_uses_cache_after_first_load -v
+uv run pytest tests/adapters/persistence/test_jsonl.py::test_load_history_uses_cache_after_first_load -v
 ```
 
 **Step 3: Implement**
@@ -529,7 +529,7 @@ async def append_message(self, message: Message) -> None:
 
 **Step 4: Run tests to verify they pass**
 ```bash
-uv run pytest tests/adapters/test_jsonl_memory.py -v
+uv run pytest tests/adapters/persistence/test_jsonl.py -v
 ```
 
 **Step 5: Lint, type-check, full suite**
@@ -541,18 +541,18 @@ uv run pytest
 
 **Step 6: Commit**
 ```bash
-git add squidbot/adapters/persistence/jsonl.py tests/adapters/test_jsonl_memory.py
+git add squidbot/adapters/persistence/jsonl.py tests/adapters/persistence/test_jsonl.py
 git commit -m "perf(persistence): add in-memory ring-buffer cache for recent history"
 ```
 
 ---
 
-### Task 7: Batch write in JsonlMemory + opt-in in MemoryManager
+## Task 7: Batch write in JsonlMemory + opt-in in MemoryManager
 
 **Files:**
 - Modify: `squidbot/adapters/persistence/jsonl.py`
 - Modify: `squidbot/core/memory.py`
-- Test: `tests/adapters/test_jsonl_memory.py`
+- Test: `tests/adapters/persistence/test_jsonl.py`
 
 **Step 1: Write the failing test**
 
@@ -585,7 +585,7 @@ async def test_persist_exchange_opens_file_once(tmp_path: Path) -> None:
 
 **Step 2: Run test to verify it fails**
 ```bash
-uv run pytest tests/adapters/test_jsonl_memory.py::test_persist_exchange_opens_file_once -v
+uv run pytest tests/adapters/persistence/test_jsonl.py::test_persist_exchange_opens_file_once -v
 ```
 
 **Step 3: Implement `append_messages` in `jsonl.py`**
@@ -646,7 +646,7 @@ async def persist_exchange(
 
 **Step 5: Run tests to verify they pass**
 ```bash
-uv run pytest tests/adapters/test_jsonl_memory.py tests/core/test_memory.py -v
+uv run pytest tests/adapters/persistence/test_jsonl.py tests/core/test_memory.py -v
 ```
 
 **Step 6: Lint, type-check, full suite**
@@ -656,13 +656,13 @@ uv run ruff check squidbot/ && uv run mypy squidbot/ && uv run pytest
 
 **Step 7: Commit**
 ```bash
-git add squidbot/adapters/persistence/jsonl.py squidbot/core/memory.py tests/adapters/test_jsonl_memory.py
+git add squidbot/adapters/persistence/jsonl.py squidbot/core/memory.py tests/adapters/persistence/test_jsonl.py
 git commit -m "perf(persistence): add append_messages batch write; use in persist_exchange"
 ```
 
 ---
 
-### Task 8: RichCliChannel — cache Console() instance
+## Task 8: RichCliChannel — cache Console() instance
 
 **Files:**
 - Modify: `squidbot/adapters/channels/cli.py`
@@ -738,7 +738,7 @@ git commit -m "perf(channels): cache Rich Console() instance in RichCliChannel"
 
 ---
 
-### Task 9: EmailChannel — cache SSL context
+## Task 9: EmailChannel — cache SSL context
 
 **Files:**
 - Modify: `squidbot/adapters/channels/email.py`
@@ -831,7 +831,7 @@ git commit -m "perf(email): cache SSLContext in __init__ instead of recreating p
 
 ---
 
-### Task 10: AgentLoop — parallel tool execution
+## Task 10: AgentLoop — parallel tool execution
 
 **Files:**
 - Modify: `squidbot/core/agent.py`
@@ -967,7 +967,7 @@ git commit -m "perf(agent): execute tool calls in parallel with asyncio.gather"
 
 ---
 
-### Task 11: AgentLoop — remove outbound_metadata dict copy
+## Task 11: AgentLoop — remove outbound_metadata dict copy
 
 **Files:**
 - Modify: `squidbot/core/agent.py`
@@ -996,7 +996,7 @@ git commit -m "perf(agent): remove unnecessary dict copy for outbound_metadata"
 
 ---
 
-### Task 12: SearchHistoryTool — substring pre-filter
+## Task 12: SearchHistoryTool — substring pre-filter
 
 **Files:**
 - Modify: `squidbot/adapters/tools/search_history.py`
@@ -1093,7 +1093,7 @@ git commit -m "perf(tools): skip JSON deserialization for non-matching lines in 
 
 ---
 
-### Task 13: ReadFileTool — combine exists + read_text into single to_thread
+## Task 13: ReadFileTool — combine exists + read_text into single to_thread
 
 **Files:**
 - Modify: `squidbot/adapters/tools/files.py`
@@ -1163,7 +1163,7 @@ git commit -m "perf(tools): combine exists+read_text into single asyncio.to_thre
 
 ---
 
-### Task 14: gateway.py — connect MCP servers in parallel
+## Task 14: gateway.py — connect MCP servers in parallel
 
 **Files:**
 - Modify: `squidbot/cli/gateway.py`
@@ -1262,7 +1262,7 @@ git commit -m "perf(gateway): connect MCP servers in parallel with asyncio.gathe
 
 ---
 
-### Task 15: gateway.py — MemoryWriteTool singleton + remove owner_aliases copy
+## Task 15: gateway.py — MemoryWriteTool singleton + remove owner_aliases copy
 
 **Files:**
 - Modify: `squidbot/cli/gateway.py`
@@ -1361,7 +1361,7 @@ git commit -m "perf(gateway): reuse MemoryWriteTool singleton; remove owner_alia
 
 ---
 
-### Task 16: pool.py — shared AsyncOpenAI client for same api_base
+## Task 16: pool.py — shared AsyncOpenAI client for same api_base
 
 **Files:**
 - Modify: `squidbot/adapters/llm/pool.py`

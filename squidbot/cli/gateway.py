@@ -78,11 +78,17 @@ async def _connect_mcp_servers(
 ) -> list[tuple[McpConnectionProtocol, list[Any]]]:
     """Connect all MCP servers concurrently.
 
+    Connections that fail are skipped (with a WARNING log) so that one broken
+    server does not prevent the rest from loading. Successful connections that
+    were established before a sibling failure are NOT closed — the caller owns
+    lifetime management via the connection objects.
+
     Args:
         connections: Pre-constructed server connection objects.
 
     Returns:
-        List of (connection, tools) pairs in the same order as input.
+        List of (connection, tools) pairs for every server that connected
+        successfully (may be shorter than ``connections``).
     """
 
     async def _connect_one(
@@ -91,7 +97,19 @@ async def _connect_mcp_servers(
         tools = await conn.connect()
         return conn, tools
 
-    return list(await asyncio.gather(*[_connect_one(c) for c in connections]))
+    results = await asyncio.gather(
+        *[_connect_one(c) for c in connections],
+        return_exceptions=True,
+    )
+
+    connected: list[tuple[McpConnectionProtocol, list[Any]]] = []
+    for _conn, outcome in zip(connections, results, strict=True):
+        if isinstance(outcome, BaseException):
+            logger.warning("mcp: skipping server that raised during connect: {}", outcome)
+        else:
+            connected.append(outcome)
+
+    return connected
 
 
 def _owner_matrix_ids(settings: Settings) -> set[str]:

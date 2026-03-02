@@ -198,6 +198,9 @@ class JsonlMemory:
         self._history_cache: collections.deque[Message] = collections.deque()
         self._history_cache_size: int = 0  # largest last_n ever requested
         self._history_cache_loaded: bool = False  # True after at least one disk read
+        # Guards cache population: prevents two concurrent callers from both
+        # executing the expensive disk read when the cache is cold.
+        self._history_load_lock: asyncio.Lock = asyncio.Lock()
 
     async def load_history(self, last_n: int | None = None) -> list[Message]:
         """Load messages from the global history JSONL file.
@@ -226,6 +229,27 @@ class JsonlMemory:
             skip = max(0, len(self._history_cache) - last_n)
             return list(itertools.islice(self._history_cache, skip, None))
 
+        # Unbounded reads are never cached — skip the lock entirely.
+        if last_n is None:
+            return await self._load_history_from_disk(None)
+
+        # Serialize concurrent cold-cache loads: only one caller reads from disk,
+        # subsequent callers check the cache again under the lock and return early.
+        async with self._history_load_lock:
+            # Re-check inside the lock — a concurrent caller may have populated the
+            # cache while we were waiting.
+            if self._history_cache_loaded and last_n <= self._history_cache_size:
+                skip = max(0, len(self._history_cache) - last_n)
+                return list(itertools.islice(self._history_cache, skip, None))
+
+            return await self._load_history_from_disk(last_n)
+
+    async def _load_history_from_disk(self, last_n: int | None) -> list[Message]:
+        """Read history from disk and, for bounded reads, update the in-memory cache.
+
+        Must be called while holding self._history_load_lock for bounded reads.
+        Unbounded reads (last_n=None) are not cached and may bypass the lock.
+        """
         path = _history_file(self._base)
 
         def _read() -> tuple[list[Message], int, str | None]:

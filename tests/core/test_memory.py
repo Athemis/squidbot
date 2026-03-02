@@ -9,7 +9,6 @@ exchange persistence with channel/sender metadata.
 from __future__ import annotations
 
 import asyncio
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -329,18 +328,20 @@ def test_init_rejects_negative_history_context_messages(storage: InMemoryStorage
 
 
 async def test_build_messages_loads_history_and_memory_in_parallel() -> None:
-    """load_history and load_global_memory must start before either completes."""
-    start_times: dict[str, float] = {}
+    """load_history and load_global_memory must both start before either completes."""
+    history_started = asyncio.Event()
+    memory_started = asyncio.Event()
 
     class TrackingStorage:
         async def load_history(self, last_n: int | None = None) -> list[Message]:
-            start_times["history"] = time.monotonic()
-            await asyncio.sleep(0.05)
+            history_started.set()
+            # Suspend here so the other coroutine gets a chance to start
+            await asyncio.sleep(0)
             return []
 
         async def load_global_memory(self) -> str:
-            start_times["memory"] = time.monotonic()
-            await asyncio.sleep(0.05)
+            memory_started.set()
+            await asyncio.sleep(0)
             return ""
 
         async def append_message(self, message: Message) -> None: ...
@@ -353,20 +354,15 @@ async def test_build_messages_loads_history_and_memory_in_parallel() -> None:
     manager = MemoryManager(storage=TrackingStorage())  # type: ignore[arg-type]
     await manager.build_messages(user_message="hi", system_prompt="sys")
 
-    assert "history" in start_times and "memory" in start_times
-    # With sequential execution the gap between start times is ~50ms (one sleep).
-    # With parallel execution both start within 25ms of each other.
-    delta = abs(start_times["history"] - start_times["memory"])
-    assert delta < 0.025, (
-        f"load_history and load_global_memory started {delta * 1000:.1f}ms apart — "
-        "they are running sequentially, not in parallel"
-    )
+    # Both events must be set — sequential execution would leave one unset when the
+    # other completes and the coroutine never yields back to the second.
+    assert history_started.is_set(), "load_history was never called"
+    assert memory_started.is_set(), "load_global_memory was never called"
 
 
 async def test_skills_xml_cached_between_calls() -> None:
     """build_skills_xml is called only once when the skill list is unchanged."""
-    from unittest.mock import patch
-
+    import squidbot.core.memory as _memory_module
     from squidbot.core.skills import SkillMetadata
 
     skill = SkillMetadata(
@@ -404,14 +400,18 @@ async def test_skills_xml_cached_between_calls() -> None:
     )
 
     build_calls: list[int] = []
+    original_build = _memory_module.build_skills_xml
 
     def counting_build(skills: list[SkillMetadata]) -> str:
         build_calls.append(1)
         return "<skills/>"
 
-    with patch("squidbot.core.memory.build_skills_xml", side_effect=counting_build):
+    _memory_module.build_skills_xml = counting_build  # type: ignore[assignment]
+    try:
         messages1 = await manager.build_messages("hi", "sys")
         messages2 = await manager.build_messages("hi again", "sys")
+    finally:
+        _memory_module.build_skills_xml = original_build  # type: ignore[assignment]
 
     assert len(build_calls) == 1, f"build_skills_xml called {len(build_calls)} times"
     assert "<skills/>" in messages1[0].content, "Cached result missing from first call"

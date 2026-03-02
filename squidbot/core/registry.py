@@ -31,6 +31,10 @@ class ToolRegistry:
             )
         return list(self._cached_definitions)
 
+    def get(self, tool_name: str) -> ToolPort | None:
+        """Return the registered tool object for the given name, or None."""
+        return self._tools.get(tool_name)
+
     async def execute(self, tool_name: str, tool_call_id: str, **kwargs: object) -> ToolResult:
         """
         Execute a tool by name with the given arguments.

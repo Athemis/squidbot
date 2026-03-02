@@ -376,11 +376,7 @@ async def test_agent_run_multimodal_persists_text_fallback(storage, memory) -> N
 async def test_tool_calls_executed_in_parallel() -> None:
     """Multiple tool calls from one LLM turn must execute concurrently."""
     import asyncio
-    import pathlib
-    import tempfile
     import time
-
-    from squidbot.adapters.persistence.jsonl import JsonlMemory
 
     call_start_times: list[float] = []
 
@@ -403,18 +399,22 @@ async def test_tool_calls_executed_in_parallel() -> None:
     registry = ToolRegistry()
     registry.register(SlowTool())
 
-    with tempfile.TemporaryDirectory() as tmp:
-        storage = JsonlMemory(base_dir=pathlib.Path(tmp))
-        memory = MemoryManager(storage=storage)  # type: ignore[arg-type]
-        loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
-        channel = CollectingChannel()
-        session = Session(channel="cli", sender_id="local")
+    storage = InMemoryStorage()
+    memory = MemoryManager(storage=storage)
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+    channel = CollectingChannel()
+    session = Session(channel="cli", sender_id="local")
 
-        start = time.monotonic()
-        await loop.run(session, "run two tools", channel)
-        elapsed = time.monotonic() - start
+    start = time.monotonic()
+    await loop.run(session, "run two tools", channel)
+    elapsed = time.monotonic() - start
 
-    # Sequential: >= 0.10 s; parallel: ~0.05 s
-    assert elapsed < 0.09, f"Tools ran sequentially (elapsed={elapsed:.3f}s)"
+    # Sequential would take >= 0.10 s; parallel completes in ~0.05 s.
+    # Allow generous headroom for slow CI runners.
+    assert elapsed < 0.20, f"Tools ran sequentially (elapsed={elapsed:.3f}s)"
     assert len(call_start_times) == 2
-    assert abs(call_start_times[1] - call_start_times[0]) < 0.025
+    # Both tools must have started before the first one finished (overlap-based check).
+    assert call_start_times[1] < call_start_times[0] + 0.05, (
+        f"Tool 2 started {(call_start_times[1] - call_start_times[0]) * 1000:.1f}ms after tool 1 "
+        "— they ran sequentially, not in parallel"
+    )

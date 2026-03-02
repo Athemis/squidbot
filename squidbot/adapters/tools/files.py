@@ -58,20 +58,34 @@ class ReadFileTool:
                 tool_call_id="", content="Error: path is outside workspace", is_error=True
             )
 
-        def _read_file() -> str | None:
+        def _read_file() -> tuple[str | None, str | None]:
+            """Return (content, error_message). One of the two is always None."""
             try:
-                return resolved.read_text(encoding="utf-8")
+                return resolved.read_text(encoding="utf-8"), None
             except FileNotFoundError:
-                return None
+                return None, f"Error: file not found: {path_raw}"
+            except UnicodeDecodeError as exc:
+                return None, f"Error: cannot decode {path_raw} as UTF-8: {exc.reason}"
+            except OSError as exc:
+                return None, f"Error reading {path_raw}: {exc.strerror}"
 
-        content = await asyncio.to_thread(_read_file)
-        if content is None:
+        try:
+            content, error = await asyncio.to_thread(_read_file)
+        except UnicodeDecodeError as exc:
             return ToolResult(
                 tool_call_id="",
-                content=f"Error: file not found: {path_raw}",
+                content=f"Error: cannot decode {path_raw} as UTF-8: {exc.reason}",
                 is_error=True,
             )
-        return ToolResult(tool_call_id="", content=content)
+        except OSError as exc:
+            return ToolResult(
+                tool_call_id="",
+                content=f"Error reading {path_raw}: {exc.strerror}",
+                is_error=True,
+            )
+        if error is not None:
+            return ToolResult(tool_call_id="", content=error, is_error=True)
+        return ToolResult(tool_call_id="", content=content or "")
 
 
 class WriteFileTool:

@@ -67,9 +67,11 @@ class MemoryManager:
         self._history_context_messages = history_context_messages
 
         # Cache for the assembled skills block.
-        # Key: frozenset of (name, location_str, available, always, description) tuples.
+        # Key: frozenset of (name, location_str, available, always, description, mtime) tuples.
         # Value: the assembled XML + always-skill bodies string.
-        self._skills_cache: tuple[frozenset[tuple[str, str, bool, bool, str]], str] | None = None
+        self._skills_cache: (
+            tuple[frozenset[tuple[str, str, bool, bool, str, float]], str] | None
+        ) = None
 
     def _is_owner(self, sender_id: str, channel: str) -> bool:
         """
@@ -162,8 +164,11 @@ class MemoryManager:
         # Inject skills: XML index + full bodies of always-skills (cached by fingerprint)
         if self._skills is not None:
             skill_list = self._skills.list_skills()
+            # mtime is included so that changes to an always-skill's body (which
+            # FsSkillsLoader tracks by mtime) also invalidate this cache.
             fingerprint = frozenset(
-                (s.name, str(s.location), s.available, s.always, s.description) for s in skill_list
+                (s.name, str(s.location), s.available, s.always, s.description, s.mtime)
+                for s in skill_list
             )
 
             if self._skills_cache is None or self._skills_cache[0] != fingerprint:

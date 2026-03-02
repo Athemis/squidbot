@@ -159,6 +159,42 @@ class TestListFilesToolLists:
 # ── Async Offloading ──────────────────────────────────────────────────────────
 
 
+class TestReadFileToolErrorHandling:
+    async def test_permission_error_returns_error_result(self, tmp_path: Path) -> None:
+        """A PermissionError during read must be returned as ToolResult(is_error=True)."""
+        from unittest.mock import patch
+
+        tool = ReadFileTool(workspace=tmp_path, restrict_to_workspace=False)
+        target = tmp_path / "secret.txt"
+        target.write_text("hidden", encoding="utf-8")
+
+        with patch(
+            "squidbot.adapters.tools.files.asyncio.to_thread",
+            side_effect=PermissionError(13, "Permission denied"),
+        ):
+            result = await tool.execute(path=str(target))
+
+        assert result.is_error
+        assert "Error" in result.content
+
+    async def test_unicode_decode_error_returns_error_result(self, tmp_path: Path) -> None:
+        """A UnicodeDecodeError must be returned as ToolResult(is_error=True), not raised."""
+        from unittest.mock import patch
+
+        tool = ReadFileTool(workspace=tmp_path, restrict_to_workspace=False)
+        target = tmp_path / "binary.bin"
+        target.write_bytes(b"\xff\xfe binary garbage")
+
+        with patch(
+            "squidbot.adapters.tools.files.asyncio.to_thread",
+            side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        ):
+            result = await tool.execute(path=str(target))
+
+        assert result.is_error
+        assert "Error" in result.content
+
+
 class TestFileToolsAsyncOffloading:
     async def test_read_file_uses_single_to_thread(self, tmp_path: Path) -> None:
         """ReadFileTool must use only one asyncio.to_thread call per file read."""

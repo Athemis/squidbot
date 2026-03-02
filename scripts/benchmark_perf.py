@@ -12,13 +12,11 @@ Results are printed to stdout as a Markdown table.
 from __future__ import annotations
 
 import asyncio
-import collections
-import fcntl
 import json
 import statistics
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +61,7 @@ def _make_history_file(path: Path, n_messages: int) -> None:
             msg = {
                 "role": "user" if i % 2 == 0 else "assistant",
                 "content": f"message number {i} with some content to make it realistic",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "channel": "cli",
                 "sender_id": "local",
             }
@@ -242,7 +240,7 @@ def _make_large_history_jsonl(path: Path, n_messages: int, hit_rate: float) -> i
             msg = {
                 "role": "user" if i % 2 == 0 else "assistant",
                 "content": content,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "channel": "cli",
                 "sender_id": "local",
             }
@@ -252,7 +250,7 @@ def _make_large_history_jsonl(path: Path, n_messages: int, hit_rate: float) -> i
 
 async def bench_search_history_filter(n_messages: int, hit_rate: float) -> dict[str, str]:
     """Compare scan with vs without the substring pre-filter."""
-    from squidbot.adapters.persistence.jsonl import _history_file, deserialize_message_safe
+    from squidbot.adapters.persistence.jsonl import deserialize_message_safe
 
     before_times: list[float] = []
     after_times: list[float] = []
@@ -271,9 +269,12 @@ async def bench_search_history_filter(n_messages: int, hit_rate: float) -> dict[
                     if not line:
                         continue
                     msg = deserialize_message_safe(line)
-                    if msg is not None and isinstance(msg.content, str):
-                        if query in msg.content.lower():
-                            count += 1
+                    if (
+                        msg is not None
+                        and isinstance(msg.content, str)
+                        and query in msg.content.lower()
+                    ):
+                        count += 1
             return count
 
         def scan_with_filter() -> int:
@@ -287,9 +288,12 @@ async def bench_search_history_filter(n_messages: int, hit_rate: float) -> dict[
                     if query not in line.lower():  # pre-filter
                         continue
                     msg = deserialize_message_safe(line)
-                    if msg is not None and isinstance(msg.content, str):
-                        if query in msg.content.lower():
-                            count += 1
+                    if (
+                        msg is not None
+                        and isinstance(msg.content, str)
+                        and query in msg.content.lower()
+                    ):
+                        count += 1
             return count
 
         for _ in range(RUNS):

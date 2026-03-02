@@ -24,6 +24,7 @@ class SkillMetadata:
     requires_bins: list[str] = field(default_factory=list)
     requires_env: list[str] = field(default_factory=list)
     emoji: str = ""
+    mtime: float = 0.0  # file modification time; 0.0 for manually created skills
 
 
 def build_skills_xml(skills: list[SkillMetadata]) -> str:

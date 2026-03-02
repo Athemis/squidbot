@@ -1,4 +1,10 @@
-"""Tests for squidbot.cli.gateway module."""
+"""Tests for squidbot.cli.gateway module.
+
+Covers the performance-sensitive helpers introduced in the perf/performance-optimization
+branch: concurrent MCP server connection startup (_connect_mcp_servers) and the
+singleton MemoryWriteTool lifecycle that avoids re-instantiation on every message.
+All tests use in-process test doubles; no real MCP servers or filesystem state is needed.
+"""
 
 from __future__ import annotations
 
