@@ -24,18 +24,20 @@ from squidbot.core.skills import SkillMetadata
 _yaml = YAML()
 _yaml.preserve_quotes = True
 
+FRONTMATTER_FENCE = "---"
+
 
 def _parse_frontmatter(path: Path) -> dict[str, Any]:
     """Extract YAML frontmatter from a SKILL.md file."""
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    if not lines or lines[0].rstrip("\r") != "---":
+    if not lines or lines[0].rstrip("\r") != FRONTMATTER_FENCE:
         return {}
 
     closing_index = -1
     for idx in range(1, len(lines)):
         line = lines[idx]
-        if line.rstrip("\r") == "---":
+        if line.rstrip("\r") == FRONTMATTER_FENCE:
             closing_index = idx
             break
     if closing_index == -1:
