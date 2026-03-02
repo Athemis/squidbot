@@ -840,19 +840,17 @@ class MatrixChannel:
             Tuple of (text_description, multimodal_content_or_None).
         """
         assert self._client is not None
+        # RoomEncryptedMedia and RoomMessageMedia both expose the mxc URL as event.url.
         mxc: str = getattr(event, "url", "") or ""
-        enc_file = getattr(event, "file", None)
-        if enc_file:
-            mxc = enc_file.url
 
         # Fallback: BadEvent or event with content.file instead of content.url.
-        # nio cannot parse such events and returns them with no url/file attributes;
+        # nio cannot parse such events and returns them with no url attribute;
         # extract the mxc URL directly from the event source in that case.
         source_content: dict[str, Any] = getattr(event, "source", {}).get("content", {})
         source_file: dict[str, Any] = (
             source_content.get("file", {}) if isinstance(source_content.get("file"), dict) else {}
         )
-        if not mxc and enc_file is None:
+        if not mxc:
             mxc = source_file.get("url", "") or ""
 
         # Parse mxc://server/mediaid
@@ -913,7 +911,7 @@ class MatrixChannel:
         event_id_val = getattr(event, "event_id", "?")
         # RoomEncryptedMedia exposes key/hashes/iv as direct event attributes.
         has_direct_enc_attrs = isinstance(getattr(event, "key", None), dict)
-        is_encrypted = enc_file is not None or has_direct_enc_attrs or bool(source_file)
+        is_encrypted = has_direct_enc_attrs or bool(source_file)
         logger.debug(
             "MatrixChannel: download event={} encrypted={} url={}",
             event_id_val,
@@ -927,28 +925,9 @@ class MatrixChannel:
 
         body = cast(bytes, resp.body)
 
-        # Decrypt if E2EE via event.file (nested EncryptedFile object on the event).
-        if enc_file is not None:
-            from nio.crypto.attachments import decrypt_attachment  # noqa: PLC0415
-
-            enc_key: str | None = (
-                enc_file.key.get("k")
-                if isinstance(enc_file.key, dict)
-                else getattr(enc_file.key, "k", None)
-            )
-            enc_hashes = getattr(enc_file, "hashes", None)
-            enc_sha256: str | None = (
-                enc_hashes.get("sha256") if isinstance(enc_hashes, dict) else None
-            )
-            enc_iv: str | None = enc_file.iv if isinstance(enc_file.iv, str) else None
-            if enc_key and enc_sha256 and enc_iv:
-                body = decrypt_attachment(body, enc_key, enc_sha256, enc_iv)
-            else:
-                logger.warning(
-                    "MatrixChannel: missing E2EE key material for event={}, skipping decrypt",
-                    event_id_val,
-                )
-        elif has_direct_enc_attrs:
+        # Decrypt if E2EE: RoomEncryptedMedia exposes key/hashes/iv as direct event attributes
+        # (parsed from content.file.* by nio; no event.file attribute on that class).
+        if has_direct_enc_attrs:
             # Decrypt via RoomEncryptedMedia direct attributes: key/hashes/iv live on the event
             # itself (parsed from content.file.* by nio), not nested under event.file.
             from nio.crypto.attachments import decrypt_attachment  # noqa: PLC0415

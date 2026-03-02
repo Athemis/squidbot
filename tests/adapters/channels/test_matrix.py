@@ -1785,6 +1785,56 @@ class TestMatrixEncryptedMediaIntake:
         assert positional[2] == "base64hash", f"Expected hash='base64hash', got: {positional[2]!r}"
         assert positional[3] == "base64iv", f"Expected iv='base64iv', got: {positional[3]!r}"
 
+    async def test_room_encrypted_media_missing_key_material_warns_and_skips_decrypt(
+        self,
+    ) -> None:
+        """_download_attachment logs a warning and skips decrypt when direct E2EE attrs
+        are incomplete (e.g. iv is missing), leaving the raw ciphertext on disk."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config()
+        ch = MatrixChannel(config=config)
+
+        ciphertext = b"\x00" * 32
+        ch._client = MagicMock()
+        ch._client.download = AsyncMock(
+            return_value=MagicMock(body=ciphertext, content_type="application/octet-stream")
+        )
+
+        event = MagicMock(
+            spec=[
+                "sender",
+                "room_id",
+                "event_id",
+                "server_timestamp",
+                "body",
+                "source",
+                "url",
+                "info",
+                "key",
+                "hashes",
+                "iv",
+            ]
+        )
+        event.sender = "@alice:example.org"
+        event.room_id = "!room1:example.org"
+        event.event_id = "$enc2"
+        event.server_timestamp = 0
+        event.body = "mystery.bin"
+        event.source = {"content": {}}
+        event.url = "mxc://example.com/mystery"
+        event.info = MagicMock()
+        event.info.mimetype = "application/octet-stream"
+        # key is a dict (triggers has_direct_enc_attrs), but iv is missing → else branch.
+        event.key = {"kty": "oct", "alg": "A256CTR", "k": "somekey"}
+        event.hashes = {"sha256": "somehash"}
+        event.iv = None  # missing → decrypt skipped
+
+        with patch("nio.crypto.attachments.decrypt_attachment") as mock_decrypt:
+            await ch._download_attachment(event)
+
+        mock_decrypt.assert_not_called()
+
     async def test_bad_event_media_decrypt_uses_source_content_file_key_material(self) -> None:
         """_handle_bad_event extracts key material from source['content']['file']
         and passes positional strings to decrypt_attachment."""
