@@ -472,6 +472,29 @@ class TestMatrixMathPlugin:
         assert "\\begin{align}" in result
         assert "\\end{align}" in result
 
+    def test_inline_math_backtick_form(self) -> None:
+        r"""$`expr`$ renders as span with data-mx-maths."""
+        result = _matrix_md(r"Energy: $`E = mc^2`$")
+        assert '<span data-mx-maths="E = mc^2">' in result
+
+    def test_inline_math_backtick_pipe_expression(self) -> None:
+        r"""$`a | b`$ works for expressions containing pipe characters."""
+        result = _matrix_md(r"$`a | b`$")
+        assert '<span data-mx-maths="a | b">' in result
+
+    def test_inline_math_backtick_does_not_affect_plain_code(self) -> None:
+        """`code` remains a code span; no math interpretation."""
+        result = _matrix_md("`code`")
+        assert "<code>code</code>" in result
+        assert "data-mx-maths" not in result
+
+    def test_inline_math_backtick_no_stray_backticks(self) -> None:
+        r"""$`expr`$ leaves no stray backticks in output."""
+        result = _matrix_md(r"$`x^2`$")
+        # The backtick delimiters must not appear in rendered output
+        assert "$`" not in result
+        assert "`$" not in result
+
 
 class TestMatrixSpoilerPlugin:
     """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""
