@@ -379,7 +379,6 @@ async def test_tool_calls_executed_in_parallel() -> None:
     import pathlib
     import tempfile
     import time
-    from typing import Any
 
     from squidbot.adapters.persistence.jsonl import JsonlMemory
 

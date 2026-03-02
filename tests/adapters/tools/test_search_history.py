@@ -218,10 +218,11 @@ def test_deserialize_not_called_for_non_matching_lines(tmp_path: Path) -> None:
     Lines that are used as context (immediately adjacent to a match) are exempt from this
     rule because they need to be parsed to populate the context window.
     """
+    from datetime import datetime
     from unittest.mock import patch
+
     from squidbot.adapters.persistence.jsonl import _serialize_message, deserialize_message_safe
     from squidbot.core.models import Message
-    from datetime import datetime
 
     history_file = tmp_path / "history.jsonl"
     # Layout: two non-matching lines, then the match.

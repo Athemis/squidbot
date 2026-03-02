@@ -123,3 +123,78 @@ def test_auth_error_detected_by_name():
 def test_empty_adapters_raises():
     with pytest.raises(ValueError, match="at least one"):
         PooledLLMAdapter([])
+
+
+def test_adapters_with_same_base_and_key_share_client() -> None:
+    """Two OpenAIAdapter instances with the same credentials must share one AsyncOpenAI client."""
+    from unittest.mock import MagicMock, patch
+
+    created_clients: list[MagicMock] = []
+
+    def tracking_openai(**kwargs: object) -> MagicMock:
+        client = MagicMock()
+        created_clients.append(client)
+        return client
+
+    with patch("squidbot.adapters.llm.openai.AsyncOpenAI", side_effect=tracking_openai):
+        from squidbot.adapters.llm.openai import OpenAIAdapter
+
+        # The test for this must go through the gateway._resolve_llm path.
+        # Instead, test OpenAIAdapter's `client` param directly:
+        mock_client = MagicMock()
+        a1 = OpenAIAdapter(
+            api_base="https://api.example.com", api_key="key1", model="m1", client=mock_client
+        )
+        a2 = OpenAIAdapter(
+            api_base="https://api.example.com", api_key="key1", model="m2", client=mock_client
+        )
+
+    # With shared client, AsyncOpenAI constructor should NOT be called
+    assert len(created_clients) == 0, f"AsyncOpenAI was constructed {len(created_clients)} times"
+    assert a1._client is mock_client
+    assert a2._client is mock_client
+
+
+def test_resolve_llm_shares_client_for_same_provider() -> None:
+    """_resolve_llm must create one AsyncOpenAI client per unique (api_base, api_key)."""
+    from unittest.mock import MagicMock, patch
+
+    created_clients: list[MagicMock] = []
+
+    def tracking_openai(**kwargs: object) -> MagicMock:
+        client = MagicMock()
+        created_clients.append(client)
+        return client
+
+    # Build minimal Settings-like objects for two pool entries on the same provider
+    class FakeProvider:
+        api_base = "https://api.example.com"
+        api_key = "key1"
+        supports_reasoning_content = False
+
+    class FakeModel:
+        provider = "main"
+        model = "test-model"
+
+    class FakeLLM:
+        default_pool = "default"
+        pools = {
+            "default": [
+                type("E", (), {"model": "m1"})(),
+                type("E", (), {"model": "m2"})(),
+            ]
+        }
+        models = {"m1": FakeModel(), "m2": FakeModel()}
+        providers = {"main": FakeProvider()}
+
+    class FakeSettings:
+        llm = FakeLLM()
+
+    with patch("openai.AsyncOpenAI", side_effect=tracking_openai):
+        from squidbot.cli.gateway import _resolve_llm
+
+        _resolve_llm(FakeSettings(), "default")  # type: ignore[arg-type]
+
+    assert len(created_clients) == 1, (
+        f"Expected 1 AsyncOpenAI client for same provider, got {len(created_clients)}"
+    )

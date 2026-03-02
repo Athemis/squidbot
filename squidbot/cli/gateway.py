@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,27 @@ class GatewayStatusAdapter:
         return self._skills_loader.list_skills()  # type: ignore[no-any-return]
 
 
+async def _connect_mcp_servers(
+    connections: Sequence[McpConnectionProtocol],
+) -> list[tuple[McpConnectionProtocol, list[Any]]]:
+    """Connect all MCP servers concurrently.
+
+    Args:
+        connections: Pre-constructed server connection objects.
+
+    Returns:
+        List of (connection, tools) pairs in the same order as input.
+    """
+
+    async def _connect_one(
+        conn: McpConnectionProtocol,
+    ) -> tuple[McpConnectionProtocol, list[Any]]:
+        tools = await conn.connect()
+        return conn, tools
+
+    return list(await asyncio.gather(*[_connect_one(c) for c in connections]))
+
+
 def _owner_matrix_ids(settings: Settings) -> set[str]:
     """Extract owner Matrix IDs from owner aliases configured for matrix/global channels."""
     owner_cfg = getattr(settings, "owner", None)
@@ -123,6 +145,8 @@ async def _channel_loop_with_state(
     from squidbot.adapters.tools.message import MessageTool  # noqa: PLC0415
     from squidbot.core.models import SessionInfo  # noqa: PLC0415
 
+    memory_write_tool = MemoryWriteTool(storage=storage)
+
     async for inbound in channel.receive():
         if tracker is not None:
             tracker.update(channel, inbound.session, inbound.metadata)
@@ -140,12 +164,12 @@ async def _channel_loop_with_state(
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
         extra = [
-            MemoryWriteTool(storage=storage),
+            memory_write_tool,
             MessageTool(
                 channel_registry=registry,
                 current_session=inbound.session,
                 inbound_text=inbound.text,
-                owner_aliases=list(owner_aliases or []),
+                owner_aliases=owner_aliases or [],
                 outbound_metadata=inbound.metadata,
                 workspace=tool_workspace,
                 restrict_to_workspace=restrict_to_workspace,
@@ -199,18 +223,20 @@ async def _channel_loop(
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
     from squidbot.adapters.tools.message import MessageTool  # noqa: PLC0415
 
+    memory_write_tool = MemoryWriteTool(storage=storage)
+
     async for inbound in channel.receive():
         if tracker is not None:
             tracker.update(channel, inbound.session, inbound.metadata)
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
         extra = [
-            MemoryWriteTool(storage=storage),
+            memory_write_tool,
             MessageTool(
                 channel_registry=registry,
                 current_session=inbound.session,
                 inbound_text=inbound.text,
-                owner_aliases=list(owner_aliases or []),
+                owner_aliases=owner_aliases or [],
                 outbound_metadata=inbound.metadata,
                 workspace=tool_workspace,
                 restrict_to_workspace=restrict_to_workspace,
@@ -253,15 +279,22 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
     Returns:
         An LLMPort-compatible adapter for the first entry in the pool.
 
+    Note:
+        Client sharing is scoped to a single call; repeated calls for the same pool create
+        independent clients.
+
     Raises:
         ValueError: If the pool, model, or provider is not found in settings.
     """
+    from openai import AsyncOpenAI  # noqa: PLC0415
+
     from squidbot.adapters.llm.openai import OpenAIAdapter  # noqa: PLC0415
 
     pool_entries = settings.llm.pools.get(pool_name)
     if not pool_entries:
         raise ValueError(f"LLM pool '{pool_name}' not found in config")
 
+    client_cache: dict[tuple[str, str], AsyncOpenAI] = {}
     adapters: list[OpenAIAdapter] = []
     for entry in pool_entries:
         model_cfg = settings.llm.models.get(entry.model)
@@ -270,12 +303,18 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
         provider_cfg = settings.llm.providers.get(model_cfg.provider)
         if not provider_cfg:
             raise ValueError(f"LLM provider '{model_cfg.provider}' not found in llm.providers")
+        cache_key = (provider_cfg.api_base, provider_cfg.api_key)
+        if cache_key not in client_cache:
+            client_cache[cache_key] = AsyncOpenAI(
+                base_url=provider_cfg.api_base, api_key=provider_cfg.api_key
+            )
         adapters.append(
             OpenAIAdapter(
                 api_base=provider_cfg.api_base,
                 api_key=provider_cfg.api_key,
                 model=model_cfg.model,
                 supports_reasoning_content=provider_cfg.supports_reasoning_content,
+                client=client_cache[cache_key],
             )
         )
 
@@ -414,9 +453,11 @@ async def _make_agent_loop(
     if settings.tools.mcp_servers:
         from squidbot.adapters.tools.mcp import McpServerConnection  # noqa: PLC0415
 
-        for server_name, server_cfg in settings.tools.mcp_servers.items():
-            conn = McpServerConnection(name=server_name, config=server_cfg)
-            tools = await conn.connect()
+        raw_connections = [
+            McpServerConnection(name=name, config=cfg)
+            for name, cfg in settings.tools.mcp_servers.items()
+        ]
+        for conn, tools in await _connect_mcp_servers(raw_connections):
             for tool in tools:
                 registry.register(tool)
             mcp_connections.append(conn)
