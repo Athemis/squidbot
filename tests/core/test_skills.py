@@ -124,6 +124,188 @@ def test_openclaw_requires_fallback_marks_skill_unavailable(tmp_path):
     assert "__definitely_missing_tmux_bin__" in skills[0].requires_bins
 
 
+def test_frontmatter_parsing_ignores_triple_dash_inside_yaml_string(tmp_path):
+    skill = tmp_path / "dashy"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        '---\nname: dashy\ndescription: "contains --- inside"\n---\n# Dashy Skill\n',
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "dashy"
+    assert "contains --- inside" in skills[0].description
+
+
+def test_frontmatter_parsing_ignores_indented_triple_dash_in_block_scalar(tmp_path):
+    skill = tmp_path / "blocky"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\n"
+        "name: blocky\n"
+        "description: |\n"
+        "  first line\n"
+        "  ---\n"
+        "  last line\n"
+        "---\n"
+        "# Blocky Skill\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "blocky"
+    assert "first line" in skills[0].description
+    assert "last line" in skills[0].description
+
+
+def test_frontmatter_without_closing_delimiter_returns_no_metadata(tmp_path):
+    skill = tmp_path / "broken"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: broken\ndescription: missing closer\n# body without closing delimiter\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "broken"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_without_opening_delimiter_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "plain"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "name: plain\ndescription: not-frontmatter\n# Plain Skill\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "plain"
+    assert skills[0].description == ""
+
+
+def test_malformed_frontmatter_yaml_is_skipped_without_crash(tmp_path):
+    skill = tmp_path / "badyaml"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        '---\nname: badyaml\ndescription: "unterminated\n---\n',
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert skills == []
+
+
+def test_frontmatter_with_leading_whitespace_opening_fence_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "ws-open"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        " ---\nname: ws-open\ndescription: should not parse\n---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "ws-open"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_with_trailing_space_opening_fence_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "space-open"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "--- \nname: space-open\ndescription: should not parse\n---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "space-open"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_with_trailing_space_closing_fence_uses_fallback_defaults(tmp_path):
+    skill = tmp_path / "space-close"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: space-close\ndescription: should not parse\n--- \n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "space-close"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_with_bom_prefixed_opening_fence_is_not_treated_as_delimiter(tmp_path):
+    skill = tmp_path / "bom-open"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "\ufeff---\nname: bom-open\ndescription: should not parse\n---\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "bom-open"
+    assert skills[0].description == ""
+
+
+def test_frontmatter_with_crlf_fences_parses_metadata(tmp_path):
+    skill = tmp_path / "crlf"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        '---\r\nname: crlf\r\ndescription: "crlf delimiters"\r\n---\r\n# CRLF Skill\r\n',
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "crlf"
+    assert "crlf delimiters" in skills[0].description
+
+
+def test_frontmatter_preserves_block_scalar_boundary_blank_lines(tmp_path):
+    skill = tmp_path / "boundary"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: boundary\ndescription: |\n\n  line\n\n---\n# Boundary Skill\n",
+        encoding="utf-8",
+    )
+
+    loader = FsSkillsLoader(search_dirs=[tmp_path])
+    skills = loader.list_skills()
+
+    assert len(skills) == 1
+    assert skills[0].name == "boundary"
+    assert skills[0].description == "\nline\n"
+
+
 def test_top_level_requires_precedence_over_openclaw(tmp_path):
     skill = tmp_path / "tmux"
     skill.mkdir()
