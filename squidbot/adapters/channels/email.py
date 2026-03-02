@@ -41,7 +41,18 @@ if TYPE_CHECKING:
 
 _NO_TEXT: str = "[Keine Textinhalte]"
 
-_md = mistune.create_markdown(escape=True)
+_md = mistune.create_markdown(
+    escape=True,
+    plugins=[
+        "table",
+        "strikethrough",
+        "task_lists",
+        "url",
+        "footnotes",
+        "superscript",
+        "subscript",
+    ],
+)
 
 
 def _normalize_address(addr: str) -> str:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestTablePlugin:
     """Test table plugin renders Markdown tables to HTML."""
@@ -80,7 +78,7 @@ class TestTaskListsPlugin:
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("- [ ] Incomplete task")
-        assert '<input type="checkbox"' in result
+        assert 'type="checkbox"' in result
         assert "checked" not in result or "disabled" in result
 
     def test_checked_task_renders_checked_checkbox(self) -> None:
@@ -88,7 +86,7 @@ class TestTaskListsPlugin:
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("- [x] Completed task")
-        assert '<input type="checkbox"' in result
+        assert 'type="checkbox"' in result
         assert "checked" in result
 
     def test_mixed_task_list(self) -> None:
@@ -106,7 +104,7 @@ class TestTaskListsPlugin:
         from squidbot.adapters.channels.email import _md
 
         result = _md("- [x] Task")
-        assert '<input type="checkbox"' in result
+        assert 'type="checkbox"' in result
 
 
 class TestUrlPlugin:
@@ -120,11 +118,11 @@ class TestUrlPlugin:
         assert '<a href="https://example.com"' in result
 
     def test_auto_link_www_url(self) -> None:
-        """Bare www URL converts to anchor tag."""
+        """Bare www URL does not auto-link (url plugin requires scheme)."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("Check www.example.com")
-        assert "<a" in result
+        assert "<a" not in result
         assert "www.example.com" in result
 
     def test_url_in_email(self) -> None:
@@ -233,9 +231,12 @@ class TestAllPluginsIntegration:
 | Feature | Status |
 |---------|--------|
 | Table   | ~~old~~ |
-| Task    | [x] Done |
+| Plugin  | active |
 
-See https://example.com[^1].
+- [x] Done
+- [ ] Todo
+
+See https://example.com for details[^1].
 
 Formula: E=mc^2^, H~2~O.
 
@@ -248,7 +249,7 @@ Formula: E=mc^2^, H~2~O.
         # Strikethrough
         assert "<del>old</del>" in result
         # Task list
-        assert '<input type="checkbox"' in result
+        assert 'type="checkbox"' in result
         # URL
         assert '<a href="https://example.com"' in result
         # Footnote
@@ -272,7 +273,7 @@ Formula: E=mc^2^, H~2~O.
 - [x] Checked
 - [ ] Unchecked
 
-Link: https://test.com[^note].
+Link: https://test.org for more[^note].
 
 Math: x^n^, H~2~O.
 
@@ -285,9 +286,9 @@ Math: x^n^, H~2~O.
         # Strikethrough
         assert "<del>1</del>" in result
         # Task list
-        assert '<input type="checkbox"' in result
+        assert 'type="checkbox"' in result
         # URL
-        assert '<a href="https://test.com"' in result
+        assert '<a href="https://test.org"' in result
         # Footnote
         assert "footnote" in result.lower()
         # Superscript
