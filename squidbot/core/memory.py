@@ -192,11 +192,12 @@ class MemoryManager:
             user_message: The user's input text.
             assistant_reply: The final text response from the assistant.
         """
-        await self._storage.append_message(
-            Message(role="user", content=user_message, channel=channel, sender_id=sender_id)
+        user_msg = Message(role="user", content=user_message, channel=channel, sender_id=sender_id)
+        assistant_msg = Message(
+            role="assistant", content=assistant_reply, channel=channel, sender_id="assistant"
         )
-        await self._storage.append_message(
-            Message(
-                role="assistant", content=assistant_reply, channel=channel, sender_id="assistant"
-            )
-        )
+        if hasattr(self._storage, "append_messages"):
+            await self._storage.append_messages([user_msg, assistant_msg])
+        else:
+            await self._storage.append_message(user_msg)
+            await self._storage.append_message(assistant_msg)

@@ -269,6 +269,50 @@ async def test_persist_exchange_appends_user_then_assistant_with_metadata(
     assert assistant_msg.sender_id == "assistant"
 
 
+async def test_persist_exchange_uses_batch_when_available() -> None:
+    """persist_exchange must call append_messages (not append_message) when available."""
+    append_message_calls: list[Message] = []
+    append_messages_calls: list[list[Message]] = []
+
+    class BatchStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            return []
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, message: Message) -> None:
+            append_message_calls.append(message)
+
+        async def append_messages(self, messages: list[Message]) -> None:
+            append_messages_calls.append(messages)
+
+        async def save_global_memory(self, content: str) -> None: ...
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, jobs: list) -> None: ...
+
+    manager = MemoryManager(storage=BatchStorage())  # type: ignore[arg-type]
+    await manager.persist_exchange(
+        channel="cli",
+        sender_id="user",
+        user_message="hello",
+        assistant_reply="world",
+    )
+
+    assert len(append_messages_calls) == 1, "append_messages should be called once"
+    assert len(append_message_calls) == 0, (
+        "append_message should not be called when append_messages is available"
+    )
+    batch = append_messages_calls[0]
+    assert len(batch) == 2
+    assert batch[0].role == "user"
+    assert batch[0].content == "hello"
+    assert batch[1].role == "assistant"
+    assert batch[1].content == "world"
+
+
 def test_init_rejects_zero_history_context_messages(storage: InMemoryStorage) -> None:
     """Constructor raises ValueError when history_context_messages is zero."""
     with pytest.raises(ValueError, match="history_context_messages must be > 0"):
