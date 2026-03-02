@@ -911,7 +911,9 @@ class MatrixChannel:
                         return f"[Anhang: {filename} — zu groß]", None
 
         event_id_val = getattr(event, "event_id", "?")
-        is_encrypted = enc_file is not None or bool(source_file)
+        # RoomEncryptedMedia exposes key/hashes/iv as direct event attributes.
+        has_direct_enc_attrs = isinstance(getattr(event, "key", None), dict)
+        is_encrypted = enc_file is not None or has_direct_enc_attrs or bool(source_file)
         logger.debug(
             "MatrixChannel: download event={} encrypted={} url={}",
             event_id_val,
@@ -925,7 +927,7 @@ class MatrixChannel:
 
         body = cast(bytes, resp.body)
 
-        # Decrypt if E2EE via event.file (RoomEncryptedMedia-style: direct attribute access).
+        # Decrypt if E2EE via event.file (nested EncryptedFile object on the event).
         if enc_file is not None:
             from nio.crypto.attachments import decrypt_attachment  # noqa: PLC0415
 
@@ -944,6 +946,29 @@ class MatrixChannel:
             else:
                 logger.warning(
                     "MatrixChannel: missing E2EE key material for event={}, skipping decrypt",
+                    event_id_val,
+                )
+        elif has_direct_enc_attrs:
+            # Decrypt via RoomEncryptedMedia direct attributes: key/hashes/iv live on the event
+            # itself (parsed from content.file.* by nio), not nested under event.file.
+            from nio.crypto.attachments import decrypt_attachment  # noqa: PLC0415
+
+            direct_key_dict: dict[str, Any] = getattr(event, "key", {}) or {}
+            direct_key: str | None = (
+                direct_key_dict.get("k") if isinstance(direct_key_dict, dict) else None
+            ) or None
+            direct_hashes: dict[str, Any] = getattr(event, "hashes", {}) or {}
+            direct_sha256: str | None = (
+                direct_hashes.get("sha256") if isinstance(direct_hashes, dict) else None
+            ) or None
+            direct_iv_raw = getattr(event, "iv", None)
+            direct_iv: str | None = direct_iv_raw if isinstance(direct_iv_raw, str) else None
+            if direct_key and direct_sha256 and direct_iv:
+                body = decrypt_attachment(body, direct_key, direct_sha256, direct_iv)
+            else:
+                logger.warning(
+                    "MatrixChannel: missing E2EE key material on event attrs for event={}, "
+                    "skipping decrypt",
                     event_id_val,
                 )
         elif source_file:

@@ -1706,8 +1706,13 @@ class TestMatrixEncryptedMediaIntake:
         assert ch._queue.empty(), "Non-media BadEvent must not produce an InboundMessage"
 
     async def test_room_encrypted_media_decrypt_uses_key_k_and_hashes_sha256(self) -> None:
-        """_download_attachment passes positional strings to decrypt_attachment,
-        not a dict — guards against the pre-existing bug on matrix.py:773."""
+        """_download_attachment uses direct event.key/hashes/iv for RoomEncryptedMedia.
+
+        nio.RoomEncryptedMedia parses content.file.* into direct event attributes
+        (event.key, event.hashes, event.iv) — there is NO event.file attribute on
+        this class. The production code must use the direct-attribute path, not the
+        enc_file path, and must pass positional strings to decrypt_attachment (not a dict).
+        """
         from squidbot.adapters.channels.matrix import MatrixChannel
 
         config = _make_config()
@@ -1720,45 +1725,54 @@ class TestMatrixEncryptedMediaIntake:
             return_value=MagicMock(body=ciphertext, content_type="application/pdf")
         )
 
-        # nio.RoomEncryptedFile lacks room_id, info, and file attributes that
-        # _download_attachment reads (the event IS the encrypted wrapper; the production
-        # code detects E2EE via event.file, not by isinstance-checking the event type).
-        # A MagicMock lets us set exactly the attributes the current production code reads.
-        enc_file_event = MagicMock()
-        enc_file_event.sender = "@alice:example.org"
-        enc_file_event.room_id = "!room1:example.org"
-        enc_file_event.event_id = "$enc1"
-        enc_file_event.server_timestamp = 0
-        enc_file_event.body = "encrypted.pdf"
-        enc_file_event.source = {"content": {}}
-        enc_file_event.url = "mxc://example.com/enc"
-        enc_file_event.info = MagicMock()
-        enc_file_event.info.mimetype = "application/pdf"
-        # event.file triggers the E2EE decryption path in _download_attachment.
-        # Its attrs (key.k, hashes["sha256"], iv) are what the fixed code should read.
-        file_attr = MagicMock()
-        file_attr.url = "mxc://example.com/enc"
-        file_attr.key = MagicMock()
-        file_attr.key.k = "base64key"
-        file_attr.key.key_type = "oct"
-        file_attr.key.alg = "A256CTR"
-        file_attr.key.key_ops = ["encrypt", "decrypt"]
-        file_attr.key.ext = True
-        file_attr.iv = "base64iv"
-        file_attr.hashes = {"sha256": "base64hash"}
-        file_attr.v = "v2"
-        enc_file_event.file = file_attr
+        # Model the real RoomEncryptedMedia structure: key/hashes/iv are direct attributes
+        # on the event; event.file does NOT exist (not a dataclass field on RoomEncryptedMedia).
+        enc_media_event = MagicMock(
+            spec=[
+                "sender",
+                "room_id",
+                "event_id",
+                "server_timestamp",
+                "body",
+                "source",
+                "url",
+                "info",
+                "key",
+                "hashes",
+                "iv",
+            ]
+        )
+        enc_media_event.sender = "@alice:example.org"
+        enc_media_event.room_id = "!room1:example.org"
+        enc_media_event.event_id = "$enc1"
+        enc_media_event.server_timestamp = 0
+        enc_media_event.body = "encrypted.pdf"
+        # No content.file in source — key material lives on direct event attrs.
+        enc_media_event.source = {"content": {}}
+        enc_media_event.url = "mxc://example.com/enc"
+        enc_media_event.info = MagicMock()
+        enc_media_event.info.mimetype = "application/pdf"
+        # Direct attributes from nio RoomEncryptedMedia (parsed from content.file.*).
+        enc_media_event.key = {
+            "kty": "oct",
+            "alg": "A256CTR",
+            "k": "base64key",
+            "key_ops": ["encrypt", "decrypt"],
+            "ext": True,
+        }
+        enc_media_event.hashes = {"sha256": "base64hash"}
+        enc_media_event.iv = "base64iv"
 
         # Patch at source because matrix.py imports decrypt_attachment lazily inside the
         # function body: `from nio.crypto.attachments import decrypt_attachment`
         with patch("nio.crypto.attachments.decrypt_attachment") as mock_decrypt:
             mock_decrypt.return_value = b"decrypted content"
-            await ch._download_attachment(enc_file_event)
+            await ch._download_attachment(enc_media_event)
 
         mock_decrypt.assert_called_once()
         call_args = mock_decrypt.call_args
         # Must be called with positional strings: (ciphertext, key_str, hash_str, iv_str)
-        # NOT called with a dict as the second argument
+        # NOT called with a dict as the second argument (that was the pre-existing bug).
         positional = call_args.args
         n = len(positional)
         assert n == 4, (

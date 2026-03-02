@@ -9,7 +9,7 @@ E2EE Megolm rooms, (B) add `BadEvent` fallback for non-E2EE clients using `conte
 Fix the pre-existing `decrypt_attachment` call-site bug (dict arg → positional string args).
 Add diagnostics. Preserve mention-policy safety.
 
-**Reference implementation:** `~/projects/nanobot-redux/nanobot/channels/matrix.py` — this has
+**Reference implementation:** `nanobot-redux` — `nanobot/channels/matrix.py` — this has
 a working dual-callback setup (`MATRIX_MEDIA_EVENT_FILTER = (RoomMessageMedia, RoomEncryptedMedia)`)
 and correct `_decrypt_media_bytes` using positional string args. Port the relevant patterns.
 
