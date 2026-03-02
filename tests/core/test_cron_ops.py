@@ -110,3 +110,15 @@ def test_cronjob_once_flag_defaults_to_false() -> None:
 def test_cronjob_once_flag_can_be_set() -> None:
     job = _job(once=True)
     assert job.once is True
+
+
+def test_validate_job_rejects_once_with_interval_schedule() -> None:
+    now = datetime(2026, 3, 2, 10, 0, tzinfo=UTC)
+    error = validate_job(_job(schedule="every 3600", once=True), now=now)
+    assert error is not None
+    assert "once" in error.lower()
+
+
+def test_validate_job_accepts_once_with_cron_expression() -> None:
+    now = datetime(2026, 3, 2, 10, 0, tzinfo=UTC)
+    assert validate_job(_job(schedule="30 15 3 3 *", once=True), now=now) is None

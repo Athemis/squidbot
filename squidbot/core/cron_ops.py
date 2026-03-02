@@ -29,6 +29,10 @@ def validate_job(job: CronJob, *, now: datetime | None = None) -> str | None:
     Returns:
         Error message when invalid, otherwise None.
     """
+    if job.once and job.schedule.strip().startswith("every "):
+        return (
+            "once=True cannot be used with interval schedules ('every N'). Use a cron expression."
+        )
     next_run = parse_schedule(job, now=now)
     if next_run is None:
         return f"Invalid schedule '{job.schedule}'. Use cron syntax or 'every N'."
