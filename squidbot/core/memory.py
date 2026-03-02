@@ -8,10 +8,12 @@ contains no I/O or external service calls.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from squidbot.core.models import Message
 from squidbot.core.ports import MemoryPort, SkillsPort
+from squidbot.core.skills import build_skills_xml
 
 if TYPE_CHECKING:
     from squidbot.config.schema import OwnerAliasEntry
@@ -63,6 +65,11 @@ class MemoryManager:
         if history_context_messages <= 0:
             raise ValueError("history_context_messages must be > 0")
         self._history_context_messages = history_context_messages
+
+        # Cache for the assembled skills block.
+        # Key: frozenset of (name, location_str, available, always, description) tuples.
+        # Value: the assembled XML + always-skill bodies string.
+        self._skills_cache: tuple[frozenset[tuple[str, str, bool, bool, str]], str] | None = None
 
     def _is_owner(self, sender_id: str, channel: str) -> bool:
         """
@@ -139,27 +146,36 @@ class MemoryManager:
         Returns:
             Ordered list of messages ready to send to the LLM.
         """
-        history = await self._storage.load_history(last_n=self._history_context_messages)
-        global_memory = await self._storage.load_global_memory()
+        history, global_memory = await asyncio.gather(
+            self._storage.load_history(last_n=self._history_context_messages),
+            self._storage.load_global_memory(),
+        )
 
         # Label each history message with channel/sender context
         labelled_history = [self._label_message(msg) for msg in history]
 
-        # Build system prompt with global memory appended
-        full_system = system_prompt
+        # Assemble the system prompt using a list to avoid repeated string concatenation
+        system_parts: list[str] = [system_prompt]
         if global_memory.strip():
-            full_system += f"\n\n## Your Memory\n\n{global_memory}"
+            system_parts.append(f"## Your Memory\n\n{global_memory}")
 
-        # Inject skills: XML index + full bodies of always-skills
+        # Inject skills: XML index + full bodies of always-skills (cached by fingerprint)
         if self._skills is not None:
-            from squidbot.core.skills import build_skills_xml  # noqa: PLC0415
-
             skill_list = self._skills.list_skills()
-            full_system += f"\n\n{build_skills_xml(skill_list)}"
-            for skill in skill_list:
-                if skill.always and skill.available:
-                    body = self._skills.load_skill_body(skill.name)
-                    full_system += f"\n\n{body}"
+            fingerprint = frozenset(
+                (s.name, str(s.location), s.available, s.always, s.description) for s in skill_list
+            )
+
+            if self._skills_cache is None or self._skills_cache[0] != fingerprint:
+                parts: list[str] = [build_skills_xml(skill_list)]
+                for skill in skill_list:
+                    if skill.always and skill.available:
+                        parts.append(self._skills.load_skill_body(skill.name))
+                self._skills_cache = (fingerprint, "\n\n".join(parts))
+
+            system_parts.append(self._skills_cache[1])
+
+        full_system = "\n\n".join(system_parts)
 
         messages: list[Message] = [
             Message(role="system", content=full_system),

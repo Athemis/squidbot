@@ -8,6 +8,9 @@ exchange persistence with channel/sender metadata.
 
 from __future__ import annotations
 
+import asyncio
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -323,3 +326,93 @@ def test_init_rejects_negative_history_context_messages(storage: InMemoryStorage
     """Constructor raises ValueError when history_context_messages is negative."""
     with pytest.raises(ValueError, match="history_context_messages must be > 0"):
         MemoryManager(storage=storage, history_context_messages=-5)
+
+
+async def test_build_messages_loads_history_and_memory_in_parallel() -> None:
+    """load_history and load_global_memory must start before either completes."""
+    start_times: dict[str, float] = {}
+
+    class TrackingStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            start_times["history"] = time.monotonic()
+            await asyncio.sleep(0.05)
+            return []
+
+        async def load_global_memory(self) -> str:
+            start_times["memory"] = time.monotonic()
+            await asyncio.sleep(0.05)
+            return ""
+
+        async def append_message(self, message: Message) -> None: ...
+        async def save_global_memory(self, content: str) -> None: ...
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, jobs: list) -> None: ...
+
+    manager = MemoryManager(storage=TrackingStorage())  # type: ignore[arg-type]
+    await manager.build_messages(user_message="hi", system_prompt="sys")
+
+    assert "history" in start_times and "memory" in start_times
+    # With sequential execution the gap between start times is ~50ms (one sleep).
+    # With parallel execution both start within 25ms of each other.
+    delta = abs(start_times["history"] - start_times["memory"])
+    assert delta < 0.025, (
+        f"load_history and load_global_memory started {delta * 1000:.1f}ms apart — "
+        "they are running sequentially, not in parallel"
+    )
+
+
+async def test_skills_xml_cached_between_calls() -> None:
+    """build_skills_xml is called only once when the skill list is unchanged."""
+    from unittest.mock import patch
+
+    from squidbot.core.skills import SkillMetadata
+
+    skill = SkillMetadata(
+        name="test_skill",
+        description="desc",
+        location=Path("/f.md"),
+        always=False,
+        available=True,
+    )
+
+    class FakeSkills:
+        def list_skills(self) -> list[SkillMetadata]:
+            return [skill]
+
+        def load_skill_body(self, name: str) -> str:
+            return "body"
+
+    class MinimalStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            return []
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, m: Message) -> None: ...
+        async def save_global_memory(self, c: str) -> None: ...
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, j: list) -> None: ...
+
+    manager = MemoryManager(
+        storage=MinimalStorage(),  # type: ignore[arg-type]
+        skills=FakeSkills(),  # type: ignore[arg-type]
+    )
+
+    build_calls: list[int] = []
+
+    def counting_build(skills: list[SkillMetadata]) -> str:
+        build_calls.append(1)
+        return "<skills/>"
+
+    with patch("squidbot.core.memory.build_skills_xml", side_effect=counting_build):
+        messages1 = await manager.build_messages("hi", "sys")
+        messages2 = await manager.build_messages("hi again", "sys")
+
+    assert len(build_calls) == 1, f"build_skills_xml called {len(build_calls)} times"
+    assert "<skills/>" in messages1[0].content, "Cached result missing from first call"
+    assert "<skills/>" in messages2[0].content, "Cached result missing from second call"
