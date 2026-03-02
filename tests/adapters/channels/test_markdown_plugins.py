@@ -37,7 +37,10 @@ class TestTablePlugin:
         assert "<td>Cell 1</td>" in result
 
     def test_table_with_alignment(self) -> None:
-        """Test table with column alignment preserves alignment in HTML.
+        """Test table with column alignment renders table structure.
+
+        Note: Matrix spec v1.17 does not permit style= attributes, so nh3
+        strips alignment styles. The table structure is preserved.
 
         Returns:
             None
@@ -49,7 +52,7 @@ class TestTablePlugin:
 | L1   | C1     | R1    |"""
         result = _render_markdown(md)
         assert "<table>" in result
-        assert 'style="text-align:left"' in result or 'align="left"' in result
+        assert "<th>Left</th>" in result
 
     def test_table_in_email_channel(self) -> None:
         """Test Email channel _md renders tables correctly.
@@ -105,32 +108,36 @@ class TestStrikethroughPlugin:
 class TestTaskListsPlugin:
     """Test task_lists plugin renders task lists with checkboxes."""
 
-    def test_unchecked_task_renders_checkbox(self) -> None:
-        """Unchecked task [ ] renders with checkbox input."""
+    def test_unchecked_task_renders_list_item(self) -> None:
+        """Unchecked task [ ] renders as a list item in Matrix.
+
+        Note: <input> is not in the Matrix spec v1.17 allowed tags, so nh3
+        strips the checkbox. Task lists are still parsed but render as plain
+        <ul><li> without checkboxes in the Matrix formatted_body.
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("- [ ] Incomplete task")
-        assert 'type="checkbox"' in result
-        assert "checked" not in result
-        assert "disabled" in result
+        assert "<li>" in result
+        assert "Incomplete task" in result
 
-    def test_checked_task_renders_checked_checkbox(self) -> None:
-        """Checked task [x] renders with checked checkbox."""
+    def test_checked_task_renders_list_item(self) -> None:
+        """Checked task [x] renders as a list item in Matrix."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("- [x] Completed task")
-        assert 'type="checkbox"' in result
-        assert "checked" in result
+        assert "<li>" in result
+        assert "Completed task" in result
 
     def test_mixed_task_list(self) -> None:
-        """Mixed completed and incomplete tasks render correctly."""
+        """Mixed tasks all render as list items in Matrix."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
         md = """- [x] Done
 - [ ] Todo
 - [x] Also done"""
         result = _render_markdown(md)
-        assert result.count("checked") >= 2
+        assert result.count("<li>") == 3
 
     def test_task_list_in_email(self) -> None:
         """Email channel _md renders task lists."""
@@ -170,18 +177,22 @@ class TestFootnotesPlugin:
     """Test footnotes plugin renders footnote references and definitions."""
 
     def test_footnote_reference_and_definition(self) -> None:
-        """Footnote reference [^1] and definition render to HTML."""
+        """Footnote reference [^1] renders as <sup><a> with fragment href.
+
+        Note: nh3 strips class= and id= attributes (not in Matrix spec v1.17
+        allowlist), but the <sup> and <a href="#fn-..."> structure is preserved.
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         md = """This has a footnote[^1].
 
 [^1]: This is the footnote content."""
         result = _render_markdown(md)
-        assert "footnote-ref" in result or 'id="fnref:' in result
-        assert "footnote" in result.lower()
+        assert "<sup>" in result
+        assert 'href="#fn-' in result
 
     def test_multiple_footnotes(self) -> None:
-        """Multiple footnotes render with correct numbering."""
+        """Multiple footnotes each render a <sup> reference."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
         md = """First[^1] and second[^2].
@@ -189,7 +200,7 @@ class TestFootnotesPlugin:
 [^1]: First note.
 [^2]: Second note."""
         result = _render_markdown(md)
-        assert result.count("footnote") >= 2
+        assert result.count("<sup>") >= 2
 
     def test_footnotes_in_email(self) -> None:
         """Email channel _md renders footnotes."""
@@ -281,12 +292,12 @@ Formula: E=mc^2^, H~2~O.
         assert "<table>" in result
         # Strikethrough
         assert "<del>old</del>" in result
-        # Task list
-        assert 'type="checkbox"' in result
+        # Task list (checkboxes stripped by nh3 — <input> not in Matrix spec v1.17)
+        assert "<li>" in result
         # URL
         assert '<a href="https://example.com"' in result
-        # Footnote
-        assert "footnote" in result.lower()
+        # Footnote (class/id stripped by nh3, but <sup> and href structure preserved)
+        assert "<sup>" in result
         # Superscript
         assert "<sup>2</sup>" in result
         # Subscript
@@ -404,11 +415,12 @@ class TestMatrixSpoilerPlugin:
     """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""
 
     def test_inline_spoiler_renders_span_data_mx_spoiler(self) -> None:
-        """||text|| renders to <span data-mx-spoiler>text</span>."""
+        """||text|| renders to a <span> with data-mx-spoiler attribute."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("Here is ||a spoiler|| for you.")
-        assert "<span data-mx-spoiler>" in result
+        # nh3 normalises valueless attributes to attr="", both forms are valid HTML5
+        assert "data-mx-spoiler" in result
         assert "a spoiler" in result
 
     def test_spoiler_preserves_inner_markdown(self) -> None:
@@ -416,7 +428,7 @@ class TestMatrixSpoilerPlugin:
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown("||**bold spoiler**||")
-        assert "<span data-mx-spoiler>" in result
+        assert "data-mx-spoiler" in result
         assert "<strong>bold spoiler</strong>" in result
 
     def test_spoiler_does_not_appear_in_email(self) -> None:
