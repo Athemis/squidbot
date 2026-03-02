@@ -20,9 +20,13 @@ class MemoryWriteTool:
 
     This tool REPLACES the entire document. Callers should merge existing content
     with new information before writing.
+
+    ``concurrent = False``: two parallel memory_write calls would race (last writer wins,
+    silent data loss). The agent must not issue multiple memory_write calls in one batch.
     """
 
     name = "memory_write"
+    concurrent = False
     description = (
         "Update your global long-term memory document (MEMORY.md). "
         "This document is visible in every future session under '## Your Memory'. "

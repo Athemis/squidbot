@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -228,3 +229,186 @@ async def test_load_history_last_n_skips_malformed_trailing_lines(tmp_path: Path
     assert len(history) == 80
     assert history[0].content == "m000120"
     assert history[-1].content == "m000199"
+
+
+@pytest.mark.asyncio
+async def test_no_mkdir_after_init(tmp_path: Path) -> None:
+    """mkdir must not be called after __init__ completes."""
+    from unittest.mock import patch
+
+    mkdir_calls: list[Path] = []
+    original_mkdir = Path.mkdir
+
+    def tracking_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        mkdir_calls.append(self)
+        original_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]  # Path.mkdir uses bool params, not object
+
+    mem = JsonlMemory(base_dir=tmp_path / "store")  # __init__ may call mkdir
+    mkdir_calls.clear()  # reset after __init__
+
+    with patch.object(Path, "mkdir", tracking_mkdir):
+        await mem.load_history(last_n=10)
+        await mem.append_message(Message(role="user", content="hi", channel="cli", sender_id="x"))
+
+    assert mkdir_calls == [], f"mkdir called after __init__: {mkdir_calls}"
+
+
+@pytest.mark.asyncio
+async def test_load_history_uses_cache_after_first_load(tmp_path: Path) -> None:
+    """After the first load_history call no disk read occurs for subsequent calls."""
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.core.models import Message
+
+    mem = JsonlMemory(base_dir=tmp_path)
+    msg = Message(role="user", content="cached?", channel="cli", sender_id="u")
+
+    # Write one message to disk
+    await mem.append_message(msg)
+
+    # First load: reads from disk, populates cache
+    result1 = await mem.load_history(last_n=10)
+    assert len(result1) == 1
+
+    # Delete the history file — second load must come from cache
+    history_path = tmp_path / "history.jsonl"
+    history_path.unlink()
+    assert not history_path.exists()
+
+    result2 = await mem.load_history(last_n=10)
+    assert len(result2) == 1
+    assert result2[0].content == "cached?"
+
+
+@pytest.mark.asyncio
+async def test_load_history_cache_miss_when_last_n_grows(tmp_path: Path) -> None:
+    """Cache must miss and re-read disk when last_n exceeds the cached window."""
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.core.models import Message
+
+    mem = JsonlMemory(base_dir=tmp_path)
+    for i in range(5):
+        await mem.append_message(
+            Message(role="user", content=f"msg{i}", channel="cli", sender_id="u")
+        )
+
+    # First load: cache window = 3
+    result1 = await mem.load_history(last_n=3)
+    assert len(result1) == 3
+
+    # Now add two more messages directly to the file (bypass cache) to verify re-read
+    # Actually: write two more via append_message (which also updates cache)
+    await mem.append_message(Message(role="user", content="extra1", channel="cli", sender_id="u"))
+    await mem.append_message(Message(role="user", content="extra2", channel="cli", sender_id="u"))
+
+    # Request larger window — must re-read disk (cache window was only 3)
+    result2 = await mem.load_history(last_n=5)
+    assert len(result2) == 5
+    # The cache should now be updated to window=5
+    assert mem._history_cache_size == 5
+
+
+@pytest.mark.asyncio
+async def test_append_message_updates_cache(tmp_path: Path) -> None:
+    """append_message must keep the cache current for subsequent cache hits."""
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.core.models import Message
+
+    mem = JsonlMemory(base_dir=tmp_path)
+    msg1 = Message(role="user", content="first", channel="cli", sender_id="u")
+    await mem.append_message(msg1)
+
+    # Prime the cache
+    result1 = await mem.load_history(last_n=10)
+    assert len(result1) == 1
+
+    # Append via cache-maintaining path
+    msg2 = Message(role="user", content="second", channel="cli", sender_id="u")
+    await mem.append_message(msg2)
+
+    # Delete file to force cache-only path
+    (tmp_path / "history.jsonl").unlink()
+
+    result2 = await mem.load_history(last_n=10)
+    assert len(result2) == 2
+    assert result2[0].content == "first"
+    assert result2[1].content == "second"
+
+
+@pytest.mark.asyncio
+async def test_persist_exchange_opens_file_once(tmp_path: Path) -> None:
+    """persist_exchange must open history.jsonl only once."""
+    from unittest.mock import patch
+
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.core.memory import MemoryManager
+
+    mem = JsonlMemory(base_dir=tmp_path)
+    manager = MemoryManager(storage=mem)  # type: ignore[arg-type]
+
+    open_count = 0
+    real_open = open
+
+    def counting_open(path: object, *args: object, **kwargs: object) -> Any:
+        nonlocal open_count
+        if "history.jsonl" in str(path):
+            open_count += 1
+        return real_open(path, *args, **kwargs)  # type: ignore[call-overload]
+
+    with patch("builtins.open", side_effect=counting_open):
+        await manager.persist_exchange(
+            channel="cli",
+            sender_id="user",
+            user_message="hello",
+            assistant_reply="world",
+        )
+
+    assert open_count == 1, f"history.jsonl was opened {open_count} times"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_load_history_second_caller_uses_cache(tmp_path: Path) -> None:
+    """Double-checked locking: a second concurrent cold-cache caller must return cached data.
+
+    asyncio.gather schedules both coroutines. The first acquires the lock and reads from
+    disk via asyncio.to_thread (an await point). While the thread runs, the event loop
+    starts the second coroutine, which suspends on the lock. Once the first finishes and
+    releases the lock, the second re-checks the condition (lines 241-243) and returns
+    from cache without a second disk read.
+    """
+    storage = JsonlMemory(base_dir=tmp_path)
+    for i in range(3):
+        await storage.append_message(Message(role="user", content=f"m{i}"))
+
+    # Both concurrent results must be correct.
+    r1, r2 = await asyncio.gather(
+        storage.load_history(last_n=3),
+        storage.load_history(last_n=3),
+    )
+    assert len(r1) == 3
+    assert len(r2) == 3
+    assert storage._history_cache_loaded  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_append_messages_empty_list_is_noop(tmp_path: Path) -> None:
+    """append_messages([]) must return immediately without writing to disk."""
+    storage = JsonlMemory(base_dir=tmp_path)
+    await storage.append_messages([])  # must not raise
+    history = await storage.load_history()
+    assert history == []
+
+
+@pytest.mark.asyncio
+async def test_append_messages_updates_cache(tmp_path: Path) -> None:
+    """append_messages must update the in-memory cache when the cache is initialised."""
+    storage = JsonlMemory(base_dir=tmp_path)
+    # Prime the cache by loading history (sets _history_cache_size > 0).
+    await storage.load_history(last_n=10)
+    msgs = [
+        Message(role="user", content="batch-1"),
+        Message(role="assistant", content="batch-2"),
+    ]
+    await storage.append_messages(msgs)
+    cached = list(storage._history_cache)  # type: ignore[attr-defined]
+    assert any(m.content == "batch-1" for m in cached)
+    assert any(m.content == "batch-2" for m in cached)

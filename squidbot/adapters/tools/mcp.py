@@ -26,7 +26,11 @@ from squidbot.core.models import ToolResult
 
 
 class McpConnectionProtocol(Protocol):
-    """Protocol for MCP server connections that can be closed."""
+    """Protocol for MCP server connections that can be connected and closed."""
+
+    async def connect(self) -> list[Any]:
+        """Open the server connection and return all available tools."""
+        ...
 
     async def close(self) -> None:
         """Close the server connection and clean up resources."""

@@ -199,18 +199,22 @@ class HeartbeatService:
 
         return start_minutes <= current_minutes < end_minutes
 
-    def _read_heartbeat_file(self) -> str | None:
+    async def _read_heartbeat_file(self) -> str | None:
         """
-        Read HEARTBEAT.md from the workspace.
+        Read HEARTBEAT.md from the workspace via asyncio.to_thread.
 
         Returns:
             File contents as a string, or None if the file does not exist.
         """
         path = self._workspace / "HEARTBEAT.md"
-        try:
-            return path.read_text(encoding="utf-8") if path.exists() else None
-        except Exception:
-            return None
+
+        def _read() -> str | None:
+            try:
+                return path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return None
+
+        return await asyncio.to_thread(_read)
 
     @staticmethod
     def _is_heartbeat_ok(text: str) -> bool:
@@ -251,7 +255,7 @@ class HeartbeatService:
             return
 
         # 3. HEARTBEAT.md check — skip only when the file exists and is empty
-        content = self._read_heartbeat_file()
+        content = await self._read_heartbeat_file()
         if content is not None and _is_heartbeat_empty(content):
             logger.debug("heartbeat: skipped (HEARTBEAT.md empty)")
             return

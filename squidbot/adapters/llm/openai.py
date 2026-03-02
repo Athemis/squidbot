@@ -59,6 +59,8 @@ class OpenAIAdapter:
         api_key: str,
         model: str,
         supports_reasoning_content: bool = False,
+        *,
+        client: AsyncOpenAI | None = None,
     ) -> None:
         """
         Args:
@@ -66,8 +68,10 @@ class OpenAIAdapter:
             api_key: API key for authentication.
             model: Model identifier (e.g., "anthropic/claude-opus-4-5").
             supports_reasoning_content: Whether provider supports reasoning content fields.
+            client: Optional pre-constructed AsyncOpenAI client to reuse. If not
+                    provided, a new client is created from api_base and api_key.
         """
-        self._client = AsyncOpenAI(base_url=api_base, api_key=api_key)
+        self._client = client or AsyncOpenAI(base_url=api_base, api_key=api_key)
         self._model = model
         self._supports_reasoning_content = supports_reasoning_content
 

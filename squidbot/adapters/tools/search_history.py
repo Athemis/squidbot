@@ -52,7 +52,11 @@ def _scan_history(
         return []
 
     contexts: list[tuple[Message | None, Message, Message | None]] = []
+    # previous_message is set eagerly only for lines that were already parsed
+    # (matches and after-context lines). For non-matching lines we keep the raw
+    # text in previous_raw_line and parse it lazily if it becomes a before-context.
     previous_message: Message | None = None
+    previous_raw_line: str | None = None
     pending_after_index: int | None = None
 
     with path.open("r", encoding="utf-8", errors="replace") as history_file:
@@ -61,19 +65,51 @@ def _scan_history(
             if not line:
                 continue
 
+            # Fill the "after" context slot for the most recent match.
+            # We must parse this line regardless of whether it contains the query.
+            if pending_after_index is not None:
+                message = deserialize_message_safe(line)
+                if message is not None and not (cutoff is not None and message.timestamp < cutoff):
+                    before, hit, _ = contexts[pending_after_index]
+                    contexts[pending_after_index] = (before, hit, message)
+                    pending_after_index = None
+                    previous_message = message
+                    previous_raw_line = line
+                    if len(contexts) >= max_results:
+                        break
+                    continue
+                # Malformed or cutoff-filtered after-context line: skip it but
+                # keep searching for the next valid after-context candidate.
+                continue
+
+            # Skip JSON parsing entirely if the query cannot be in this line.
+            # ensure_ascii=False in _serialize_message means content is stored as raw
+            # Unicode, so this string check is reliable for all scripts and languages.
+            if normalized_query not in line.lower():
+                # Remember this raw line in case the next parsed message is a match
+                # and needs this as its "before" context (lazy parsing).
+                previous_message = None
+                previous_raw_line = line
+                continue
+
             message = deserialize_message_safe(line)
             if message is None:
                 continue
 
             if cutoff is not None and message.timestamp < cutoff:
+                previous_message = None
+                previous_raw_line = line
                 continue
 
-            if pending_after_index is not None:
-                before, hit, _ = contexts[pending_after_index]
-                contexts[pending_after_index] = (before, hit, message)
-                pending_after_index = None
-                if len(contexts) >= max_results:
-                    break
+            # Lazily parse the previous raw line as before-context if needed.
+            # Apply the same cutoff filter to avoid leaking time-filtered messages
+            # into the context window via the lazy-parse path.
+            if previous_message is None and previous_raw_line is not None:
+                lazy_msg = deserialize_message_safe(previous_raw_line)
+                if lazy_msg is not None and not (
+                    cutoff is not None and lazy_msg.timestamp < cutoff
+                ):
+                    previous_message = lazy_msg
 
             if (
                 message.role in SEARCHABLE_ROLES
@@ -85,6 +121,7 @@ def _scan_history(
                 pending_after_index = len(contexts) - 1
 
             previous_message = message
+            previous_raw_line = line
 
     return contexts
 

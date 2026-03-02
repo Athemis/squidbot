@@ -139,3 +139,21 @@ class TestCronListRemoveSetEnabled:
 
         final_jobs = await storage.load_cron_jobs()
         assert final_jobs == []
+
+
+class TestCronToolConcurrency:
+    """Mutating cron tools must declare concurrent=False (read-modify-write TOCTOU risk)."""
+
+    def test_cron_add_concurrent_is_false(self, tmp_path: Path) -> None:
+        tool = CronAddTool(
+            storage=JsonlMemory(tmp_path), default_channel="cli:local", default_metadata={}
+        )
+        assert tool.concurrent is False
+
+    def test_cron_remove_concurrent_is_false(self, tmp_path: Path) -> None:
+        tool = CronRemoveTool(storage=JsonlMemory(tmp_path))
+        assert tool.concurrent is False
+
+    def test_cron_set_enabled_concurrent_is_false(self, tmp_path: Path) -> None:
+        tool = CronSetEnabledTool(storage=JsonlMemory(tmp_path))
+        assert tool.concurrent is False

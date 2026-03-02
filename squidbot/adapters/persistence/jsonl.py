@@ -21,7 +21,9 @@ Directory layout:
 from __future__ import annotations
 
 import asyncio
+import collections
 import fcntl
+import itertools
 import json
 import os
 import tempfile
@@ -61,7 +63,7 @@ def _serialize_message(message: Message) -> str:
         d["channel"] = message.channel
     if message.sender_id is not None:
         d["sender_id"] = message.sender_id
-    return json.dumps(d)
+    return json.dumps(d, ensure_ascii=False)
 
 
 def deserialize_message(line: str) -> Message:
@@ -112,31 +114,34 @@ def deserialize_message_safe(line: str) -> Message | None:
 
 
 def _history_file(base_dir: Path) -> Path:
-    """Return the global history JSONL path, creating parent directories."""
-    # This helper is used by both readers and writers. Creating the base directory is
-    # cheap and simplifies callers by ensuring a stable path.
-    base_dir.mkdir(parents=True, exist_ok=True)
+    """Return the global history JSONL path.
+
+    Note: Does not create directories. ``JsonlMemory.__init__`` creates all required
+    directories at startup; callers outside of ``JsonlMemory`` must ensure the directory
+    already exists (e.g. ``SearchHistoryTool`` always runs alongside a ``JsonlMemory``
+    instance that shares the same ``base_dir``).
+    """
     return base_dir / "history.jsonl"
 
 
-def _global_memory_file(base_dir: Path, *, write: bool = False) -> Path:
+def _global_memory_file(base_dir: Path) -> Path:
     """Return the global MEMORY.md path.
 
-    Args:
-        base_dir: Root storage directory.
-        write: If True, creates parent directories.
+    Note: Does not create directories. ``JsonlMemory.__init__`` creates all required
+    directories at startup; callers outside of ``JsonlMemory`` must ensure the directory
+    already exists.
     """
-    path = base_dir / "workspace" / "MEMORY.md"
-    if write:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    return base_dir / "workspace" / "MEMORY.md"
 
 
 def _cron_file(base_dir: Path) -> Path:
-    """Return the cron jobs JSON path."""
-    path = base_dir / "cron" / "jobs.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    """Return the cron jobs JSON path.
+
+    Note: Does not create directories. ``JsonlMemory.__init__`` creates all required
+    directories at startup; callers outside of ``JsonlMemory`` must ensure the directory
+    already exists.
+    """
+    return base_dir / "cron" / "jobs.json"
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -184,6 +189,18 @@ class JsonlMemory:
 
     def __init__(self, base_dir: Path) -> None:
         self._base = base_dir
+        # Create full directory structure once at startup so no method needs to mkdir.
+        self._base.mkdir(parents=True, exist_ok=True)
+        (self._base / "workspace").mkdir(parents=True, exist_ok=True)
+        (self._base / "cron").mkdir(parents=True, exist_ok=True)
+        # In-memory cache of recent history entries.
+        # Populated on first load_history call; maintained on append.
+        self._history_cache: collections.deque[Message] = collections.deque()
+        self._history_cache_size: int = 0  # largest last_n ever requested
+        self._history_cache_loaded: bool = False  # True after at least one disk read
+        # Guards cache population: prevents two concurrent callers from both
+        # executing the expensive disk read when the cache is cold.
+        self._history_load_lock: asyncio.Lock = asyncio.Lock()
 
     async def load_history(self, last_n: int | None = None) -> list[Message]:
         """Load messages from the global history JSONL file.
@@ -193,6 +210,11 @@ class JsonlMemory:
 
         Returns:
             List of messages in chronological order.
+
+        Note:
+            Results are cached in memory after the first bounded (last_n is not None) read.
+            Subsequent calls with last_n <= the largest previously requested value are served
+            from cache without disk I/O. Unbounded reads (last_n=None) always read from disk.
         """
         # Treat <=0 as "no history". This is useful for callers that want to disable
         # history without branching. It also prevents accidentally loading the full
@@ -200,6 +222,34 @@ class JsonlMemory:
         if last_n is not None and last_n <= 0:
             return []
 
+        # Cache hit: cache has been loaded from disk and covers the requested window.
+        # The deque may hold fewer than last_n entries when history itself is shorter
+        # than last_n — that is still a valid hit; we return whatever the cache holds.
+        if last_n is not None and self._history_cache_loaded and last_n <= self._history_cache_size:
+            skip = max(0, len(self._history_cache) - last_n)
+            return list(itertools.islice(self._history_cache, skip, None))
+
+        # Unbounded reads are never cached — skip the lock entirely.
+        if last_n is None:
+            return await self._load_history_from_disk(None)
+
+        # Serialize concurrent cold-cache loads: only one caller reads from disk,
+        # subsequent callers check the cache again under the lock and return early.
+        async with self._history_load_lock:
+            # Re-check inside the lock — a concurrent caller may have populated the
+            # cache while we were waiting.
+            if self._history_cache_loaded and last_n <= self._history_cache_size:
+                skip = max(0, len(self._history_cache) - last_n)
+                return list(itertools.islice(self._history_cache, skip, None))
+
+            return await self._load_history_from_disk(last_n)
+
+    async def _load_history_from_disk(self, last_n: int | None) -> list[Message]:
+        """Read history from disk and, for bounded reads, update the in-memory cache.
+
+        Must be called while holding self._history_load_lock for bounded reads.
+        Unbounded reads (last_n=None) are not cached and may bypass the lock.
+        """
         path = _history_file(self._base)
 
         def _read() -> tuple[list[Message], int, str | None]:
@@ -315,6 +365,16 @@ class JsonlMemory:
                 path,
                 preview,
             )
+
+        # Populate cache after disk read
+        if last_n is not None:
+            self._history_cache_size = max(self._history_cache_size, last_n)
+            self._history_cache = collections.deque(
+                messages[-self._history_cache_size :],
+                maxlen=self._history_cache_size,
+            )
+            self._history_cache_loaded = True
+
         return messages
 
     async def append_message(self, message: Message) -> None:
@@ -339,6 +399,43 @@ class JsonlMemory:
 
         await asyncio.to_thread(_write)
 
+        # Update cache AFTER successful write — never ahead of disk.
+        # deque with maxlen trims automatically in O(1).
+        if self._history_cache_size > 0:
+            self._history_cache.append(message)
+
+    async def append_messages(self, messages: list[Message]) -> None:
+        """Append multiple messages to history in a single file open and lock.
+
+        This is an adapter-level extension that is not part of ``MemoryPort``.
+        Callers that want batch writes should check ``hasattr(storage, "append_messages")``
+        and fall back to ``append_message`` for other adapters.
+
+        Args:
+            messages: Messages to append in order.
+        """
+        if not messages:
+            return
+        path = _history_file(self._base)
+        # Serialize before entering the thread to keep the lock window minimal.
+        lines = "\n".join(_serialize_message(m) for m in messages) + "\n"
+
+        def _write() -> None:
+            with open(path, "a", encoding="utf-8") as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    f.write(lines)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+
+        await asyncio.to_thread(_write)
+
+        # Update cache AFTER successful write — never ahead of disk.
+        # deque with maxlen trims automatically in O(1).
+        if self._history_cache_size > 0:
+            for message in messages:
+                self._history_cache.append(message)
+
     async def load_global_memory(self) -> str:
         """Load the global cross-session memory document."""
         path = _global_memory_file(self._base)
@@ -352,7 +449,7 @@ class JsonlMemory:
 
     async def save_global_memory(self, content: str) -> None:
         """Overwrite the global memory document."""
-        path = _global_memory_file(self._base, write=True)
+        path = _global_memory_file(self._base)
         await asyncio.to_thread(_atomic_write_text, path, content)
 
     async def load_cron_jobs(self) -> list[CronJob]:

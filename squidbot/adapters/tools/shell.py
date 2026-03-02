@@ -15,9 +15,15 @@ from squidbot.core.models import ToolDefinition, ToolResult
 
 
 class ShellTool:
-    """Executes shell commands, optionally scoped to the workspace directory."""
+    """Executes shell commands, optionally scoped to the workspace directory.
+
+    ``concurrent = False``: parallel shell commands can interfere with each other
+    through shared filesystem state, environment variables, or external resources.
+    The agent executes shell calls serially in LLM-specified order.
+    """
 
     name = "shell"
+    concurrent = False
     description = (
         "Execute a shell command. Returns stdout and stderr combined. "
         "Use for running scripts, installing packages, or interacting with the system."

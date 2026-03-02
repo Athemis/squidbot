@@ -8,6 +8,8 @@ exchange persistence with channel/sender metadata.
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -269,6 +271,50 @@ async def test_persist_exchange_appends_user_then_assistant_with_metadata(
     assert assistant_msg.sender_id == "assistant"
 
 
+async def test_persist_exchange_uses_batch_when_available() -> None:
+    """persist_exchange must call append_messages (not append_message) when available."""
+    append_message_calls: list[Message] = []
+    append_messages_calls: list[list[Message]] = []
+
+    class BatchStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            return []
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, message: Message) -> None:
+            append_message_calls.append(message)
+
+        async def append_messages(self, messages: list[Message]) -> None:
+            append_messages_calls.append(messages)
+
+        async def save_global_memory(self, content: str) -> None: ...
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, jobs: list) -> None: ...
+
+    manager = MemoryManager(storage=BatchStorage())  # type: ignore[arg-type]
+    await manager.persist_exchange(
+        channel="cli",
+        sender_id="user",
+        user_message="hello",
+        assistant_reply="world",
+    )
+
+    assert len(append_messages_calls) == 1, "append_messages should be called once"
+    assert len(append_message_calls) == 0, (
+        "append_message should not be called when append_messages is available"
+    )
+    batch = append_messages_calls[0]
+    assert len(batch) == 2
+    assert batch[0].role == "user"
+    assert batch[0].content == "hello"
+    assert batch[1].role == "assistant"
+    assert batch[1].content == "world"
+
+
 def test_init_rejects_zero_history_context_messages(storage: InMemoryStorage) -> None:
     """Constructor raises ValueError when history_context_messages is zero."""
     with pytest.raises(ValueError, match="history_context_messages must be > 0"):
@@ -279,3 +325,138 @@ def test_init_rejects_negative_history_context_messages(storage: InMemoryStorage
     """Constructor raises ValueError when history_context_messages is negative."""
     with pytest.raises(ValueError, match="history_context_messages must be > 0"):
         MemoryManager(storage=storage, history_context_messages=-5)
+
+
+async def test_build_messages_loads_history_and_memory_in_parallel() -> None:
+    """load_history and load_global_memory must both start before either completes."""
+    history_started = asyncio.Event()
+    memory_started = asyncio.Event()
+
+    class TrackingStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            history_started.set()
+            # Suspend here so the other coroutine gets a chance to start
+            await asyncio.sleep(0)
+            return []
+
+        async def load_global_memory(self) -> str:
+            memory_started.set()
+            await asyncio.sleep(0)
+            return ""
+
+        async def append_message(self, message: Message) -> None: ...
+        async def save_global_memory(self, content: str) -> None: ...
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, jobs: list) -> None: ...
+
+    manager = MemoryManager(storage=TrackingStorage())  # type: ignore[arg-type]
+    await manager.build_messages(user_message="hi", system_prompt="sys")
+
+    # Both events must be set — sequential execution would leave one unset when the
+    # other completes and the coroutine never yields back to the second.
+    assert history_started.is_set(), "load_history was never called"
+    assert memory_started.is_set(), "load_global_memory was never called"
+
+
+async def test_skills_xml_cached_between_calls() -> None:
+    """build_skills_xml is called only once when the skill list is unchanged."""
+    import squidbot.core.memory as _memory_module
+    from squidbot.core.skills import SkillMetadata
+
+    skill = SkillMetadata(
+        name="test_skill",
+        description="desc",
+        location=Path("/f.md"),
+        always=False,
+        available=True,
+    )
+
+    class FakeSkills:
+        def list_skills(self) -> list[SkillMetadata]:
+            return [skill]
+
+        def load_skill_body(self, name: str) -> str:
+            return "body"
+
+    class MinimalStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            return []
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, m: Message) -> None: ...
+        async def save_global_memory(self, c: str) -> None: ...
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, j: list) -> None: ...
+
+    manager = MemoryManager(
+        storage=MinimalStorage(),  # type: ignore[arg-type]
+        skills=FakeSkills(),  # type: ignore[arg-type]
+    )
+
+    build_calls: list[int] = []
+    original_build = _memory_module.build_skills_xml
+
+    def counting_build(skills: list[SkillMetadata]) -> str:
+        build_calls.append(1)
+        return "<skills/>"
+
+    _memory_module.build_skills_xml = counting_build  # type: ignore[assignment]
+    try:
+        messages1 = await manager.build_messages("hi", "sys")
+        messages2 = await manager.build_messages("hi again", "sys")
+    finally:
+        _memory_module.build_skills_xml = original_build  # type: ignore[assignment]
+
+    assert len(build_calls) == 1, f"build_skills_xml called {len(build_calls)} times"
+    assert "<skills/>" in messages1[0].content, "Cached result missing from first call"
+    assert "<skills/>" in messages2[0].content, "Cached result missing from second call"
+
+
+async def test_always_available_skill_body_injected_into_system_prompt() -> None:
+    """Skills with always=True and available=True must have their body appended to the prompt."""
+    from squidbot.core.skills import SkillMetadata
+
+    skill = SkillMetadata(
+        name="always_skill",
+        description="Always-injected skill",
+        location=Path("/always.md"),
+        always=True,
+        available=True,
+    )
+
+    class FakeSkills:
+        def list_skills(self) -> list[SkillMetadata]:
+            return [skill]
+
+        def load_skill_body(self, name: str) -> str:
+            return f"<body>{name}</body>"
+
+    class MinimalStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            return []
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, m: Message) -> None: ...
+
+        async def save_global_memory(self, c: str) -> None: ...
+
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, j: list) -> None: ...
+
+    manager = MemoryManager(
+        storage=MinimalStorage(),  # type: ignore[arg-type]
+        skills=FakeSkills(),  # type: ignore[arg-type]
+    )
+    messages = await manager.build_messages("hi", "sys")
+    assert messages[0].role == "system"
+    assert "<body>always_skill</body>" in messages[0].content

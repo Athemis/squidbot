@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -427,3 +428,27 @@ async def test_run_loop_calls_tick_and_stops(tmp_path):
         await _run_briefly()
 
     assert tick_count >= 1
+
+
+async def test_read_heartbeat_file_uses_to_thread(tmp_path: Path) -> None:
+    """_read_heartbeat_file must not block the event loop with synchronous I/O."""
+    from unittest.mock import patch
+
+    hb_path = tmp_path / "HEARTBEAT.md"
+    hb_path.write_text("hello", encoding="utf-8")
+
+    service = HeartbeatService.__new__(HeartbeatService)
+    service._workspace = tmp_path
+
+    called_in_thread = False
+
+    async def fake_to_thread(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        nonlocal called_in_thread
+        called_in_thread = True
+        return fn(*args, **kwargs)
+
+    with patch("squidbot.core.heartbeat.asyncio.to_thread", side_effect=fake_to_thread):
+        result = await service._read_heartbeat_file()
+
+    assert called_in_thread, "_read_heartbeat_file must use asyncio.to_thread"
+    assert result == "hello"

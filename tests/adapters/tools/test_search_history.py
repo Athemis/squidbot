@@ -208,3 +208,72 @@ async def test_search_skips_malformed_jsonl_lines(tmp_path: Path) -> None:
     assert not result.is_error
     assert "Find malformed data safely" in result.content
     assert "Still searchable response" in result.content
+
+
+def test_deserialize_not_called_for_non_matching_lines(tmp_path: Path) -> None:
+    """deserialize_message_safe must not be called for lines that cannot contain the query.
+
+    Lines that don't contain the query string (checked via a fast substring scan of the
+    raw JSONL text) must be skipped entirely — JSON parsing must not be invoked for them.
+    Lines that are used as context (immediately adjacent to a match) are exempt from this
+    rule because they need to be parsed to populate the context window.
+    """
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from squidbot.adapters.persistence.jsonl import _serialize_message, deserialize_message_safe
+    from squidbot.core.models import Message
+
+    history_file = tmp_path / "history.jsonl"
+    # Layout: two non-matching lines, then the match.
+    # The line immediately before the match may be lazily parsed for before-context,
+    # but the earlier non-matching lines must NOT be deserialized at all.
+    early_noise_a = Message(role="user", content="alpha noise", channel="c", sender_id="u")
+    early_noise_b = Message(role="user", content="beta noise", channel="c", sender_id="u")
+    context_before = Message(
+        role="user", content="context before the hit", channel="c", sender_id="u"
+    )
+    matching = Message(role="user", content="find me please", channel="c", sender_id="u")
+    history_file.write_text(
+        "\n".join(
+            [
+                _serialize_message(early_noise_a),
+                _serialize_message(early_noise_b),
+                _serialize_message(context_before),
+                _serialize_message(matching),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    deserialized_contents: list[str] = []
+    real_dsafe = deserialize_message_safe
+
+    def tracking_dsafe(line: str) -> Message | None:
+        parsed = real_dsafe(line)
+        if parsed is not None and isinstance(parsed.content, str):
+            deserialized_contents.append(parsed.content)
+        return parsed
+
+    with patch(
+        "squidbot.adapters.tools.search_history.deserialize_message_safe",
+        side_effect=tracking_dsafe,
+    ):
+        from squidbot.adapters.tools.search_history import _scan_history
+
+        results = _scan_history(
+            tmp_path,
+            "find me please",
+            cutoff=datetime(2000, 1, 1),
+            max_results=10,
+        )
+
+    assert len(results) == 1
+    # Lines that clearly cannot contain the query must not be deserialized.
+    assert "alpha noise" not in deserialized_contents, (
+        f"Non-adjacent non-matching line was deserialized: {deserialized_contents}"
+    )
+    assert "beta noise" not in deserialized_contents, (
+        f"Non-adjacent non-matching line was deserialized: {deserialized_contents}"
+    )

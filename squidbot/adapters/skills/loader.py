@@ -205,6 +205,7 @@ class FsSkillsLoader:
             requires_bins=missing_bins,
             requires_env=missing_env,
             emoji=squidbot_meta.get("emoji", ""),
+            mtime=mtime,
         )
         self._cache[path] = (mtime, skill)
         return skill

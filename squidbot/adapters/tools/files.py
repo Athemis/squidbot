@@ -57,21 +57,46 @@ class ReadFileTool:
             return ToolResult(
                 tool_call_id="", content="Error: path is outside workspace", is_error=True
             )
-        if not await asyncio.to_thread(resolved.exists):
-            return ToolResult(
-                tool_call_id="", content=f"Error: {path} does not exist", is_error=True
-            )
+
+        def _read_file() -> tuple[str | None, str | None]:
+            """Return (content, error_message). One of the two is always None."""
+            try:
+                return resolved.read_text(encoding="utf-8"), None
+            except FileNotFoundError:
+                return None, f"Error: file not found: {path_raw}"
+            except UnicodeDecodeError as exc:
+                return None, f"Error: cannot decode {path_raw} as UTF-8: {exc.reason}"
+            except OSError as exc:
+                return None, f"Error reading {path_raw}: {exc.strerror}"
+
         try:
-            content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
-            return ToolResult(tool_call_id="", content=content)
-        except Exception as e:
-            return ToolResult(tool_call_id="", content=str(e), is_error=True)
+            content, error = await asyncio.to_thread(_read_file)
+        except UnicodeDecodeError as exc:
+            return ToolResult(
+                tool_call_id="",
+                content=f"Error: cannot decode {path_raw} as UTF-8: {exc.reason}",
+                is_error=True,
+            )
+        except OSError as exc:
+            return ToolResult(
+                tool_call_id="",
+                content=f"Error reading {path_raw}: {exc.strerror}",
+                is_error=True,
+            )
+        if error is not None:
+            return ToolResult(tool_call_id="", content=error, is_error=True)
+        return ToolResult(tool_call_id="", content=content or "")
 
 
 class WriteFileTool:
-    """Write content to a file, creating it if it doesn't exist."""
+    """Write content to a file, creating it if it doesn't exist.
+
+    ``concurrent = False``: two parallel writes to the same path produce a race
+    condition (last writer wins). Serial execution preserves the LLM-intended order.
+    """
 
     name = "write_file"
+    concurrent = False
     description = "Write content to a file. Creates parent directories as needed."
     parameters = {
         "type": "object",

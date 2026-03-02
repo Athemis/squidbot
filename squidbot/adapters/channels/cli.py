@@ -79,6 +79,7 @@ class RichCliChannel:
     def __init__(self) -> None:
         """Initialize Rich CLI state."""
         self._session: PromptSession[str] | None = None
+        self._console = Console()
 
     def _get_session(self) -> PromptSession[str]:
         """Create and cache the prompt-toolkit session."""
@@ -104,10 +105,9 @@ class RichCliChannel:
 
     async def send(self, message: OutboundMessage) -> None:
         """Print the response as Markdown via Rich Console."""
-        console = Console()
-        console.print(Rule(style="dim"))
-        console.print("[bold cyan]squidbot ›[/bold cyan]")
-        console.print(Markdown(message.text))
+        self._console.print(Rule(style="dim"))
+        self._console.print("[bold cyan]squidbot ›[/bold cyan]")
+        self._console.print(Markdown(message.text))
 
     async def send_typing(self, session_id: str, typing: bool = True) -> None:
         """No typing indicator for Rich CLI."""

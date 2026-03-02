@@ -8,10 +8,12 @@ contains no I/O or external service calls.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from squidbot.core.models import Message
 from squidbot.core.ports import MemoryPort, SkillsPort
+from squidbot.core.skills import build_skills_xml
 
 if TYPE_CHECKING:
     from squidbot.config.schema import OwnerAliasEntry
@@ -63,6 +65,13 @@ class MemoryManager:
         if history_context_messages <= 0:
             raise ValueError("history_context_messages must be > 0")
         self._history_context_messages = history_context_messages
+
+        # Cache for the assembled skills block.
+        # Key: frozenset of (name, location_str, available, always, description, mtime) tuples.
+        # Value: the assembled XML + always-skill bodies string.
+        self._skills_cache: (
+            tuple[frozenset[tuple[str, str, bool, bool, str, float]], str] | None
+        ) = None
 
     def _is_owner(self, sender_id: str, channel: str) -> bool:
         """
@@ -139,27 +148,39 @@ class MemoryManager:
         Returns:
             Ordered list of messages ready to send to the LLM.
         """
-        history = await self._storage.load_history(last_n=self._history_context_messages)
-        global_memory = await self._storage.load_global_memory()
+        history, global_memory = await asyncio.gather(
+            self._storage.load_history(last_n=self._history_context_messages),
+            self._storage.load_global_memory(),
+        )
 
         # Label each history message with channel/sender context
         labelled_history = [self._label_message(msg) for msg in history]
 
-        # Build system prompt with global memory appended
-        full_system = system_prompt
+        # Assemble the system prompt using a list to avoid repeated string concatenation
+        system_parts: list[str] = [system_prompt]
         if global_memory.strip():
-            full_system += f"\n\n## Your Memory\n\n{global_memory}"
+            system_parts.append(f"## Your Memory\n\n{global_memory}")
 
-        # Inject skills: XML index + full bodies of always-skills
+        # Inject skills: XML index + full bodies of always-skills (cached by fingerprint)
         if self._skills is not None:
-            from squidbot.core.skills import build_skills_xml  # noqa: PLC0415
-
             skill_list = self._skills.list_skills()
-            full_system += f"\n\n{build_skills_xml(skill_list)}"
-            for skill in skill_list:
-                if skill.always and skill.available:
-                    body = self._skills.load_skill_body(skill.name)
-                    full_system += f"\n\n{body}"
+            # mtime is included so that changes to an always-skill's body (which
+            # FsSkillsLoader tracks by mtime) also invalidate this cache.
+            fingerprint = frozenset(
+                (s.name, str(s.location), s.available, s.always, s.description, s.mtime)
+                for s in skill_list
+            )
+
+            if self._skills_cache is None or self._skills_cache[0] != fingerprint:
+                parts: list[str] = [build_skills_xml(skill_list)]
+                for skill in skill_list:
+                    if skill.always and skill.available:
+                        parts.append(self._skills.load_skill_body(skill.name))
+                self._skills_cache = (fingerprint, "\n\n".join(parts))
+
+            system_parts.append(self._skills_cache[1])
+
+        full_system = "\n\n".join(system_parts)
 
         messages: list[Message] = [
             Message(role="system", content=full_system),
@@ -192,11 +213,12 @@ class MemoryManager:
             user_message: The user's input text.
             assistant_reply: The final text response from the assistant.
         """
-        await self._storage.append_message(
-            Message(role="user", content=user_message, channel=channel, sender_id=sender_id)
+        user_msg = Message(role="user", content=user_message, channel=channel, sender_id=sender_id)
+        assistant_msg = Message(
+            role="assistant", content=assistant_reply, channel=channel, sender_id="assistant"
         )
-        await self._storage.append_message(
-            Message(
-                role="assistant", content=assistant_reply, channel=channel, sender_id="assistant"
-            )
-        )
+        if hasattr(self._storage, "append_messages"):
+            await self._storage.append_messages([user_msg, assistant_msg])
+        else:
+            await self._storage.append_message(user_msg)
+            await self._storage.append_message(assistant_msg)

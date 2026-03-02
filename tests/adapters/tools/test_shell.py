@@ -40,3 +40,10 @@ class TestShellToolExecutes:
         result = await tool.execute(command="echo ok", timeout=None)
         assert not result.is_error
         assert "ok" in result.content
+
+
+class TestShellToolConcurrency:
+    def test_concurrent_is_false(self, tmp_path: Path) -> None:
+        """shell must declare concurrent=False to prevent parallel command interference."""
+        tool = ShellTool(workspace=tmp_path, restrict_to_workspace=False)
+        assert tool.concurrent is False

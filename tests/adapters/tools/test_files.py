@@ -47,7 +47,7 @@ class TestReadFileToolReadsFile:
         tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
         result = await tool.execute(path=str(ws / "nope.txt"))
         assert result.is_error
-        assert "does not exist" in result.content
+        assert "file not found" in result.content
 
     async def test_path_outside_workspace_blocked(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -156,29 +156,109 @@ class TestListFilesToolLists:
         assert "(empty)" in result.content
 
 
+# ── Concurrency ───────────────────────────────────────────────────────────────
+
+
+class TestWriteFileToolConcurrency:
+    def test_concurrent_is_false(self, tmp_path: Path) -> None:
+        """write_file must declare concurrent=False to prevent parallel write races."""
+        tool = WriteFileTool(workspace=_workspace(tmp_path), restrict_to_workspace=False)
+        assert tool.concurrent is False
+
+
 # ── Async Offloading ──────────────────────────────────────────────────────────
 
 
-class TestFileToolsAsyncOffloading:
-    async def test_read_file_uses_to_thread(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+class TestReadFileToolInnerErrorBranches:
+    """Tests that exercise error handling inside _read_file (not via mocked asyncio.to_thread)."""
+
+    async def test_binary_file_returns_unicode_decode_error(self, tmp_path: Path) -> None:
+        """A file with invalid UTF-8 bytes triggers the inner UnicodeDecodeError branch."""
         ws = _workspace(tmp_path)
-        (ws / "test.txt").write_text("content", encoding="utf-8")
+        target = ws / "binary.bin"
+        target.write_bytes(b"\xff\xfe\xfa garbage")
         tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
+        result = await tool.execute(path=str(target))
+        assert result.is_error
+        assert "cannot decode" in result.content
 
-        called_funcs = []
-        orig_to_thread = asyncio.to_thread
+    async def test_unreadable_file_returns_oserror(self, tmp_path: Path) -> None:
+        """A file with no read permissions triggers the inner OSError branch."""
+        import os
 
-        async def mock_to_thread(func, *args, **kwargs):
-            called_funcs.append(func.__name__ if hasattr(func, "__name__") else str(func))
-            return await orig_to_thread(func, *args, **kwargs)
+        if os.getuid() == 0:
+            pytest.skip("chmod 000 has no effect when running as root")
+        ws = _workspace(tmp_path)
+        target = ws / "locked.txt"
+        target.write_text("secret", encoding="utf-8")
+        target.chmod(0o000)
+        try:
+            tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
+            result = await tool.execute(path=str(target))
+            assert result.is_error
+            assert "Error reading" in result.content
+        finally:
+            target.chmod(0o644)
 
-        monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
-        await tool.execute(path="test.txt")
 
-        assert "exists" in called_funcs
-        assert "read_text" in called_funcs
+class TestReadFileToolErrorHandling:
+    async def test_permission_error_returns_error_result(self, tmp_path: Path) -> None:
+        """A PermissionError during read must be returned as ToolResult(is_error=True)."""
+        from unittest.mock import patch
+
+        tool = ReadFileTool(workspace=tmp_path, restrict_to_workspace=False)
+        target = tmp_path / "secret.txt"
+        target.write_text("hidden", encoding="utf-8")
+
+        with patch(
+            "squidbot.adapters.tools.files.asyncio.to_thread",
+            side_effect=PermissionError(13, "Permission denied"),
+        ):
+            result = await tool.execute(path=str(target))
+
+        assert result.is_error
+        assert "Error" in result.content
+
+    async def test_unicode_decode_error_returns_error_result(self, tmp_path: Path) -> None:
+        """A UnicodeDecodeError must be returned as ToolResult(is_error=True), not raised."""
+        from unittest.mock import patch
+
+        tool = ReadFileTool(workspace=tmp_path, restrict_to_workspace=False)
+        target = tmp_path / "binary.bin"
+        target.write_bytes(b"\xff\xfe binary garbage")
+
+        with patch(
+            "squidbot.adapters.tools.files.asyncio.to_thread",
+            side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        ):
+            result = await tool.execute(path=str(target))
+
+        assert result.is_error
+        assert "Error" in result.content
+
+
+class TestFileToolsAsyncOffloading:
+    async def test_read_file_uses_single_to_thread(self, tmp_path: Path) -> None:
+        """ReadFileTool must use only one asyncio.to_thread call per file read."""
+        from unittest.mock import patch
+
+        thread_calls: list[object] = []
+        real_to_thread = asyncio.to_thread
+
+        async def tracking_to_thread(fn: object, *args: object, **kwargs: object) -> object:
+            thread_calls.append(fn)
+            return await real_to_thread(fn, *args, **kwargs)  # type: ignore[arg-type]
+
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content", encoding="utf-8")
+
+        tool = ReadFileTool(workspace=tmp_path, restrict_to_workspace=False)
+        with patch(
+            "squidbot.adapters.tools.files.asyncio.to_thread", side_effect=tracking_to_thread
+        ):
+            await tool.execute(path=str(test_file))
+
+        assert len(thread_calls) == 1, f"asyncio.to_thread called {len(thread_calls)} times"
 
     async def test_write_file_uses_to_thread(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
