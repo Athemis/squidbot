@@ -447,29 +447,39 @@ class TestMatrixSpoilerPlugin:
         assert "data-mx-maths" in result
 
     def test_block_spoiler_single_line_renders_span(self) -> None:
-        """>! single line renders to <span data-mx-spoiler>."""
+        """>! single line renders to <span data-mx-spoiler>.
+
+        nh3 normalises valueless attributes to attr="", both forms are valid HTML5.
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown(">! hidden content")
-        assert "<span data-mx-spoiler>" in result
+        assert "data-mx-spoiler" in result
         assert "hidden content" in result
 
     def test_block_spoiler_multiline_renders_single_span(self) -> None:
-        """Multi-line >! block produces one <span data-mx-spoiler>."""
+        """Multi-line >! block produces one <span data-mx-spoiler>.
+
+        nh3 normalises valueless attributes to attr="", both forms are valid HTML5.
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown(">! first line\n>!\n>! second line")
-        assert result.count("<span data-mx-spoiler>") == 1
+        assert result.count("data-mx-spoiler") == 1
         assert "first line" in result
         assert "second line" in result
 
     def test_block_spoiler_inline_markdown_rendered(self) -> None:
-        """Inline markdown inside >! block is rendered."""
+        """Inline markdown inside >! block is rendered.
+
+        nh3 normalises valueless attributes to attr="", both forms are valid HTML5.
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         result = _render_markdown(">! **bold** and _italic_")
-        assert "<span data-mx-spoiler>" in result
+        assert "data-mx-spoiler" in result
         assert "<strong>bold</strong>" in result
+        assert "<em>italic</em>" in result
 
     def test_block_spoiler_does_not_appear_in_email(self) -> None:
         """>! lines are NOT rendered as spoiler in email channel."""
@@ -477,6 +487,7 @@ class TestMatrixSpoilerPlugin:
 
         result = _md(">! hidden")
         assert "data-mx-spoiler" not in result
+        assert "hidden" in result
 
     def test_block_spoiler_coexists_with_inline_spoiler(self) -> None:
         """Block and inline spoiler both work in the same message."""

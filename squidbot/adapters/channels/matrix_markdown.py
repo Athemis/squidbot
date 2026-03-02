@@ -5,6 +5,8 @@ Provides:
   to the Matrix spec v1.11+ data-mx-maths format.
 - plugin_mx_spoiler: mistune plugin that converts ||text|| to Matrix
   data-mx-spoiler format.
+- plugin_mx_block_spoiler: mistune plugin that converts >!-prefixed lines to
+  Matrix data-mx-spoiler format as a block-level element.
 - sanitize_for_matrix: nh3-based HTML sanitizer enforcing the Matrix spec
   v1.17 permitted HTML allowlist.
 """
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
     from mistune.core import BaseRenderer, BlockState, InlineState
     from mistune.inline_parser import InlineParser
 
-__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "sanitize_for_matrix"]
+__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sanitize_for_matrix"]
 
 # ---------------------------------------------------------------------------
 # Math plugin
@@ -78,6 +80,7 @@ def plugin_mx_math(md: Markdown) -> None:
 # ---------------------------------------------------------------------------
 
 _INLINE_SPOILER_PATTERN = r"\|\|(?P<spoiler_text>.+?)\|\|"
+_BLOCK_SPOILER_PATTERN = r"(?:^>![ \t]?[^\n]*(?:\n|$))+"
 
 
 def plugin_mx_spoiler(md: Markdown) -> None:
@@ -110,6 +113,45 @@ def plugin_mx_spoiler(md: Markdown) -> None:
     )
     if md.renderer and md.renderer.NAME == "html":
         md.renderer.register("mx_inline_spoiler", _render_inline_spoiler)
+
+
+def plugin_mx_block_spoiler(md: Markdown) -> None:
+    """Mistune plugin that renders >!-prefixed lines to Matrix data-mx-spoiler format.
+
+    Block spoiler syntax (one or more lines starting with '>!') becomes
+    <span data-mx-spoiler>rendered inline content</span>.
+    Inner text is rendered as inline Markdown so **bold**, _italic_ etc. work.
+    Registered before 'block_quote' so '>!' is tested before '>'.
+
+    Args:
+        md: The Markdown instance to extend.
+    """
+
+    def _parse_block_spoiler(block: BlockParser, m: Any, state: BlockState) -> int:
+        raw = m.group(0)
+        # Strip the '>!' prefix (and optional single space/tab) from each line.
+        lines = []
+        for line in raw.splitlines():
+            if line.startswith(">! ") or line.startswith(">!\t"):
+                lines.append(line[3:])
+            elif line.rstrip() == ">!":
+                lines.append("")
+            else:
+                lines.append(line)
+        content = "\n".join(lines)
+        # Store as "text" so mistune's _iter_render processes it via the inline
+        # parser automatically before the renderer is called.
+        state.append_token({"type": "mx_block_spoiler", "text": content})
+        return int(m.end())
+
+    def _render_block_spoiler(renderer: BaseRenderer, text: str) -> str:
+        return f"<span data-mx-spoiler>{text}</span>\n"
+
+    md.block.register(
+        "mx_block_spoiler", _BLOCK_SPOILER_PATTERN, _parse_block_spoiler, before="block_quote"
+    )
+    if md.renderer and md.renderer.NAME == "html":
+        md.renderer.register("mx_block_spoiler", _render_block_spoiler)
 
 
 # ---------------------------------------------------------------------------

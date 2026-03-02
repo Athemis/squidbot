@@ -28,6 +28,7 @@ import nio
 from loguru import logger
 
 from squidbot.adapters.channels.matrix_markdown import (
+    plugin_mx_block_spoiler,
     plugin_mx_math,
     plugin_mx_spoiler,
     sanitize_for_matrix,
@@ -69,7 +70,8 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
 )
 
 _md = mistune.create_markdown(
-    escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler]
+    escape=False,
+    plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler, plugin_mx_block_spoiler],
 )
 
 
