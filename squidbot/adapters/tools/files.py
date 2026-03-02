@@ -57,15 +57,21 @@ class ReadFileTool:
             return ToolResult(
                 tool_call_id="", content="Error: path is outside workspace", is_error=True
             )
-        if not await asyncio.to_thread(resolved.exists):
+
+        def _read_file() -> str | None:
+            try:
+                return resolved.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return None
+
+        content = await asyncio.to_thread(_read_file)
+        if content is None:
             return ToolResult(
-                tool_call_id="", content=f"Error: {path} does not exist", is_error=True
+                tool_call_id="",
+                content=f"Error: file not found: {path_raw}",
+                is_error=True,
             )
-        try:
-            content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
-            return ToolResult(tool_call_id="", content=content)
-        except Exception as e:
-            return ToolResult(tool_call_id="", content=str(e), is_error=True)
+        return ToolResult(tool_call_id="", content=content)
 
 
 class WriteFileTool:

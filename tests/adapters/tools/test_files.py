@@ -47,7 +47,7 @@ class TestReadFileToolReadsFile:
         tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
         result = await tool.execute(path=str(ws / "nope.txt"))
         assert result.is_error
-        assert "does not exist" in result.content
+        assert "file not found" in result.content
 
     async def test_path_outside_workspace_blocked(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -160,25 +160,27 @@ class TestListFilesToolLists:
 
 
 class TestFileToolsAsyncOffloading:
-    async def test_read_file_uses_to_thread(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        ws = _workspace(tmp_path)
-        (ws / "test.txt").write_text("content", encoding="utf-8")
-        tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
+    async def test_read_file_uses_single_to_thread(self, tmp_path: Path) -> None:
+        """ReadFileTool must use only one asyncio.to_thread call per file read."""
+        from unittest.mock import patch
 
-        called_funcs = []
-        orig_to_thread = asyncio.to_thread
+        thread_calls: list[object] = []
+        real_to_thread = asyncio.to_thread
 
-        async def mock_to_thread(func, *args, **kwargs):
-            called_funcs.append(func.__name__ if hasattr(func, "__name__") else str(func))
-            return await orig_to_thread(func, *args, **kwargs)
+        async def tracking_to_thread(fn: object, *args: object, **kwargs: object) -> object:
+            thread_calls.append(fn)
+            return await real_to_thread(fn, *args, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(asyncio, "to_thread", mock_to_thread)
-        await tool.execute(path="test.txt")
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content", encoding="utf-8")
 
-        assert "exists" in called_funcs
-        assert "read_text" in called_funcs
+        tool = ReadFileTool(workspace=tmp_path, restrict_to_workspace=False)
+        with patch(
+            "squidbot.adapters.tools.files.asyncio.to_thread", side_effect=tracking_to_thread
+        ):
+            await tool.execute(path=str(test_file))
+
+        assert len(thread_calls) == 1, f"asyncio.to_thread called {len(thread_calls)} times"
 
     async def test_write_file_uses_to_thread(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

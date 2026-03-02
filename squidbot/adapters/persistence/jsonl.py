@@ -63,7 +63,7 @@ def _serialize_message(message: Message) -> str:
         d["channel"] = message.channel
     if message.sender_id is not None:
         d["sender_id"] = message.sender_id
-    return json.dumps(d)
+    return json.dumps(d, ensure_ascii=False)
 
 
 def deserialize_message(line: str) -> Message:
