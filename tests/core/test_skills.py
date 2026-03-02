@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from squidbot.adapters.skills.fs import FsSkillsLoader
+from squidbot.adapters.skills.loader import FsSkillsLoader
 from squidbot.core.skills import build_skills_xml
 
 
@@ -402,7 +402,7 @@ def test_list_skills_ttl_cache_hit_skips_scan_work(skill_dir, monkeypatch):
     monkeypatch.setattr(type(skill_dir), "iterdir", tracked_iterdir)
     monkeypatch.setattr(type(skill_dir), "stat", tracked_stat)
     monkeypatch.setattr(
-        "squidbot.adapters.skills.fs.time.monotonic", lambda: next(monotonic_values)
+        "squidbot.adapters.skills.loader.time.monotonic", lambda: next(monotonic_values)
     )
 
     loader.list_skills()
@@ -440,7 +440,7 @@ def test_touching_skill_file_invalidates_list_and_body_cache(skill_dir, monkeypa
     skill_file = skill_dir / "github" / "SKILL.md"
     monotonic_values = iter([50.0, 53.0])
     monkeypatch.setattr(
-        "squidbot.adapters.skills.fs.time.monotonic", lambda: next(monotonic_values)
+        "squidbot.adapters.skills.loader.time.monotonic", lambda: next(monotonic_values)
     )
 
     original_skills = loader.list_skills()

@@ -17,7 +17,7 @@ skills_app = cyclopts.App(name="skills", help="Manage squidbot skills.")
 @skills_app.command
 def list_skills(config: Path = DEFAULT_CONFIG_PATH) -> None:
     """List all discovered skills and their availability."""
-    from squidbot.adapters.skills.fs import FsSkillsLoader
+    from squidbot.adapters.skills.loader import FsSkillsLoader
 
     settings = Settings.load(config)
     workspace = Path(settings.agents.workspace).expanduser()

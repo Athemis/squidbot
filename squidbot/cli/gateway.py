@@ -345,7 +345,7 @@ async def _make_agent_loop(
         mcp_connections on shutdown by calling conn.close() on each.
     """
     from squidbot.adapters.persistence.jsonl import JsonlMemory  # noqa: PLC0415
-    from squidbot.adapters.skills.fs import FsSkillsLoader  # noqa: PLC0415
+    from squidbot.adapters.skills.loader import FsSkillsLoader  # noqa: PLC0415
     from squidbot.adapters.tools.files import (  # noqa: PLC0415
         ListFilesTool,
         ReadFileTool,

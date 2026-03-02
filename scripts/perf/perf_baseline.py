@@ -16,7 +16,7 @@ from tempfile import TemporaryDirectory
 from time import perf_counter
 
 from squidbot.adapters.persistence.jsonl import JsonlMemory
-from squidbot.adapters.skills.fs import FsSkillsLoader
+from squidbot.adapters.skills.loader import FsSkillsLoader
 
 HISTORY_SIZES: tuple[int, ...] = (1_000, 10_000, 50_000)
 HISTORY_LAST_N = 80

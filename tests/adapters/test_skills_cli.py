@@ -20,7 +20,7 @@ def test_list_skills_no_skills(capsys: CaptureFixture[str]) -> None:
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = []
@@ -60,7 +60,7 @@ def test_list_skills_sorted_by_name(capsys: CaptureFixture[str]) -> None:
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -94,7 +94,7 @@ def test_list_skills_available_skill(capsys: CaptureFixture[str]) -> None:
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -124,7 +124,7 @@ def test_list_skills_unavailable_skill_missing_bins(capsys: CaptureFixture[str])
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -154,7 +154,7 @@ def test_list_skills_unavailable_skill_missing_env(capsys: CaptureFixture[str]) 
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -185,7 +185,7 @@ def test_list_skills_unavailable_skill_both_missing(capsys: CaptureFixture[str])
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -216,7 +216,7 @@ def test_list_skills_always_skill(capsys: CaptureFixture[str]) -> None:
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -259,7 +259,7 @@ def test_list_skills_mixed_skills(capsys: CaptureFixture[str]) -> None:
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = skills
@@ -287,7 +287,7 @@ def test_list_skills_uses_configured_workspace(capsys: CaptureFixture[str]) -> N
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = []
@@ -309,7 +309,7 @@ def test_list_skills_uses_extra_dirs(capsys: CaptureFixture[str]) -> None:
 
     with (
         patch("squidbot.cli.skills.Settings.load", return_value=settings),
-        patch("squidbot.adapters.skills.fs.FsSkillsLoader") as mock_loader_class,
+        patch("squidbot.adapters.skills.loader.FsSkillsLoader") as mock_loader_class,
     ):
         mock_loader = mock_loader_class.return_value
         mock_loader.list_skills.return_value = []
