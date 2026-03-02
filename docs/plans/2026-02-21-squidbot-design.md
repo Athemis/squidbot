@@ -1,7 +1,7 @@
 # squidbot — Design Document
 
 **Date:** 2026-02-21  
-**Updated:** 2026-02-28  
+**Updated:** 2026-03-02  
 **Status:** Approved
 
 ## Motivation
@@ -975,3 +975,79 @@ The following are explicitly out of scope for the initial implementation:
 
 14. **Added prompt-toolkit** — RichCliChannel uses prompt-toolkit for enhanced
     terminal input with history, multiline support, and better UX.
+
+---
+
+### 2026-03-02 — Performance Optimizations
+
+**14 bottlenecks eliminated across core, adapters, and gateway:**
+
+1. **P0 — Heartbeat blocking I/O fixed:** `_read_heartbeat_file` was calling
+   `Path.read_text()` directly on the event loop thread. Moved to `asyncio.to_thread`.
+
+2. **JsonlMemory — startup mkdir consolidated:** Directory creation moved to
+   `__init__`; path helpers no longer call `mkdir` on every operation.
+
+3. **JsonlMemory — in-memory ring-buffer cache:** `load_history` stores the last
+   `_CACHE_SIZE` messages in a `collections.deque`. Cache hits skip disk I/O entirely
+   (~200–330× faster for typical workloads).
+
+4. **JsonlMemory — batch write:** New `append_messages(msgs)` method opens the file
+   and acquires the lock once per exchange instead of once per message (~3× faster).
+   Opted into via `hasattr` in `MemoryManager.persist_exchange` to preserve the
+   `MemoryPort` protocol boundary.
+
+5. **MemoryManager — parallel I/O on message build:** `build_messages` uses
+   `asyncio.gather` to load history and global memory concurrently (~2× faster when
+   both are cold).
+
+6. **MemoryManager — skills-XML cache:** `build_skills_xml` result is cached keyed
+   on a tuple of `(name, location, available, always, description)` fingerprints.
+   Avoids re-serialising the XML block on every agent call when skills haven't changed.
+
+7. **AgentLoop — parallel tool execution:** `_append_tool_results` uses
+   `asyncio.gather(return_exceptions=True)` to dispatch all tool calls concurrently.
+   Scales linearly with the number of tools (8 tools × 50ms = 50ms total vs 400ms).
+
+8. **AgentLoop — remove dict copy per chunk:** Eliminated `dict(outbound_metadata or {})`
+   shallow copy that was created on every streamed text chunk.
+
+9. **RichCliChannel — Console() cached:** `Console()` construction moved to `__init__`;
+   previously a new instance was created on every `send()` call (~98× faster per send).
+
+10. **EmailChannel — SSLContext cached:** `ssl.create_default_context()` moved to
+    `__init__`; previously reconstructed on every SMTP send (~42,000× faster per send).
+
+11. **SearchHistoryTool — substring pre-filter:** Lines in `history.jsonl` are checked
+    for the raw query string before JSON parsing. Reduces CPU cost by 5–9× at typical
+    hit rates.
+
+12. **ReadFileTool — single `asyncio.to_thread` call:** `exists()` and `read_text()`
+    combined into one thread dispatch, halving the number of event-loop round-trips.
+
+13. **Gateway — parallel MCP server connections:** `_connect_mcp_servers` helper
+    connects all configured MCP servers concurrently via `asyncio.gather`.
+
+14. **Gateway — MemoryWriteTool singleton + OpenAI client cache:** `MemoryWriteTool`
+    is now instantiated once per channel loop instead of once per message. `_resolve_llm`
+    caches `AsyncOpenAI` client instances keyed on `(api_base, api_key)`.
+
+**Benchmark results** (median of 5 runs, see `scripts/benchmark_perf.py`):
+
+| Benchmark | Before | After | Speedup |
+|-----------|--------|-------|---------|
+| `load_history` cache hit (500 msgs) | 1.28 ms | 0.01 ms | **179×** |
+| `load_history` cache hit (2000 msgs) | 1.55 ms | 0.00 ms | **331×** |
+| `load_history` cache hit (10000 msgs) | 1.07 ms | 0.00 ms | **226×** |
+| `persist_exchange` batch write | 0.78 ms | 0.27 ms | **2.9×** |
+| `build_messages` parallel load (2×20ms I/O) | 40.48 ms | 20.41 ms | **2.0×** |
+| Parallel tools (2 × 50ms) | 100.52 ms | 50.40 ms | **2.0×** |
+| Parallel tools (4 × 50ms) | 201.07 ms | 50.53 ms | **4.0×** |
+| Parallel tools (8 × 50ms) | 402.30 ms | 50.69 ms | **7.9×** |
+| `search_history` (5000 msgs, 1% hits) | 24.28 ms | 2.72 ms | **8.9×** |
+| `search_history` (5000 msgs, 50% hits) | 23.84 ms | 13.63 ms | **1.7×** |
+| `Console()` cache (10 sends) | 0.23 ms | 0.00 ms | **98×** |
+| `SSLContext` cache (10 sends) | 80.37 ms | 0.00 ms | **42,634×** |
+
+**Architecture constraints preserved:** `MemoryPort` protocol unchanged; `core/`
+changes limited to `MemoryManager` and `AgentLoop`; hexagonal boundary intact.
