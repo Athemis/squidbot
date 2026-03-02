@@ -1,8 +1,12 @@
 """Matrix-specific mistune plugins and HTML sanitizer for squidbot.
 
 Provides:
-- plugin_mx_math: mistune plugin that converts $$...$$ and $...$ LaTeX syntax
-  to the Matrix spec v1.11+ data-mx-maths format.
+- plugin_mx_math: mistune plugin that converts LaTeX math syntax to the Matrix
+  spec v1.11+ data-mx-maths format.  Supported syntaxes:
+    · $...$          standard inline math
+    · $`...`$        GFM backtick inline math
+    · $$...$$        block math (delimiter on own line, single-line, or inline-open)
+    · ```math        GFM fenced block math (backtick or tilde fence)
 - plugin_mx_spoiler: mistune plugin that converts ||text|| to Matrix
   data-mx-spoiler format.
 - plugin_mx_block_spoiler: mistune plugin that converts >!-prefixed lines to
