@@ -238,7 +238,7 @@ def _matrix_attr_filter(tag: str, attr: str, value: str) -> str | None:
     if tag == "code" and attr == "class":
         return value if value.startswith("language-") else None
     if tag == "img" and attr == "src":
-        return value if value.startswith("mxc://") else None
+        return value if value.lower().startswith("mxc://") else None
     return value
 
 

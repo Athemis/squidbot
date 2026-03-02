@@ -153,7 +153,7 @@ Die `Cleaner`-Instanz wird einmal beim Modulimport erstellt und wiederverwendet.
 ### `matrix.py` — `_render_markdown`
 
 ```python
-_md = mistune.create_markdown(escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math])
+_md = mistune.create_markdown(escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler, plugin_mx_block_spoiler])
 
 def _render_markdown(text: str) -> str:
     raw = cast(str, _md(text)).strip()
