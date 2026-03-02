@@ -25,9 +25,14 @@ class CronListTool:
 
 
 class CronAddTool:
-    """Create a cron job with channel-aware defaults."""
+    """Create a cron job with channel-aware defaults.
+
+    ``concurrent = False``: uses a read-modify-write pattern on jobs.json; two parallel
+    calls would each read the same stale list and overwrite each other's additions.
+    """
 
     name = "cron_add"
+    concurrent = False
     description = "Create a cron job with schedule, target channel, and message."
     parameters = {
         "type": "object",
@@ -130,9 +135,13 @@ class CronAddTool:
 
 
 class CronRemoveTool:
-    """Remove a cron job by ID."""
+    """Remove a cron job by ID.
+
+    ``concurrent = False``: same read-modify-write race as CronAddTool.
+    """
 
     name = "cron_remove"
+    concurrent = False
     description = "Remove a cron job by its ID."
     parameters = {
         "type": "object",
@@ -160,9 +169,13 @@ class CronRemoveTool:
 
 
 class CronSetEnabledTool:
-    """Enable or disable a cron job by ID."""
+    """Enable or disable a cron job by ID.
+
+    ``concurrent = False``: same read-modify-write race as CronAddTool.
+    """
 
     name = "cron_set_enabled"
+    concurrent = False
     description = "Enable or disable a cron job by its ID."
     parameters = {
         "type": "object",

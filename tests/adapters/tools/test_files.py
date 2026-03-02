@@ -156,6 +156,16 @@ class TestListFilesToolLists:
         assert "(empty)" in result.content
 
 
+# ── Concurrency ───────────────────────────────────────────────────────────────
+
+
+class TestWriteFileToolConcurrency:
+    def test_concurrent_is_false(self, tmp_path: Path) -> None:
+        """write_file must declare concurrent=False to prevent parallel write races."""
+        tool = WriteFileTool(workspace=_workspace(tmp_path), restrict_to_workspace=False)
+        assert tool.concurrent is False
+
+
 # ── Async Offloading ──────────────────────────────────────────────────────────
 
 

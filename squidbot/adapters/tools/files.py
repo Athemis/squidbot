@@ -89,9 +89,14 @@ class ReadFileTool:
 
 
 class WriteFileTool:
-    """Write content to a file, creating it if it doesn't exist."""
+    """Write content to a file, creating it if it doesn't exist.
+
+    ``concurrent = False``: two parallel writes to the same path produce a race
+    condition (last writer wins). Serial execution preserves the LLM-intended order.
+    """
 
     name = "write_file"
+    concurrent = False
     description = "Write content to a file. Creates parent directories as needed."
     parameters = {
         "type": "object",

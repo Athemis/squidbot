@@ -47,3 +47,10 @@ class TestMemoryWriteToolWrites:
         assert not result.is_error
         assert "Memory updated" in result.content
         storage.save_global_memory.assert_called_once_with("# Notes\n\nUser likes Python.")
+
+
+class TestMemoryWriteToolConcurrency:
+    def test_concurrent_is_false(self) -> None:
+        """memory_write must declare concurrent=False to prevent parallel overwrites."""
+        tool, _ = _make_tool()
+        assert tool.concurrent is False
