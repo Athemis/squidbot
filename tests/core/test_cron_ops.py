@@ -122,3 +122,15 @@ def test_validate_job_rejects_once_with_interval_schedule() -> None:
 def test_validate_job_accepts_once_with_cron_expression() -> None:
     now = datetime(2026, 3, 2, 10, 0, tzinfo=UTC)
     assert validate_job(_job(schedule="30 15 3 3 *", once=True), now=now) is None
+
+
+def test_format_jobs_shows_once_label_for_once_jobs() -> None:
+    job = _job(once=True)
+    output = format_jobs([job])
+    assert "[once]" in output
+
+
+def test_format_jobs_does_not_show_once_label_for_recurring_jobs() -> None:
+    job = _job(once=False)
+    output = format_jobs([job])
+    assert "[once]" not in output

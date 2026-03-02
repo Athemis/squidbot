@@ -98,7 +98,8 @@ def format_jobs(jobs: list[CronJob]) -> str:
     lines: list[str] = []
     for job in jobs:
         state = "on" if job.enabled else "off"
-        lines.append(f"  [{state}] {job.id}  {job.name}")
+        once_label = "  [once]" if job.once else ""
+        lines.append(f"  [{state}] {job.id}  {job.name}{once_label}")
         lines.append(
             f"       schedule: {job.schedule}  timezone: {job.timezone}  channel: {job.channel}"
         )
