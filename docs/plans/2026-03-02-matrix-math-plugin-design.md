@@ -1,44 +1,49 @@
-# Matrix Math Plugin — Design Document
+# Matrix Math Plugin & HTML Passthrough — Design Document
 
 **Status:** Draft
 
-**Problem:** LLM-Antworten mit mathematischen Ausdrücken (`$$E=mc^2$$`, `$x^2$`) werden aktuell nicht korrekt in Matrix gerendert. Das eingebaute mistune-math-Plugin erzeugt `<div class="math">`, aber Matrix-Clients (Element, FluffyChat) erwarten `<div data-mx-maths>` gemäß Spec v1.11+ (MSC2191).
+**Problem:** LLM-Antworten mit mathematischen Ausdrücken (`$$E=mc^2$$`, `$x^2$`) werden in Matrix nicht korrekt gerendert. Außerdem können LLMs kein Raw-HTML nutzen um Matrix-spezifische Tags wie `<details>`, `<u>` oder `<span data-mx-spoiler>` zu erzeugen, weil `escape=True` in mistune alles escaped.
 
-**Solution:** Eigenes mistune-Plugin `plugin_mx_math`, das LaTeX-Syntax in Matrix-kompatibles HTML übersetzt. `escape=True` bleibt aktiv — kein HTML-Sanitizer nötig.
+**Solution:** Zwei komplementäre Mechanismen:
+1. **`plugin_mx_math`** — Mistune-Plugin für natürliche LaTeX-Syntax (`$$...$$`, `$...$`) → `<div data-mx-maths>` / `<span data-mx-maths>` (Matrix Spec v1.11+).
+2. **HTML-Passthrough + nh3-Sanitizer** — `escape=False` in mistune erlaubt Raw-HTML vom LLM; nh3 saniert den Output mit der Matrix-Spec-v1.17-Allowlist vor dem Senden.
 
 ---
 
 ## Background
 
-### Matrix Spec v1.11 — Mathematical Messages
+### Matrix Spec v1.17 — Erlaubte HTML-Tags
 
-Die Matrix-Spec definiert seit v1.11 ein spezielles HTML-Format für mathematische Inhalte:
+Clients müssen `formatted_body` gegen folgende Allowlist sanieren:
 
-| Element   | Tag     | Attribut                    | Kind-Content           |
-| --------- | ------- | --------------------------- | ---------------------- |
-| Block     | `<div>`   | `data-mx-maths="<LaTeX>"`     | Fallback (HTML/Text)   |
-| Inline    | `<span>`  | `data-mx-maths="<LaTeX>"`     | Fallback (HTML/Text)   |
-
-**Beispiel (inline):**
-
-```html
-<span data-mx-maths="\sin(x)=\frac{a}{b}">sin(<i>x</i>)=<sup><i>a</i></sup>/<sub><i>b</i></sub></span>
+**Tags:**
+```
+del, h1, h2, h3, h4, h5, h6, blockquote, p, a, ul, ol, sup, sub, li,
+b, i, u, strong, em, s, code, hr, br, div, table, thead, tbody, tr,
+th, td, caption, pre, span, img, details, summary
 ```
 
-- Das `data-mx-maths`-Attribut enthält den rohen LaTeX-String (HTML-escaped).
-- Der Kind-Content ist ein Fallback für Clients ohne LaTeX-Support.
-- Clients mit LaTeX-Rendering (Element, FluffyChat) zeigen die gerenderte Formel an.
+**Attribute (pro Tag):**
 
-### mistune Built-in `math` Plugin
+| Tag     | Erlaubte Attribute                                               |
+| ------- | ---------------------------------------------------------------- |
+| `span`  | `data-mx-bg-color`, `data-mx-color`, `data-mx-spoiler`, `data-mx-maths` |
+| `a`     | `href` (Schemes: https, http, ftp, mailto, magnet), `target`    |
+| `img`   | `width`, `height`, `alt`, `title`, `src` (nur `mxc://`-URIs)   |
+| `ol`    | `start`                                                          |
+| `code`  | `class` (nur `language-*`)                                       |
+| `div`   | `data-mx-maths`                                                  |
 
-Das eingebaute Plugin nutzt dieselbe Syntax (`$$...$$` / `$...$`), erzeugt aber:
+Alle anderen Tags: keine Attribute.
 
-```html
-<div class="math">$$\nE=mc^2\n$$</div>
-<span class="math">\((E=mc^2)\)</span>
-```
+### Matrix Spec v1.11 — Mathematical Messages (MSC2191)
 
-Das ist **nicht** Matrix-kompatibel. Ein CSS-basierter Ansatz (`class="math"`) wird von Element/FluffyChat nicht unterstützt.
+| Element | Tag      | Attribut                       | Kind-Content         |
+| ------- | -------- | ------------------------------ | -------------------- |
+| Block   | `<div>`  | `data-mx-maths="<LaTeX>"`      | Fallback (HTML/Text) |
+| Inline  | `<span>` | `data-mx-maths="<LaTeX>"`      | Fallback (HTML/Text) |
+
+Clients mit LaTeX-Rendering (Element, FluffyChat) lesen `data-mx-maths`. Clients ohne LaTeX zeigen den Kind-Content.
 
 ---
 
@@ -48,77 +53,111 @@ Das ist **nicht** Matrix-kompatibel. Ein CSS-basierter Ansatz (`class="math"`) w
 
 ```
 squidbot/adapters/channels/
-├── matrix.py               # importiert plugin_mx_math, fügt es zur Plugin-Liste
-├── matrix_markdown.py      # NEU: plugin_mx_math implementation
-└── email.py                # unverändert (nutzt nur core.markdown PLUGINS)
+├── matrix.py               # escape=False; nutzt plugin_mx_math + sanitize_for_matrix()
+├── matrix_markdown.py      # NEU: plugin_mx_math + _MATRIX_SANITIZER (nh3.Cleaner)
+└── email.py                # unverändert (escape=True, kein nh3)
 
 squidbot/core/
-└── markdown.py             # unverändert (enthält nur shared plugin names)
+└── markdown.py             # unverändert (shared plugin names)
 ```
 
-**Abhängigkeitsrichtung:**
+**Abhängigkeitsrichtung:** `matrix.py` → `matrix_markdown.py`. `core/` importiert nichts aus `adapters/`. Hexagonale Architektur bleibt intakt.
 
-- `matrix.py` → `matrix_markdown.py` (Plugin-Import)
-- `email.py` → `core/markdown.py` (shared Plugins)
-- `core/` importiert nichts aus `adapters/` (Hexagonal Architecture bleibt intakt)
+### Rendering-Pipeline (Matrix)
 
-### Plugin-Signatur
+```
+LLM-Text (Markdown + optional Raw-HTML)
+        │
+        ▼
+mistune (escape=False, plugins=[...MARKDOWN_PLUGINS, plugin_mx_math])
+        │  • $$...$$ → <div data-mx-maths="..."><code>...</code></div>
+        │  • $...$ → <span data-mx-maths="..."><code>...</code></span>
+        │  • Raw HTML passiert unverändert
+        ▼
+nh3.Cleaner (Matrix Spec v1.17 Allowlist)
+        │  • Unbekannte Tags: Content bleibt, Tag wird entfernt
+        │  • Verbotene Attribute: entfernt
+        │  • Ungültige URL-Schemes in href: entfernt
+        │  • img src ohne mxc://: entfernt
+        │  • code class ohne language-*: entfernt
+        ▼
+formatted_body (sicheres, spec-konformes HTML)
+```
+
+### `plugin_mx_math`
+
+Reuses die Regex-Pattern des eingebauten `math`-Plugins, rendert aber Matrix-konform:
+
+- Block `$$...\n...\n$$` → `<div data-mx-maths="ESCAPED_LATEX"><code>ESCAPED_LATEX</code></div>`
+- Inline `$...$` → `<span data-mx-maths="ESCAPED_LATEX"><code>ESCAPED_LATEX</code></span>`
+
+LaTeX-Content wird mit `html.escape()` für das Attribut und den Kind-Content escaped.
+
+### nh3-Sanitizer-Konfiguration
 
 ```python
-def plugin_mx_math(md: Markdown) -> None:
-    """Mistune plugin that renders math to Matrix data-mx-maths format."""
-```
+_MATRIX_TAGS: frozenset[str] = frozenset({
+    "del", "h1", "h2", "h3", "h4", "h5", "h6",
+    "blockquote", "p", "a", "ul", "ol", "sup", "sub", "li",
+    "b", "i", "u", "strong", "em", "s", "code", "hr", "br",
+    "div", "table", "thead", "tbody", "tr", "th", "td", "caption",
+    "pre", "span", "img", "details", "summary",
+})
 
-Das Plugin folgt dem mistune-Plugin-Contract (callable, nimmt `Markdown`-Instanz, registriert Parser und Renderer).
+_MATRIX_ATTRIBUTES: dict[str, set[str]] = {
+    "span": {"data-mx-bg-color", "data-mx-color", "data-mx-spoiler", "data-mx-maths"},
+    "a":    {"href", "target"},
+    "img":  {"width", "height", "alt", "title", "src"},
+    "ol":   {"start"},
+    "code": {"class"},
+    "div":  {"data-mx-maths"},
+}
 
-### Syntax-Erkennung
+# mxc hinzugefügt damit nh3 img[src=mxc://...] nicht vorzeitig blockt;
+# attribute_filter beschränkt img src dann auf mxc:// explizit.
+_MATRIX_URL_SCHEMES: frozenset[str] = frozenset({
+    "https", "http", "ftp", "mailto", "magnet", "mxc",
+})
 
-Identisch zum eingebauten `math`-Plugin:
+def _matrix_attr_filter(tag: str, attr: str, value: str) -> str | None:
+    if tag == "code" and attr == "class":
+        return value if value.startswith("language-") else None
+    if tag == "img" and attr == "src":
+        return value if value.startswith("mxc://") else None
+    return value
 
-| Typ    | Pattern                                  | Beispiel          |
-| ------ | ---------------------------------------- | ----------------- |
-| Block  | `^ {0,3}\$\$[ \t]*\n[\s\S]+?\n\$\$[ \t]*$` | `$$\nE=mc^2\n$$`    |
-| Inline | `\$(?!\s)(.+?)(?!\s)\$`                    | `$x^2$`             |
-
-Block-Math wird vor `list` registriert, Inline-Math vor `link`.
-
-### HTML-Output
-
-**Block:**
-
-```html
-<div data-mx-maths="a^2 + b^2 = c^2"><code>a^2 + b^2 = c^2</code></div>
-```
-
-**Inline:**
-
-```html
-<span data-mx-maths="x^2"><code>x^2</code></span>
-```
-
-- `data-mx-maths`-Attribut: LaTeX roh, HTML-escaped (`html.escape(..., quote=True)`)
-- Kind-Content: `<code>` mit dem gleichen Text (Fallback für nicht-LaTeX-Clients)
-- Keine Unicode-Konvertierung, keine LaTeX → HTML-Approximation — das überlassen wir dem Client
-
-### Security
-
-- `escape=True` bleibt in `matrix.py` aktiviert
-- Das Plugin selbst escapet LaTeX-Content mit `html.escape()` bevor er ins Attribut geschrieben wird
-- Kein Raw-HTML-Passthrough, kein Sanitizer (nh3) nötig
-- Single-user Bot, Trusted Output — Risiko ist minimal
-
-### Koexistenz mit anderen Plugins
-
-`plugin_mx_math` wird **zusätzlich** zu den bestehenden Plugins geladen:
-
-```python
-_md = mistune.create_markdown(
-    escape=True,
-    plugins=[*MARKDOWN_PLUGINS, plugin_mx_graph],
+_MATRIX_SANITIZER = nh3.Cleaner(
+    tags=_MATRIX_TAGS,
+    attributes=_MATRIX_ATTRIBUTES,
+    url_schemes=_MATRIX_URL_SCHEMES,
+    attribute_filter=_matrix_attr_filter,
+    # link_rel default "noopener noreferrer" bleibt — korrekt für ausgehende Links
 )
 ```
 
-Die Pattern von `plugin_mx_graph` und `superscript` (`^text^`) können kollidieren. Da Inline-Math vor `link` registriert wird und Superscript ein eigenes Pattern hat, gibt es keinen Konflikt in der Praxis — mistune priorisiert nach Registrierungsreihenfolge.
+Die `Cleaner`-Instanz wird einmal beim Modulimport erstellt und wiederverwendet.
+
+### `matrix.py` — `_render_markdown`
+
+```python
+_md = mistune.create_markdown(escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math])
+
+def _render_markdown(text: str) -> str:
+    raw = cast(str, _md(text)).strip()
+    return sanitize_for_matrix(raw)
+```
+
+`escape=False`: Raw-HTML vom LLM passiert mistune unverändert. nh3 übernimmt die Sanierung.
+
+### Was das LLM jetzt direkt schreiben kann
+
+```html
+<details><summary>Mehr Details</summary>Hier der Inhalt...</details>
+<u>unterstrichen</u>
+<span data-mx-spoiler>Spoiler-Text</span>
+```
+
+Alles andere (z.B. `<script>`, `onclick=`) wird von nh3 entfernt.
 
 ---
 
@@ -126,18 +165,19 @@ Die Pattern von `plugin_mx_graph` und `superscript` (`^text^`) können kollidier
 
 ### In Scope
 
-- Block-Math (`$$...$$`) → `<div data-mx-maths>`
-- Inline-Math (`$...$`) → `<span data-mx-maths>`
-- HTML-Escaping von LaTeX-Content
-- Fallback `<code>` für nicht-LaTeX-Clients
-- Unit Tests
+- `plugin_mx_math`: `$$...$$` → `<div data-mx-maths>`, `$...$` → `<span data-mx-maths>`
+- nh3-Sanitizer mit Matrix-Spec-v1.17-Allowlist
+- `escape=False` in Matrix-Adapter
+- nh3 als neue Projektabhängigkeit
+- Unit Tests für Plugin und Sanitizer
 
 ### Out of Scope
 
-- Spoiler-Plugin (`data-mx-spoiler`) — separates Feature
-- Details/Summary-Plugin — Raw-HTML-Passthrough oder separates Plugin
-- Math in Email-Channel — nicht Matrix-spezifisch
-- LaTeX → Unicode/HTML-Approximation — Client-seitiges Rendering
+- Email-Adapter: bleibt unverändert (`escape=True`, kein nh3)
+- Spoiler-Plugin als Markdown-Syntax (`>!...`) — LLM schreibt direkt `<span data-mx-spoiler>`
+- Details-Plugin als Markdown-Syntax — LLM schreibt direkt `<details><summary>`
+- `data-mx-color`-Wertvalidierung (`#rrggbb`) — Clients validieren selbst
+- LaTeX → Unicode-Approximation im Fallback — `<code>` mit Roh-LaTeX reicht
 
 ---
 
@@ -145,33 +185,53 @@ Die Pattern von `plugin_mx_graph` und `superscript` (`^text^`) können kollidier
 
 **Unit Tests** in `tests/adapters/channels/test_markdown_plugins.py`:
 
-1. Block-Math erzeugt `<div data-mx-maths="...">` mit korrektem Attribut
-2. Inline-Math erzeugt `<span data-mx-maths="...">` mit korrektem Attribut
-3. LaTeX mit Quotes wird korrekt escaped (`"` → `&quot;`)
-4. Multi-Line Block-Math bleibt erhalten
-5. Email-Channel rendert NICHT `data-mx-maths` (Plugin nicht aktiv)
-6. Koexistenz mit anderen Plugins (strikethrough, table, etc.)
+**`plugin_mx_math`:**
+1. Block-Math erzeugt `<div data-mx-maths="...">`
+2. Inline-Math erzeugt `<span data-mx-maths="...">`
+3. LaTeX mit `"` korrekt escaped im Attribut
+4. Multi-Line Block-Math erhalten
+5. Koexistenz mit anderen Plugins
 
-**Integration:**
+**`sanitize_for_matrix` (nh3):**
+6. Unbekannte Tags werden entfernt (Content bleibt)
+7. `<script>` und Content werden entfernt (`clean_content_tags`)
+8. `<details>/<summary>` passieren
+9. `<u>` passiert
+10. `<span data-mx-spoiler>` passiert
+11. `<span data-mx-maths>` passiert (kein Doppel-Escaping nach Plugin)
+12. `code[class=language-python]` passiert, `code[class=foo]` wird entfernt
+13. `img[src=mxc://...]` passiert, `img[src=https://...]` wird entfernt
+14. `a[href=javascript:]` wird entfernt
+15. Email-Channel rendert kein `data-mx-maths`
 
-- Manueller Test in echtem Matrix-Room mit Element/FluffyChat
-- Verifikation dass Formeln korrekt gerendert werden
+---
+
+## Dependency
+
+```toml
+# pyproject.toml
+"nh3>=0.2"
+```
+
+nh3 ist eine Rust-Extension (via PyO3/maturin). Binäre Wheels für alle gängigen Plattformen auf PyPI verfügbar — kein Compiler-Build nötig.
 
 ---
 
 ## Risks & Mitigations
 
-| Risiko                              | Wahrscheinlichkeit | Impact | Mitigation                              |
-| ----------------------------------- | ------------------ | ------ | --------------------------------------- |
-| Pattern-Kollision mit `superscript` | Niedrig           | Mittel | Inline-Math vor `link`, Test Coverage   |
-| LaTeX mit Sonderzeichen escaped falsch | Mittel           | Niedrig | `html.escape(..., quote=True)` + Tests  |
-| Element unterstützt `data-mx-maths` nicht | Niedrig (Spec v1.11+) | Mittel | Fallback `<code>` wird angezeigt        |
+| Risiko                                     | Wahrscheinlichkeit | Impact | Mitigation                                       |
+| ------------------------------------------ | ------------------ | ------ | ------------------------------------------------ |
+| nh3 entfernt `data-mx-*` Attribute         | Niedrig            | Hoch   | Explizit in `attributes` dict eintragen + Tests  |
+| Double-Escaping: Plugin escaped, nh3 auch  | Mittel             | Mittel | nh3 parsed HTML korrekt, kein double-escape; Test |
+| Pattern-Kollision `$...$` mit Superscript  | Niedrig            | Mittel | Inline-Math vor `link` registriert; Test         |
+| nh3 binary wheel fehlt auf Zielplattform   | Sehr niedrig       | Mittel | nh3 0.3.3 hat Wheels für Linux/macOS/Windows     |
 
 ---
 
 ## References
 
+- Matrix Spec v1.17 — Permitted HTML: <https://spec.matrix.org/v1.17/client-server-api/#permitted-html>
 - Matrix Spec v1.17 — Mathematical Messages: <https://spec.matrix.org/v1.17/client-server-api/#mathematical-messages>
 - MSC2191: Markup for mathematical messages
+- nh3 Docs: <https://nh3.readthedocs.io/>
 - mistune Plugin API: <https://mistune.lepture.com/en/latest/advanced.html#create-plugins>
-- mistune `math` plugin source: `mistune/plugins/math.py`
