@@ -159,6 +159,38 @@ class TestListFilesToolLists:
 # ── Async Offloading ──────────────────────────────────────────────────────────
 
 
+class TestReadFileToolInnerErrorBranches:
+    """Tests that exercise error handling inside _read_file (not via mocked asyncio.to_thread)."""
+
+    async def test_binary_file_returns_unicode_decode_error(self, tmp_path: Path) -> None:
+        """A file with invalid UTF-8 bytes triggers the inner UnicodeDecodeError branch."""
+        ws = _workspace(tmp_path)
+        target = ws / "binary.bin"
+        target.write_bytes(b"\xff\xfe\xfa garbage")
+        tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
+        result = await tool.execute(path=str(target))
+        assert result.is_error
+        assert "cannot decode" in result.content
+
+    async def test_unreadable_file_returns_oserror(self, tmp_path: Path) -> None:
+        """A file with no read permissions triggers the inner OSError branch."""
+        import os
+
+        if os.getuid() == 0:
+            pytest.skip("chmod 000 has no effect when running as root")
+        ws = _workspace(tmp_path)
+        target = ws / "locked.txt"
+        target.write_text("secret", encoding="utf-8")
+        target.chmod(0o000)
+        try:
+            tool = ReadFileTool(workspace=ws, restrict_to_workspace=False)
+            result = await tool.execute(path=str(target))
+            assert result.is_error
+            assert "Error reading" in result.content
+        finally:
+            target.chmod(0o644)
+
+
 class TestReadFileToolErrorHandling:
     async def test_permission_error_returns_error_result(self, tmp_path: Path) -> None:
         """A PermissionError during read must be returned as ToolResult(is_error=True)."""

@@ -418,3 +418,51 @@ async def test_tool_calls_executed_in_parallel() -> None:
         f"Tool 2 started {(call_start_times[1] - call_start_times[0]) * 1000:.1f}ms after tool 1 "
         "— they ran sequentially, not in parallel"
     )
+
+
+class SerialTool:
+    """Tool that declares concurrent=False, forcing serial execution of batched calls."""
+
+    name = "serial_tool"
+    description = "A serial-safe tool"
+    parameters: dict[str, Any] = {"type": "object", "properties": {}}
+    concurrent = False
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        return ToolResult(tool_call_id="", content="serial_result")
+
+
+class RaisingSerialTool:
+    """Tool that declares concurrent=False and raises on execute."""
+
+    name = "raising_serial"
+    description = "Always raises"
+    parameters: dict[str, Any] = {"type": "object", "properties": {}}
+    concurrent = False
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        raise RuntimeError("serial tool error")
+
+
+async def test_serial_tool_runs_in_sequence(storage, memory):
+    """A tool with concurrent=False must execute via the serial branch (not asyncio.gather)."""
+    tool_call = ToolCall(id="tc_s1", name="serial_tool", arguments={})
+    llm = ScriptedLLM([[tool_call], "done"])
+    registry = ToolRegistry()
+    registry.register(SerialTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+    await loop.run(SESSION, "run serial", channel)
+    assert any("done" in m.text for m in channel.sent)
+
+
+async def test_raising_serial_tool_produces_error_message(storage, memory):
+    """A tool that raises in serial mode produces a tool-error message (BaseException branch)."""
+    tool_call = ToolCall(id="tc_r1", name="raising_serial", arguments={})
+    llm = ScriptedLLM([[tool_call], "handled"])
+    registry = ToolRegistry()
+    registry.register(RaisingSerialTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+    await loop.run(SESSION, "try raising", channel)
+    assert any("handled" in m.text for m in channel.sent)

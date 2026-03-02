@@ -76,3 +76,27 @@ async def test_memory_write_tool_is_singleton_across_messages(tmp_path: Path) ->
     assert mock_cls.call_count == 1, (
         f"MemoryWriteTool was instantiated {mock_cls.call_count} times for 2 messages"
     )
+
+
+async def test_mcp_server_that_raises_is_skipped() -> None:
+    """A connection whose connect() raises must be skipped (not propagated) with a warning."""
+    from unittest.mock import MagicMock
+
+    from squidbot.cli.gateway import _connect_mcp_servers
+
+    async def failing_connect() -> list:
+        raise RuntimeError("connection failed")
+
+    async def good_connect() -> list:
+        return []
+
+    conn_fail: MagicMock = MagicMock()
+    conn_ok: MagicMock = MagicMock()
+    conn_fail.connect = failing_connect
+    conn_ok.connect = good_connect
+
+    result = await _connect_mcp_servers([conn_fail, conn_ok])
+
+    # Only the successful connection must appear in the result.
+    assert len(result) == 1
+    assert result[0][0] is conn_ok

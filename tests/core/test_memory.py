@@ -416,3 +416,47 @@ async def test_skills_xml_cached_between_calls() -> None:
     assert len(build_calls) == 1, f"build_skills_xml called {len(build_calls)} times"
     assert "<skills/>" in messages1[0].content, "Cached result missing from first call"
     assert "<skills/>" in messages2[0].content, "Cached result missing from second call"
+
+
+async def test_always_available_skill_body_injected_into_system_prompt() -> None:
+    """Skills with always=True and available=True must have their body appended to the prompt."""
+    from squidbot.core.skills import SkillMetadata
+
+    skill = SkillMetadata(
+        name="always_skill",
+        description="Always-injected skill",
+        location=Path("/always.md"),
+        always=True,
+        available=True,
+    )
+
+    class FakeSkills:
+        def list_skills(self) -> list[SkillMetadata]:
+            return [skill]
+
+        def load_skill_body(self, name: str) -> str:
+            return f"<body>{name}</body>"
+
+    class MinimalStorage:
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            return []
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, m: Message) -> None: ...
+
+        async def save_global_memory(self, c: str) -> None: ...
+
+        async def load_cron_jobs(self) -> list:
+            return []  # type: ignore[return-value]
+
+        async def save_cron_jobs(self, j: list) -> None: ...
+
+    manager = MemoryManager(
+        storage=MinimalStorage(),  # type: ignore[arg-type]
+        skills=FakeSkills(),  # type: ignore[arg-type]
+    )
+    messages = await manager.build_messages("hi", "sys")
+    assert messages[0].role == "system"
+    assert "<body>always_skill</body>" in messages[0].content

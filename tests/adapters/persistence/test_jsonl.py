@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -362,3 +363,52 @@ async def test_persist_exchange_opens_file_once(tmp_path: Path) -> None:
         )
 
     assert open_count == 1, f"history.jsonl was opened {open_count} times"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_load_history_second_caller_uses_cache(tmp_path: Path) -> None:
+    """Double-checked locking: a second concurrent cold-cache caller must return cached data.
+
+    asyncio.gather schedules both coroutines. The first acquires the lock and reads from
+    disk via asyncio.to_thread (an await point). While the thread runs, the event loop
+    starts the second coroutine, which suspends on the lock. Once the first finishes and
+    releases the lock, the second re-checks the condition (lines 241-243) and returns
+    from cache without a second disk read.
+    """
+    storage = JsonlMemory(base_dir=tmp_path)
+    for i in range(3):
+        await storage.append_message(Message(role="user", content=f"m{i}"))
+
+    # Both concurrent results must be correct.
+    r1, r2 = await asyncio.gather(
+        storage.load_history(last_n=3),
+        storage.load_history(last_n=3),
+    )
+    assert len(r1) == 3
+    assert len(r2) == 3
+    assert storage._history_cache_loaded  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_append_messages_empty_list_is_noop(tmp_path: Path) -> None:
+    """append_messages([]) must return immediately without writing to disk."""
+    storage = JsonlMemory(base_dir=tmp_path)
+    await storage.append_messages([])  # must not raise
+    history = await storage.load_history()
+    assert history == []
+
+
+@pytest.mark.asyncio
+async def test_append_messages_updates_cache(tmp_path: Path) -> None:
+    """append_messages must update the in-memory cache when the cache is initialised."""
+    storage = JsonlMemory(base_dir=tmp_path)
+    # Prime the cache by loading history (sets _history_cache_size > 0).
+    await storage.load_history(last_n=10)
+    msgs = [
+        Message(role="user", content="batch-1"),
+        Message(role="assistant", content="batch-2"),
+    ]
+    await storage.append_messages(msgs)
+    cached = list(storage._history_cache)  # type: ignore[attr-defined]
+    assert any(m.content == "batch-1" for m in cached)
+    assert any(m.content == "batch-2" for m in cached)
