@@ -10,6 +10,23 @@ syntax. These tests serve as unit-level verification of the markdown rendering p
 from __future__ import annotations
 
 
+def _matrix_md(src: str) -> str:
+    """Render Markdown through the Matrix plugin stack.
+
+    Convenience wrapper that applies plugin_mx_math and sanitize_for_matrix,
+    matching what _render_markdown does in the Matrix channel adapter.
+
+    Args:
+        src: Markdown source text.
+
+    Returns:
+        Sanitized HTML string suitable for Matrix formatted_body.
+    """
+    from squidbot.adapters.channels.matrix import _render_markdown
+
+    return _render_markdown(src)
+
+
 class TestTablePlugin:
     """Test table plugin renders Markdown tables to HTML.
 
@@ -426,6 +443,34 @@ class TestMatrixMathPlugin:
         result = _render_markdown("~~old~~ value: $x^2$\n\n$$\n\\alpha\n$$")
         assert "<del>old</del>" in result
         assert "data-mx-maths" in result
+
+    def test_block_math_inline_open_align(self) -> None:
+        """$$\\begin{align}...\\end{align}$$ renders as div, not raw $$."""
+        src = "$$\\begin{align}\nf(x) &= x + 1\n\\end{align}$$"
+        result = _matrix_md(src)
+        assert '<div data-mx-maths="' in result
+        assert "$$" not in result
+
+    def test_block_math_inline_open_bmatrix(self) -> None:
+        """$$\\begin{bmatrix}...\\end{bmatrix}$$ renders as div."""
+        src = "$$\\begin{bmatrix}\n1 & 2 \\\\\n3 & 4\n\\end{bmatrix}$$"
+        result = _matrix_md(src)
+        assert '<div data-mx-maths="' in result
+        assert "$$" not in result
+
+    def test_block_math_inline_open_cases(self) -> None:
+        """$$\\begin{cases}...\\end{cases}$$ renders as div."""
+        src = "$$\\begin{cases}\nx & x \\geq 0 \\\\\n-x & x < 0\n\\end{cases}$$"
+        result = _matrix_md(src)
+        assert '<div data-mx-maths="' in result
+        assert "$$" not in result
+
+    def test_block_math_inline_open_content_preserved(self) -> None:
+        """Content between inline-open $$ is preserved verbatim in attribute."""
+        src = "$$\\begin{align}\nf(x) &= x + 1\n\\end{align}$$"
+        result = _matrix_md(src)
+        assert "\\begin{align}" in result
+        assert "\\end{align}" in result
 
 
 class TestMatrixSpoilerPlugin:
