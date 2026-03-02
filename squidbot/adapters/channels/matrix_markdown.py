@@ -50,6 +50,14 @@ _BLOCK_MATH_PATTERN = (
     r"|^ {0,3}\$\$[ \t]*(?P<math_text_s>[^\n$][^\n]*?)[ \t]*\$\$[ \t]*$"
     r"|^ {0,3}\$\$(?P<math_text_m>[^\n$][^\n]*\n[\s\S]+?)\$\$[ \t]*$"
 )
+# Fenced block math: ```math or ~~~math code fence.
+# Registered before mistune's fenced_code rule so we intercept first.
+# Both backtick and tilde fences are accepted.
+_BLOCK_MATH_FENCE_PATTERN = (
+    r"^ {0,3}(?:```|~~~)[ \t]*math[ \t]*\n"
+    r"(?P<math_text_f>[\s\S]+?)"
+    r"\n {0,3}(?:```|~~~)[ \t]*$"
+)
 # Inline math — two supported forms:
 #
 #  Backtick form (GFM):  $`expr`$   — preferred when expr contains | or _
@@ -58,7 +66,7 @@ _BLOCK_MATH_PATTERN = (
 # Backtick form is listed first so the alternation prefers it over the dollar
 # form when input starts with $`.  Content must not contain backticks.
 _INLINE_MATH_PATTERN = (
-    r"\$`(?P<math_text_bt>[^`]+?)`\$"
+    r"\$`(?P<math_text_bt>[^`]+)`\$"
     r"|\$(?!\s)(?P<math_text>.+?)(?!\s)\$"
 )
 
@@ -85,6 +93,12 @@ def plugin_mx_math(md: Markdown) -> None:
         state.append_token({"type": "mx_block_math", "raw": math_text})
         return int(m.end()) + 1
 
+    def _parse_fenced_math(block: BlockParser, m: Any, state: BlockState) -> int:
+        math_text: str = m.group("math_text_f") or ""
+        # Emit mx_block_math tokens so the existing renderer is reused.
+        state.append_token({"type": "mx_block_math", "raw": math_text})
+        return int(m.end()) + 1
+
     def _parse_inline_math(inline: InlineParser, m: Any, state: InlineState) -> int:
         math_text: str = m.group("math_text_bt") or m.group("math_text") or ""
         state.append_token({"type": "mx_inline_math", "raw": math_text})
@@ -101,6 +115,10 @@ def plugin_mx_math(md: Markdown) -> None:
         return f'<span data-mx-maths="{attr}"><code>{body}</code></span>'
 
     md.block.register("mx_block_math", _BLOCK_MATH_PATTERN, _parse_block_math, before="list")
+    md.block.register(
+        "mx_fenced_math", _BLOCK_MATH_FENCE_PATTERN, _parse_fenced_math, before="fenced_code"
+    )
+    # before="codespan" so $`...`$ is matched before mistune consumes the backtick as a code span
     md.inline.register(
         "mx_inline_math", _INLINE_MATH_PATTERN, _parse_inline_math, before="codespan"
     )
