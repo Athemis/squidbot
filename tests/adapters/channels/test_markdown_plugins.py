@@ -1,13 +1,28 @@
-"""Tests for mistune plugin rendering in Matrix and Email channels."""
+"""Tests for mistune plugin rendering in Matrix and Email channels.
+
+This module provides comprehensive test coverage for all enabled mistune plugins
+(table, strikethrough, task_lists, url, footnotes, superscript, subscript) to ensure
+correct Markdown-to-HTML conversion. Tests verify plugin behavior in isolation and
+validate that both Matrix and Email channel adapters properly render extended Markdown
+syntax. These tests serve as unit-level verification of the markdown rendering pipeline.
+"""
 
 from __future__ import annotations
 
 
 class TestTablePlugin:
-    """Test table plugin renders Markdown tables to HTML."""
+    """Test table plugin renders Markdown tables to HTML.
+
+    Tests verify that the mistune table plugin correctly converts Markdown
+    table syntax to HTML table elements with proper structure and alignment.
+    """
 
     def test_simple_table_renders_to_html(self) -> None:
-        """Simple table with header and rows renders to <table>."""
+        """Test simple table renders to HTML with thead and tbody.
+
+        Returns:
+            None
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         md = """| Header 1 | Header 2 |
@@ -22,7 +37,11 @@ class TestTablePlugin:
         assert "<td>Cell 1</td>" in result
 
     def test_table_with_alignment(self) -> None:
-        """Table with column alignment preserves alignment in HTML."""
+        """Test table with column alignment preserves alignment in HTML.
+
+        Returns:
+            None
+        """
         from squidbot.adapters.channels.matrix import _render_markdown
 
         md = """| Left | Center | Right |
@@ -33,7 +52,11 @@ class TestTablePlugin:
         assert 'style="text-align:left"' in result or 'align="left"' in result
 
     def test_table_in_email_channel(self) -> None:
-        """Email channel _md renders tables correctly."""
+        """Test Email channel _md renders tables correctly.
+
+        Returns:
+            None
+        """
         from squidbot.adapters.channels.email import _md
 
         md = """| A | B |
@@ -45,9 +68,18 @@ class TestTablePlugin:
 
 
 class TestStrikethroughPlugin:
-    """Test strikethrough plugin renders ~~text~~ to <del>."""
+    """Test strikethrough plugin renders ~~text~~ to HTML del tags.
+
+    Tests verify that the mistune strikethrough plugin correctly converts
+    Markdown strikethrough syntax to HTML del elements.
+    """
 
     def test_strikethrough_renders_to_del_tag(self) -> None:
+        """Test strikethrough renders to del tag.
+
+        Returns:
+            None
+        """
         """Double tilde renders as <del> tag."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
