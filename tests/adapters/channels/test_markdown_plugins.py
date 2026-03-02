@@ -495,6 +495,32 @@ class TestMatrixMathPlugin:
         assert "$`" not in result
         assert "`$" not in result
 
+    def test_block_math_fenced_backtick(self) -> None:
+        """```math fence renders as div with data-mx-maths."""
+        src = "```math\nE = mc^2\n```"
+        result = _matrix_md(src)
+        assert '<div data-mx-maths="E = mc^2">' in result
+
+    def test_block_math_fenced_multiline(self) -> None:
+        """Multi-line ```math fence preserves all content lines."""
+        src = "```math\n\\frac{a}{b}\n= c\n```"
+        result = _matrix_md(src)
+        assert "\\frac{a}{b}" in result
+        assert '<div data-mx-maths="' in result
+
+    def test_block_math_fenced_tilde(self) -> None:
+        """~~~math tilde fence also renders as div with data-mx-maths."""
+        src = "~~~math\nE = mc^2\n~~~"
+        result = _matrix_md(src)
+        assert '<div data-mx-maths="E = mc^2">' in result
+
+    def test_block_math_fenced_no_interference_with_code(self) -> None:
+        """```python fence is unaffected — renders as code block, not math."""
+        src = "```python\nprint('hello')\n```"
+        result = _matrix_md(src)
+        assert "data-mx-maths" not in result
+        assert "language-python" in result
+
 
 class TestMatrixSpoilerPlugin:
     """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""
