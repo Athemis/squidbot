@@ -371,3 +371,51 @@ async def test_agent_run_multimodal_persists_text_fallback(storage, memory) -> N
     # Must not persist base64 payload
     assert isinstance(user_hist[0].content, str)
     assert "BIGPAYLOAD" not in user_hist[0].content
+
+
+async def test_tool_calls_executed_in_parallel() -> None:
+    """Multiple tool calls from one LLM turn must execute concurrently."""
+    import asyncio
+    import pathlib
+    import tempfile
+    import time
+    from typing import Any
+
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+
+    call_start_times: list[float] = []
+
+    class SlowTool:
+        name = "slow_tool"
+        description = "A slow tool"
+        parameters: dict[str, Any] = {"type": "object", "properties": {}}
+
+        async def execute(self, **kwargs: Any) -> ToolResult:
+            call_start_times.append(time.monotonic())
+            await asyncio.sleep(0.05)
+            return ToolResult(tool_call_id="", content="done")
+
+    two_tool_calls = [
+        ToolCall(id="tc1", name="slow_tool", arguments={}),
+        ToolCall(id="tc2", name="slow_tool", arguments={}),
+    ]
+    llm = ScriptedLLM(responses=[two_tool_calls, "done"])
+
+    registry = ToolRegistry()
+    registry.register(SlowTool())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        storage = JsonlMemory(base_dir=pathlib.Path(tmp))
+        memory = MemoryManager(storage=storage)  # type: ignore[arg-type]
+        loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+        channel = CollectingChannel()
+        session = Session(channel="cli", sender_id="local")
+
+        start = time.monotonic()
+        await loop.run(session, "run two tools", channel)
+        elapsed = time.monotonic() - start
+
+    # Sequential: >= 0.10 s; parallel: ~0.05 s
+    assert elapsed < 0.09, f"Tools ran sequentially (elapsed={elapsed:.3f}s)"
+    assert len(call_start_times) == 2
+    assert abs(call_start_times[1] - call_start_times[0]) < 0.025

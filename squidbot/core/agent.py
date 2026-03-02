@@ -8,6 +8,7 @@ interactions happen through the injected port implementations.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -121,7 +122,7 @@ class AgentLoop:
                         OutboundMessage(
                             session=session,
                             text=chunk,
-                            metadata=dict(outbound_metadata or {}),
+                            metadata=outbound_metadata or {},
                         )
                     )
                 continue
@@ -141,14 +142,27 @@ class AgentLoop:
         tool_calls: list[ToolCall],
         extra_tools: dict[str, ToolPort],
     ) -> None:
-        for tool_call in tool_calls:
+        """Execute all tool calls concurrently and append results to messages.
+
+        Uses asyncio.gather with return_exceptions=True so that a failing tool
+        does not cancel sibling tasks — threads started by asyncio.to_thread
+        cannot be interrupted mid-execution, so cancellation would only corrupt
+        state without stopping the thread.
+
+        Args:
+            messages: Message list to append tool result messages to.
+            tool_calls: Tool calls from the LLM to execute.
+            extra_tools: Per-run extra tools keyed by name.
+        """
+
+        async def _execute_one(tool_call: ToolCall) -> Message:
             extra_tool = extra_tools.get(tool_call.name)
             if extra_tool is not None:
-                extra_result = await extra_tool.execute(**tool_call.arguments)
+                raw = await extra_tool.execute(**tool_call.arguments)
                 result = ToolResult(
                     tool_call_id=tool_call.id,
-                    content=extra_result.content,
-                    is_error=extra_result.is_error,
+                    content=raw.content,
+                    is_error=raw.is_error,
                 )
             else:
                 result = await self._registry.execute(
@@ -156,14 +170,27 @@ class AgentLoop:
                     tool_call_id=tool_call.id,
                     **tool_call.arguments,
                 )
-
-            messages.append(
-                Message(
-                    role="tool",
-                    content=result.content,
-                    tool_call_id=tool_call.id,
-                )
+            return Message(
+                role="tool",
+                content=result.content,
+                tool_call_id=tool_call.id,
             )
+
+        results = await asyncio.gather(
+            *[_execute_one(tc) for tc in tool_calls],
+            return_exceptions=True,
+        )
+        for tool_call, result_or_exc in zip(tool_calls, results, strict=True):
+            if isinstance(result_or_exc, BaseException):
+                messages.append(
+                    Message(
+                        role="tool",
+                        content=f"Error: {result_or_exc}",
+                        tool_call_id=tool_call.id,
+                    )
+                )
+            else:
+                messages.append(result_or_exc)
 
     async def _deliver_final_text(
         self,
@@ -177,7 +204,7 @@ class AgentLoop:
                 OutboundMessage(
                     session=session,
                     text=final_text,
-                    metadata=dict(outbound_metadata or {}),
+                    metadata=outbound_metadata or {},
                 )
             )
 
@@ -288,7 +315,7 @@ class AgentLoop:
                     OutboundMessage(
                         session=session,
                         text=error_msg,
-                        metadata=dict(outbound_metadata or {}),
+                        metadata=outbound_metadata or {},
                     )
                 )
                 logger.error("agent.run: llm failed for session={}: {}", session.id, e)
