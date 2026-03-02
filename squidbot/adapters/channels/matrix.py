@@ -27,6 +27,7 @@ import mistune
 import nio
 from loguru import logger
 
+from squidbot.core.markdown import MARKDOWN_PLUGINS
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/webp", "image/gif"}
 )
 
-_md = mistune.create_markdown(escape=True)
+_md = mistune.create_markdown(escape=True, plugins=list(MARKDOWN_PLUGINS))
 
 
 def _is_media_shaped_bad_event(event: nio.BadEvent) -> bool:

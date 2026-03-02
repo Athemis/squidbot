@@ -29,6 +29,7 @@ import aiosmtplib
 import mistune
 from loguru import logger
 
+from squidbot.core.markdown import MARKDOWN_PLUGINS
 from squidbot.core.models import InboundMessage, OutboundMessage, Session
 from squidbot.core.text_extract import html_to_text
 
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 
 _NO_TEXT: str = "[Keine Textinhalte]"
 
-_md = mistune.create_markdown(escape=True)
+_md = mistune.create_markdown(escape=True, plugins=list(MARKDOWN_PLUGINS))
 
 
 def _normalize_address(addr: str) -> str:
