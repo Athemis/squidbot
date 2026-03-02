@@ -62,7 +62,18 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/webp", "image/gif"}
 )
 
-_md = mistune.create_markdown(escape=True)
+_md = mistune.create_markdown(
+    escape=True,
+    plugins=[
+        "table",
+        "strikethrough",
+        "task_lists",
+        "url",
+        "footnotes",
+        "superscript",
+        "subscript",
+    ],
+)
 
 
 def _is_media_shaped_bad_event(event: nio.BadEvent) -> bool:
