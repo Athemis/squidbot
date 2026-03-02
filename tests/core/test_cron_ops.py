@@ -134,3 +134,10 @@ def test_format_jobs_does_not_show_once_label_for_recurring_jobs() -> None:
     job = _job(once=False)
     output = format_jobs([job])
     assert "[once]" not in output
+
+
+def test_set_enabled_preserves_once_flag() -> None:
+    job = _job(once=True)
+    updated, found = set_enabled([job], job.id, False)
+    assert found
+    assert updated[0].once is True

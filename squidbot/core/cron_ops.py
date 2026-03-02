@@ -84,6 +84,7 @@ def set_enabled(jobs: list[CronJob], job_id: str, enabled: bool) -> tuple[list[C
                 enabled=enabled,
                 timezone=job.timezone,
                 last_run=job.last_run,
+                once=job.once,
                 metadata=dict(job.metadata),
             )
         )
