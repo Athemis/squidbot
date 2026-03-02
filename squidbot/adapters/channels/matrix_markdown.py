@@ -30,8 +30,13 @@ __all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sa
 # Math plugin
 # ---------------------------------------------------------------------------
 
-# Reuse the same patterns as mistune's built-in math plugin.
-_BLOCK_MATH_PATTERN = r"^ {0,3}\$\$[ \t]*\n(?P<math_text>[\s\S]+?)\n\$\$[ \t]*$"
+# Block math: multi-line form  $$\ncontent\n$$  or single-line form  $$content$$
+# The single-line alternative uses a separate named group (math_text_s) because
+# Python regex does not allow the same group name in two alternatives.
+_BLOCK_MATH_PATTERN = (
+    r"^ {0,3}\$\$[ \t]*\n(?P<math_text>[\s\S]+?)\n\$\$[ \t]*$"
+    r"|^ {0,3}\$\$[ \t]*(?P<math_text_s>[^\n$][^\n]*?)[ \t]*\$\$[ \t]*$"
+)
 _INLINE_MATH_PATTERN = r"\$(?!\s)(?P<math_text>.+?)(?!\s)\$"
 
 
@@ -51,7 +56,8 @@ def plugin_mx_math(md: Markdown) -> None:
     """
 
     def _parse_block_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        state.append_token({"type": "mx_block_math", "raw": m.group("math_text")})
+        math_text: str = m.group("math_text") or m.group("math_text_s") or ""
+        state.append_token({"type": "mx_block_math", "raw": math_text})
         return int(m.end()) + 1
 
     def _parse_inline_math(inline: InlineParser, m: Any, state: InlineState) -> int:

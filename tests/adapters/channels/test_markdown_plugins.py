@@ -395,6 +395,23 @@ class TestMatrixMathPlugin:
         assert "data-mx-maths=" in result
         assert "a^2" in result
 
+    def test_block_math_single_line_renders_div(self) -> None:
+        """Single-line $$...$$ renders to <div data-mx-maths>, not <span>."""
+        from squidbot.adapters.channels.matrix import _render_markdown
+
+        result = _render_markdown("$$a^2 + b^2 = c^2$$")
+        assert '<div data-mx-maths="a^2 + b^2 = c^2">' in result
+        assert (
+            "<span" not in result or "data-mx-maths" not in result.split("<span")[1].split(">")[0]
+        )
+
+    def test_block_math_single_line_no_stray_dollar(self) -> None:
+        """Single-line $$...$$ leaves no stray $ in output."""
+        from squidbot.adapters.channels.matrix import _render_markdown
+
+        result = _render_markdown("$$E=mc^2$$")
+        assert "$" not in result
+
     def test_math_does_not_appear_in_email(self) -> None:
         """Email _md does NOT render data-mx-maths (Matrix-only plugin)."""
         from squidbot.adapters.channels.email import _md
