@@ -56,7 +56,9 @@ _BLOCK_MATH_PATTERN = (
 )
 # Fenced block math: ```math or ~~~math code fence.
 # Registered before mistune's fenced_code rule so we intercept first.
-# Both backtick and tilde fences are accepted.
+# Both backtick and tilde fences are accepted on open and close independently;
+# mismatched types (e.g. ```math closed by ~~~) also match — intentional
+# simplification, as mixed fences are unreachable in normal usage.
 _BLOCK_MATH_FENCE_PATTERN = (
     r"^ {0,3}(?:```|~~~)[ \t]*math[ \t]*\n"
     r"(?P<math_text_f>[\s\S]+?)"
