@@ -111,7 +111,8 @@ class TestTaskListsPlugin:
 
         result = _render_markdown("- [ ] Incomplete task")
         assert 'type="checkbox"' in result
-        assert "checked" not in result or "disabled" in result
+        assert "checked" not in result
+        assert "disabled" in result
 
     def test_checked_task_renders_checked_checkbox(self) -> None:
         """Checked task [x] renders with checked checkbox."""
