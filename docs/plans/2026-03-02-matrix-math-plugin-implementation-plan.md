@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Matrix-Nachrichten rendern LaTeX-Formeln via `data-mx-maths` und erlauben Raw-HTML-Passthrough (z.B. `<details>`, `<u>`, `<span data-mx-spoiler>`) — abgesichert durch einen nh3-Sanitizer mit Matrix-Spec-v1.17-Allowlist.
+**Goal:** Matrix-Nachrichten rendern LaTeX-Formeln via `data-mx-maths`, Spoiler via `||text||` → `<span data-mx-spoiler>` und erlauben Raw-HTML-Passthrough (z.B. `<details>`, `<u>`) — abgesichert durch einen nh3-Sanitizer mit Matrix-Spec-v1.17-Allowlist.
 
-**Architecture:** Neues Modul `squidbot/adapters/channels/matrix_markdown.py` mit `plugin_mx_math` (Latex-Syntax → `data-mx-maths`) und `sanitize_for_matrix()` (nh3-Cleaner). `matrix.py` schaltet auf `escape=False` um und wendet den Sanitizer post-render an. Email-Adapter bleibt unverändert.
+**Architecture:** Neues Modul `squidbot/adapters/channels/matrix_markdown.py` mit `plugin_mx_math` (LaTeX → `data-mx-maths`), `plugin_mx_spoiler` (`||text||` → `<span data-mx-spoiler>`) und `sanitize_for_matrix()` (nh3-Cleaner). `matrix.py` schaltet auf `escape=False` um und wendet den Sanitizer post-render an. Email-Adapter bleibt unverändert.
 
 **Tech Stack:** mistune>=3.0 (vorhanden), nh3>=0.2 (neu), html (stdlib)
 
@@ -105,6 +105,41 @@ class TestMatrixMathPlugin:
 
         result = _render_markdown("~~old~~ value: $x^2$\n\n$$\n\\alpha\n$$")
         assert "<del>old</del>" in result
+        assert "data-mx-maths" in result
+
+
+class TestMatrixSpoilerPlugin:
+    """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""
+
+    def test_inline_spoiler_renders_span_data_mx_spoiler(self) -> None:
+        """||text|| renders to <span data-mx-spoiler>text</span>."""
+        from squidbot.adapters.channels.matrix import _render_markdown
+
+        result = _render_markdown("Here is ||a spoiler|| for you.")
+        assert "<span data-mx-spoiler>" in result
+        assert "a spoiler" in result
+
+    def test_spoiler_preserves_inner_markdown(self) -> None:
+        """Nested inline markdown inside spoiler is rendered."""
+        from squidbot.adapters.channels.matrix import _render_markdown
+
+        result = _render_markdown("||**bold spoiler**||")
+        assert "<span data-mx-spoiler>" in result
+        assert "<strong>bold spoiler</strong>" in result
+
+    def test_spoiler_does_not_appear_in_email(self) -> None:
+        """Email _md does NOT render data-mx-spoiler (Matrix-only plugin)."""
+        from squidbot.adapters.channels.email import _md
+
+        result = _md("||spoiler||")
+        assert "data-mx-spoiler" not in result
+
+    def test_spoiler_coexists_with_math_plugin(self) -> None:
+        """Spoiler and math plugins work together."""
+        from squidbot.adapters.channels.matrix import _render_markdown
+
+        result = _render_markdown("||secret: $E=mc^2$||")
+        assert "data-mx-spoiler" in result
         assert "data-mx-maths" in result
 
 
@@ -254,7 +289,7 @@ if TYPE_CHECKING:
     from mistune.core import BaseRenderer, BlockState, InlineState
     from mistune.inline_parser import InlineParser
 
-__all__ = ["plugin_mx_math", "sanitize_for_matrix"]
+__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "sanitize_for_matrix"]
 
 # ---------------------------------------------------------------------------
 # Math plugin
@@ -307,6 +342,43 @@ def plugin_mx_math(md: Markdown) -> None:
     if md.renderer and md.renderer.NAME == "html":
         md.renderer.register("mx_block_math", _render_block_math)
         md.renderer.register("mx_inline_math", _render_inline_math)
+
+
+# ---------------------------------------------------------------------------
+# Spoiler plugin
+# ---------------------------------------------------------------------------
+
+_INLINE_SPOILER_PATTERN = r"\|\|(?P<spoiler_text>.+?)\|\|"
+
+
+def plugin_mx_spoiler(md: Markdown) -> None:
+    """Mistune plugin that renders ||text|| to Matrix data-mx-spoiler format.
+
+    Inline spoiler syntax ||text|| becomes <span data-mx-spoiler>text</span>.
+    The inner text is rendered recursively so nested inline Markdown works.
+
+    Args:
+        md: The Markdown instance to extend.
+    """
+
+    def _parse_inline_spoiler(
+        inline: InlineParser, m: Any, state: InlineState
+    ) -> int:
+        text = m.group("spoiler_text")
+        new_state = state.copy()
+        new_state.src = text
+        children = inline.render(new_state)
+        state.append_token({"type": "mx_inline_spoiler", "children": children})
+        return m.end()
+
+    def _render_inline_spoiler(renderer: BaseRenderer, text: str) -> str:
+        return f"<span data-mx-spoiler>{text}</span>"
+
+    md.inline.register(
+        "mx_inline_spoiler", _INLINE_SPOILER_PATTERN, _parse_inline_spoiler, before="link"
+    )
+    if md.renderer and md.renderer.NAME == "html":
+        md.renderer.register("mx_inline_spoiler", _render_inline_spoiler)
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +483,7 @@ Erwartet: alle Sanitizer-Tests PASS.
 
 ```bash
 git add squidbot/adapters/channels/matrix_markdown.py
-git commit -m "feat(matrix): add plugin_mx_math and Matrix spec v1.17 nh3 sanitizer"
+git commit -m "feat(matrix): add plugin_mx_math, plugin_mx_spoiler and Matrix spec v1.17 nh3 sanitizer"
 ```
 
 ---
@@ -426,7 +498,7 @@ git commit -m "feat(matrix): add plugin_mx_math and Matrix spec v1.17 nh3 saniti
 Nach der Zeile `from squidbot.core.markdown import MARKDOWN_PLUGINS` einfügen:
 
 ```python
-from squidbot.adapters.channels.matrix_markdown import plugin_mx_math, sanitize_for_matrix
+from squidbot.adapters.channels.matrix_markdown import plugin_mx_math, plugin_mx_spoiler, sanitize_for_matrix
 ```
 
 **Step 2: Mistune-Instanz und `_render_markdown` anpassen**
@@ -437,7 +509,7 @@ _md = mistune.create_markdown(escape=True, plugins=list(MARKDOWN_PLUGINS))
 ```
 zu:
 ```python
-_md = mistune.create_markdown(escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math])
+_md = mistune.create_markdown(escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler])
 ```
 
 Funktion `_render_markdown` (Zeile 88–91) ändern von:
@@ -453,17 +525,18 @@ def _render_markdown(text: str) -> str:
     """Render Markdown to HTML for Matrix formatted_body.
 
     Passes raw HTML through mistune (escape=False), applies plugin_mx_math
-    for LaTeX → data-mx-maths conversion, then sanitizes the result with
+    for LaTeX → data-mx-maths and plugin_mx_spoiler for ||...|| → data-mx-spoiler,
+    then sanitizes the result with
     the Matrix spec v1.17 nh3 allowlist.
     """
     rendered = cast(str, _md(text)).strip()
     return sanitize_for_matrix(rendered)
 ```
 
-**Step 3: Alle Math- und Sanitizer-Tests laufen lassen**
+**Step 3: Alle neuen Tests laufen lassen**
 
 ```bash
-uv run pytest tests/adapters/channels/test_markdown_plugins.py::TestMatrixMathPlugin tests/adapters/channels/test_markdown_plugins.py::TestSanitizeForMatrix -v
+uv run pytest tests/adapters/channels/test_markdown_plugins.py::TestMatrixMathPlugin tests/adapters/channels/test_markdown_plugins.py::TestMatrixSpoilerPlugin tests/adapters/channels/test_markdown_plugins.py::TestSanitizeForMatrix -v
 ```
 
 Erwartet: alle Tests PASS.
@@ -472,7 +545,7 @@ Erwartet: alle Tests PASS.
 
 ```bash
 git add squidbot/adapters/channels/matrix.py
-git commit -m "feat(matrix): enable HTML passthrough with nh3 sanitizer and math plugin"
+git commit -m "feat(matrix): enable HTML passthrough with nh3 sanitizer, math and spoiler plugins"
 ```
 
 ---

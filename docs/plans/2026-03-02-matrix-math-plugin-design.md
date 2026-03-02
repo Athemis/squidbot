@@ -4,9 +4,10 @@
 
 **Problem:** LLM-Antworten mit mathematischen Ausdrücken (`$$E=mc^2$$`, `$x^2$`) werden in Matrix nicht korrekt gerendert. Außerdem können LLMs kein Raw-HTML nutzen um Matrix-spezifische Tags wie `<details>`, `<u>` oder `<span data-mx-spoiler>` zu erzeugen, weil `escape=True` in mistune alles escaped.
 
-**Solution:** Zwei komplementäre Mechanismen:
+**Solution:** Drei komplementäre Mechanismen:
 1. **`plugin_mx_math`** — Mistune-Plugin für natürliche LaTeX-Syntax (`$$...$$`, `$...$`) → `<div data-mx-maths>` / `<span data-mx-maths>` (Matrix Spec v1.11+).
-2. **HTML-Passthrough + nh3-Sanitizer** — `escape=False` in mistune erlaubt Raw-HTML vom LLM; nh3 saniert den Output mit der Matrix-Spec-v1.17-Allowlist vor dem Senden.
+2. **`plugin_mx_spoiler`** — Mistune-Plugin für `||text||` → `<span data-mx-spoiler>text</span>` (Matrix-Spoiler-Format).
+3. **HTML-Passthrough + nh3-Sanitizer** — `escape=False` in mistune erlaubt Raw-HTML vom LLM; nh3 saniert den Output mit der Matrix-Spec-v1.17-Allowlist vor dem Senden.
 
 ---
 
@@ -69,9 +70,10 @@ squidbot/core/
 LLM-Text (Markdown + optional Raw-HTML)
         │
         ▼
-mistune (escape=False, plugins=[...MARKDOWN_PLUGINS, plugin_mx_math])
+mistune (escape=False, plugins=[...MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler])
         │  • $$...$$ → <div data-mx-maths="..."><code>...</code></div>
         │  • $...$ → <span data-mx-maths="..."><code>...</code></span>
+        │  • ||text|| → <span data-mx-spoiler>text</span>
         │  • Raw HTML passiert unverändert
         ▼
 nh3.Cleaner (Matrix Spec v1.17 Allowlist)
@@ -92,6 +94,17 @@ Reuses die Regex-Pattern des eingebauten `math`-Plugins, rendert aber Matrix-kon
 - Inline `$...$` → `<span data-mx-maths="ESCAPED_LATEX"><code>ESCAPED_LATEX</code></span>`
 
 LaTeX-Content wird mit `html.escape()` für das Attribut und den Kind-Content escaped.
+
+### `plugin_mx_spoiler`
+
+Inline-Plugin für Matrix-Spoiler-Format:
+
+- Syntax: `||spoiler text||`
+- Output: `<span data-mx-spoiler>spoiler text</span>`
+
+Der innere Text wird rekursiv als Inline-Markdown gerendert (z.B. `||**fetter Spoiler**||` → `<span data-mx-spoiler><strong>fetter Spoiler</strong></span>`). Kein Block-Spoiler — die Matrix-Spec kennt `data-mx-spoiler` nur auf `<span>`.
+
+Pattern: `\|\|(?P<spoiler_text>.+?)\|\|` — kein Newline im Match, damit die Abgrenzung klar bleibt.
 
 ### nh3-Sanitizer-Konfiguration
 
@@ -166,15 +179,16 @@ Alles andere (z.B. `<script>`, `onclick=`) wird von nh3 entfernt.
 ### In Scope
 
 - `plugin_mx_math`: `$$...$$` → `<div data-mx-maths>`, `$...$` → `<span data-mx-maths>`
+- `plugin_mx_spoiler`: `||text||` → `<span data-mx-spoiler>text</span>`
 - nh3-Sanitizer mit Matrix-Spec-v1.17-Allowlist
 - `escape=False` in Matrix-Adapter
 - nh3 als neue Projektabhängigkeit
-- Unit Tests für Plugin und Sanitizer
+- Unit Tests für beide Plugins und Sanitizer
 
 ### Out of Scope
 
 - Email-Adapter: bleibt unverändert (`escape=True`, kein nh3)
-- Spoiler-Plugin als Markdown-Syntax (`>!...`) — LLM schreibt direkt `<span data-mx-spoiler>`
+- Block-Spoiler — Matrix kennt `data-mx-spoiler` nur auf `<span>`
 - Details-Plugin als Markdown-Syntax — LLM schreibt direkt `<details><summary>`
 - `data-mx-color`-Wertvalidierung (`#rrggbb`) — Clients validieren selbst
 - LaTeX → Unicode-Approximation im Fallback — `<code>` mit Roh-LaTeX reicht
@@ -191,6 +205,11 @@ Alles andere (z.B. `<script>`, `onclick=`) wird von nh3 entfernt.
 3. LaTeX mit `"` korrekt escaped im Attribut
 4. Multi-Line Block-Math erhalten
 5. Koexistenz mit anderen Plugins
+
+**`plugin_mx_spoiler`:**
+6. `||text||` erzeugt `<span data-mx-spoiler>text</span>`
+7. Nested Inline-Markdown funktioniert (`||**bold**||`)
+8. Email-Channel rendert kein `data-mx-spoiler`
 
 **`sanitize_for_matrix` (nh3):**
 6. Unbekannte Tags werden entfernt (Content bleibt)
