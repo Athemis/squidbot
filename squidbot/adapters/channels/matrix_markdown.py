@@ -30,12 +30,25 @@ __all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sa
 # Math plugin
 # ---------------------------------------------------------------------------
 
-# Block math: multi-line form  $$\ncontent\n$$  or single-line form  $$content$$
-# The single-line alternative uses a separate named group (math_text_s) because
-# Python regex does not allow the same group name in two alternatives.
+# Block math — three supported forms:
+#
+#  Form A: $$ on its own line, content on next lines, $$ on its own line
+#    $$
+#    content
+#    $$
+#
+#  Form B: everything on one line  $$content$$
+#
+#  Form C: $$ opens with content on same line, closes at end of last line
+#    $$\begin{align}
+#    ...
+#    \end{align}$$
+#
+# Python regex requires distinct named groups across alternatives.
 _BLOCK_MATH_PATTERN = (
     r"^ {0,3}\$\$[ \t]*\n(?P<math_text>[\s\S]+?)\n\$\$[ \t]*$"
     r"|^ {0,3}\$\$[ \t]*(?P<math_text_s>[^\n$][^\n]*?)[ \t]*\$\$[ \t]*$"
+    r"|^ {0,3}\$\$(?P<math_text_m>[^\n$][^\n]*\n[\s\S]+?)\$\$[ \t]*$"
 )
 _INLINE_MATH_PATTERN = r"\$(?!\s)(?P<math_text>.+?)(?!\s)\$"
 
@@ -56,7 +69,9 @@ def plugin_mx_math(md: Markdown) -> None:
     """
 
     def _parse_block_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        math_text: str = m.group("math_text") or m.group("math_text_s") or ""
+        math_text: str = (
+            m.group("math_text") or m.group("math_text_s") or m.group("math_text_m") or ""
+        )
         state.append_token({"type": "mx_block_math", "raw": math_text})
         return int(m.end()) + 1
 
