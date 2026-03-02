@@ -136,6 +136,7 @@ class CronJob:
     enabled: bool = True
     timezone: str = "local"
     last_run: datetime | None = None
+    once: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

@@ -100,3 +100,13 @@ def test_format_jobs_matches_cli_layout() -> None:
 
 def test_format_jobs_empty_message() -> None:
     assert format_jobs([]) == "No cron jobs configured."
+
+
+def test_cronjob_once_flag_defaults_to_false() -> None:
+    job = _job()
+    assert job.once is False
+
+
+def test_cronjob_once_flag_can_be_set() -> None:
+    job = _job(once=True)
+    assert job.once is True
