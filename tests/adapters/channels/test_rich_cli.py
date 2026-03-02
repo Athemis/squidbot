@@ -26,13 +26,14 @@ class TestRichCliChannelSend:
     @pytest.mark.asyncio
     async def test_send_prints_to_console(self):
         """send() should render response as Markdown via Console.print."""
-        ch = RichCliChannel()
-        msg = OutboundMessage(session=Session(channel="cli", sender_id="local"), text="**hello**")
-
         with patch("squidbot.adapters.channels.cli.Console") as MockConsole:
             mock_console = MagicMock()
             MockConsole.return_value = mock_console
 
+            ch = RichCliChannel()
+            msg = OutboundMessage(
+                session=Session(channel="cli", sender_id="local"), text="**hello**"
+            )
             await ch.send(msg)
 
             mock_console.print.assert_called()
@@ -47,6 +48,27 @@ class TestRichCliChannelSend:
         """send_typing() should not raise."""
         ch = RichCliChannel()
         await ch.send_typing("cli:local")  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_console_instantiated_once(self) -> None:
+        """Console() must be created only once, not on every send() call."""
+        console_instances: list[MagicMock] = []
+
+        def tracking_console(*args: object, **kwargs: object) -> MagicMock:
+            instance = MagicMock()
+            console_instances.append(instance)
+            return instance
+
+        with patch("squidbot.adapters.channels.cli.Console", side_effect=tracking_console):
+            channel = RichCliChannel()
+            session = Session(channel="cli", sender_id="local")
+            msg = OutboundMessage(session=session, text="hello")
+            await channel.send(msg)
+            await channel.send(msg)
+
+        assert len(console_instances) == 1, (
+            f"Console() was instantiated {len(console_instances)} times"
+        )
 
 
 class TestRichCliChannelReceive:

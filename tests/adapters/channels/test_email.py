@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import email as email_lib
+import ssl
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -601,6 +602,68 @@ class TestEmailChannelIdleFallback:
         with pytest.raises(OSError, match="connection reset"):
             await ch._idle_once()
         assert ch._idle_supported is True  # flag unchanged
+
+
+class TestEmailChannelSslContextCaching:
+    """Tests that SSLContext is created once in __init__ and reused across calls."""
+
+    async def test_ssl_context_created_once_across_multiple_sends(self, tmp_path: Path) -> None:
+        """ssl.create_default_context() is called once in __init__, not per send()."""
+        from squidbot.adapters.channels.email import EmailChannel
+        from squidbot.core.models import OutboundMessage, Session
+
+        real_ssl_ctx = MagicMock(spec=ssl.SSLContext)
+        ssl_create_calls: list[object] = []
+
+        def tracking_ssl_factory() -> object:
+            ssl_create_calls.append(1)
+            return real_ssl_ctx
+
+        smtp_instance = AsyncMock()
+        smtp_instance.__aenter__ = AsyncMock(return_value=smtp_instance)
+        smtp_instance.__aexit__ = AsyncMock(return_value=False)
+        smtp_instance.ehlo = AsyncMock()
+        smtp_instance.starttls = AsyncMock()
+        smtp_instance.login = AsyncMock()
+        smtp_instance.send_message = AsyncMock()
+
+        with (
+            patch(
+                "squidbot.adapters.channels.email.ssl.create_default_context",
+                side_effect=tracking_ssl_factory,
+            ),
+            patch(
+                "squidbot.adapters.channels.email.aiosmtplib.SMTP",
+                return_value=smtp_instance,
+            ),
+        ):
+            config = _make_config(tls=True, tls_verify=True)
+            ch = EmailChannel(config=config, tmp_dir=tmp_path)
+
+            outbound = OutboundMessage(
+                session=Session(channel="email", sender_id="user@example.com"),
+                text="Hello",
+                metadata={
+                    "email_from": "user@example.com",
+                    "email_subject": "Test",
+                    "email_message_id": "<abc@host>",
+                },
+            )
+            await ch.send(outbound)
+            await ch.send(outbound)
+
+        assert len(ssl_create_calls) == 1, (
+            f"Expected ssl.create_default_context() called once, got {len(ssl_create_calls)}"
+        )
+
+    def test_no_ssl_context_when_tls_disabled(self, tmp_path: Path) -> None:
+        """_ssl_ctx must remain None when TLS is disabled."""
+        from squidbot.adapters.channels.email import EmailChannel
+
+        config = _make_config(tls=False)
+        with patch("squidbot.adapters.channels.email.logger"):
+            ch = EmailChannel(config=config, tmp_dir=tmp_path)
+        assert ch._ssl_ctx is None
 
 
 class TestEmailChannelReconnectBackoff:

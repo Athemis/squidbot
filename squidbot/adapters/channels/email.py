@@ -263,6 +263,12 @@ class EmailChannel:
         self._idle_supported: bool = True
         self._imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL | None = None
         self._warn_tls()
+        self._ssl_ctx: ssl.SSLContext | None = None
+        if self._config.tls:
+            self._ssl_ctx = ssl.create_default_context()
+            if not self._config.tls_verify:
+                self._ssl_ctx.check_hostname = False
+                self._ssl_ctx.verify_mode = ssl.CERT_NONE
 
     def _warn_tls(self) -> None:
         """Emit security warnings for weakened TLS settings."""
@@ -344,12 +350,7 @@ class EmailChannel:
             root["References"] = references
 
         cfg = self._config
-        ssl_ctx: ssl.SSLContext | None = None
-        if cfg.tls:
-            ssl_ctx = ssl.create_default_context()
-            if not cfg.tls_verify:
-                ssl_ctx.check_hostname = False
-                ssl_ctx.verify_mode = ssl.CERT_NONE
+        ssl_ctx = self._ssl_ctx
 
         try:
             smtp = aiosmtplib.SMTP(
@@ -399,12 +400,7 @@ class EmailChannel:
         if self._imap is not None:
             return
         cfg = self._config
-        ssl_ctx: ssl.SSLContext | None = None
-        if cfg.tls:
-            ssl_ctx = ssl.create_default_context()
-            if not cfg.tls_verify:
-                ssl_ctx.check_hostname = False
-                ssl_ctx.verify_mode = ssl.CERT_NONE
+        ssl_ctx = self._ssl_ctx
 
         if not cfg.tls:
             imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL = aioimaplib.IMAP4(
