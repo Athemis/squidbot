@@ -159,17 +159,23 @@ class CronScheduler:
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
         jobs = await self._storage.load_cron_jobs()
         now = datetime.now(UTC)
-        updated = False
+        kept: list[CronJob] = []
+        changed = False
         for job in jobs:
-            if is_due(job, now=now):
+            if not is_due(job, now=now):
+                kept.append(job)
+                continue
+            changed = True
+            try:  # noqa: SIM105 — contextlib.suppress doesn't support async
+                await on_due(job)
+            except Exception:
+                pass
+            if not job.once:
                 job.last_run = now
-                updated = True
-                try:  # noqa: SIM105 — contextlib.suppress doesn't support async
-                    await on_due(job)
-                except Exception:
-                    pass
-        if updated:
-            await self._storage.save_cron_jobs(jobs)
+                kept.append(job)
+            # once=True: intentionally not appended → deleted after firing
+        if changed:
+            await self._storage.save_cron_jobs(kept)
 
     def stop(self) -> None:
         self._running = False
