@@ -75,7 +75,7 @@ _BLOCK_MATH_FENCE_PATTERN = (
 # form when input starts with $`.  Content must not contain backticks.
 _INLINE_MATH_PATTERN = (
     r"\$`(?P<math_text_bt>[^`]+)`\$"
-    r"|\$(?!\s)(?P<math_text>.+?)(?<!\s)\$"
+    r"|(?<!\$)\$(?![\s$])(?P<math_text>.+?)(?<![\s$])\$(?!\$)"
 )
 
 
