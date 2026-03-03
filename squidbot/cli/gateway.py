@@ -333,6 +333,13 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
                 model=model_cfg.model,
                 supports_reasoning_content=provider_cfg.supports_reasoning_content,
                 client=client_cache[cache_key],
+                max_tokens=model_cfg.max_tokens,
+                temperature=model_cfg.temperature,
+                top_p=model_cfg.top_p,
+                presence_penalty=model_cfg.presence_penalty,
+                frequency_penalty=model_cfg.frequency_penalty,
+                reasoning_effort=model_cfg.reasoning_effort,
+                extra_body=model_cfg.extra_body,
             )
         )
 
