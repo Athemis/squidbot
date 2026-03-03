@@ -220,6 +220,26 @@ async def test_history_persisted_after_run(storage, memory):
     assert history[1].role == "assistant"
 
 
+async def test_history_persisted_with_explicit_user_sender_id(storage, memory):
+    llm = ScriptedLLM(["I remember you."])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="You are a bot."
+    )
+    session = Session(channel="matrix", sender_id="!room:example.org")
+
+    await loop.run(
+        session,
+        "Remember me!",
+        channel,
+        user_sender_id="@alice:example.org",
+    )
+    history = await storage.load_history()
+    assert len(history) == 2
+    assert history[0].role == "user"
+    assert history[0].sender_id == "@alice:example.org"
+
+
 async def test_run_with_llm_override(storage, memory):
     """llm_override replaces self._llm for a single run."""
     default_llm = ScriptedLLM(["from default"])

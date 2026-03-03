@@ -51,6 +51,7 @@ def _make_tool(
     outbound_metadata: dict[str, Any],
     workspace: Path,
     restrict_to_workspace: bool = False,
+    current_sender_id: str | None = None,
 ) -> MessageTool:
     from squidbot.adapters.tools.message import MessageTool
 
@@ -62,6 +63,7 @@ def _make_tool(
         outbound_metadata=outbound_metadata,
         workspace=workspace,
         restrict_to_workspace=restrict_to_workspace,
+        current_sender_id=current_sender_id,
     )
 
 
@@ -258,6 +260,36 @@ class TestMessageToolRoutingResolution:
         assert len(email.sent) == 1
         assert email.sent[0].session.channel == "email"
         assert email.sent[0].session.sender_id == "owner@example.org"
+
+    async def test_matrix_room_session_uses_current_sender_id_for_owner_routing(
+        self, tmp_path: Path
+    ) -> None:
+        matrix = _CollectingChannel()
+        email = _CollectingChannel()
+        room_session = Session(channel="matrix", sender_id="!room1:example.org")
+        owner_sender = "@owner:example.org"
+        tool = _make_tool(
+            channels={"matrix": matrix, "email": email},
+            session=room_session,
+            inbound_text="Please send this per email.",
+            owner_aliases=_owner_aliases(
+                sender_id=owner_sender,
+                sender_channel="matrix",
+                emails=[],
+            ),
+            outbound_metadata={"matrix_room_id": "!room1:example.org"},
+            workspace=tmp_path,
+            current_sender_id=owner_sender,
+        )
+
+        result = await tool.execute(
+            content="Delivered",
+            target_channel="email",
+            target_sender_id="owner@example.org",
+        )
+
+        assert not result.is_error
+        assert len(email.sent) == 1
 
     async def test_email_to_matrix_unsupported_v1(self, tmp_path: Path) -> None:
         matrix = _CollectingChannel()

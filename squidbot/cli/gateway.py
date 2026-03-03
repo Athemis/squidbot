@@ -181,11 +181,18 @@ async def _channel_loop_with_state(
             )
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
+        sender_from_metadata = inbound.metadata.get("matrix_sender_id")
+        current_sender_id = (
+            sender_from_metadata
+            if isinstance(sender_from_metadata, str) and sender_from_metadata
+            else inbound.session.sender_id
+        )
         extra = [
             memory_write_tool,
             MessageTool(
                 channel_registry=registry,
                 current_session=inbound.session,
+                current_sender_id=current_sender_id,
                 inbound_text=inbound.text,
                 owner_aliases=owner_aliases or [],
                 outbound_metadata=inbound.metadata,
@@ -211,6 +218,7 @@ async def _channel_loop_with_state(
             channel,
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
+            user_sender_id=current_sender_id,
         )
 
 
@@ -248,11 +256,18 @@ async def _channel_loop(
             tracker.update(channel, inbound.session, inbound.metadata)
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
+        sender_from_metadata = inbound.metadata.get("matrix_sender_id")
+        current_sender_id = (
+            sender_from_metadata
+            if isinstance(sender_from_metadata, str) and sender_from_metadata
+            else inbound.session.sender_id
+        )
         extra = [
             memory_write_tool,
             MessageTool(
                 channel_registry=registry,
                 current_session=inbound.session,
+                current_sender_id=current_sender_id,
                 inbound_text=inbound.text,
                 owner_aliases=owner_aliases or [],
                 outbound_metadata=inbound.metadata,
@@ -278,6 +293,7 @@ async def _channel_loop(
             channel,
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
+            user_sender_id=current_sender_id,
         )
 
 

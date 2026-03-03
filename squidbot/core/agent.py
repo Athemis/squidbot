@@ -241,6 +241,7 @@ class AgentLoop:
         llm: LLMPort | None = None,
         extra_tools: Sequence[ToolPort] | None = None,
         outbound_metadata: dict[str, Any] | None = None,
+        user_sender_id: str | None = None,
     ) -> None:
         """
         Process a single user message and deliver the reply to the channel.
@@ -265,6 +266,8 @@ class AgentLoop:
                          mutate self._registry.
             outbound_metadata: Optional channel-routing metadata to attach to outbound
                                messages emitted during this run.
+            user_sender_id: Optional sender attribution used for persistence.
+                Defaults to session.sender_id.
         """
         selected_llm = llm if llm is not None else self._llm
 
@@ -374,7 +377,7 @@ class AgentLoop:
         try:
             await self._memory.persist_exchange(
                 channel=session.channel,
-                sender_id=session.sender_id,
+                sender_id=user_sender_id or session.sender_id,
                 user_message=text_fallback,
                 assistant_reply=final_text,
             )

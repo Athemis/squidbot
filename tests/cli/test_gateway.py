@@ -9,6 +9,7 @@ All tests use in-process test doubles; no real MCP servers or filesystem state i
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 
 async def test_mcp_servers_connect_in_parallel() -> None:
@@ -76,6 +77,42 @@ async def test_memory_write_tool_is_singleton_across_messages(tmp_path: Path) ->
     assert mock_cls.call_count == 1, (
         f"MemoryWriteTool was instantiated {mock_cls.call_count} times for 2 messages"
     )
+
+
+async def test_channel_loop_forwards_user_sender_id_from_metadata(tmp_path: Path) -> None:
+    """_channel_loop forwards matrix_sender_id for room-scoped Matrix sessions."""
+    from collections.abc import AsyncIterator
+
+    from squidbot.adapters.persistence.jsonl import JsonlMemory
+    from squidbot.cli.gateway import _channel_loop
+    from squidbot.core.models import InboundMessage, OutboundMessage, Session
+
+    class OneMessageChannel:
+        streaming = False
+
+        async def receive(self) -> AsyncIterator[InboundMessage]:
+            session = Session(channel="matrix", sender_id="!room1:example.org")
+            metadata = {
+                "matrix_room_id": "!room1:example.org",
+                "matrix_sender_id": "@alice:example.org",
+            }
+            yield InboundMessage(session=session, text="msg1", metadata=metadata)
+
+        async def send(self, message: OutboundMessage) -> None: ...
+
+        async def send_typing(self, session_id: str, typing: bool = True) -> None: ...
+
+    fake_loop = AsyncMock()
+    storage = JsonlMemory(base_dir=tmp_path)
+
+    await _channel_loop(
+        channel=OneMessageChannel(),  # type: ignore[arg-type]
+        loop=fake_loop,
+        storage=storage,
+    )
+
+    assert fake_loop.run.await_count == 1
+    assert fake_loop.run.await_args.kwargs.get("user_sender_id") == "@alice:example.org"
 
 
 async def test_mcp_server_that_raises_is_skipped() -> None:

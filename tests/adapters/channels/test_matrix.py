@@ -74,7 +74,8 @@ class TestMatrixChannelReceive:
 
         assert len(msgs) == 1
         assert msgs[0].text == "hello bot"
-        assert msgs[0].session.sender_id == "@alice:example.org"
+        assert msgs[0].session.sender_id == "!room1:example.org"
+        assert msgs[0].metadata["matrix_sender_id"] == "@alice:example.org"
 
     @pytest.mark.asyncio
     async def test_open_policy_skips_own_messages(self, fake_nio: MagicMock) -> None:
@@ -223,16 +224,16 @@ class TestMatrixChannelTyping:
         ch._client.room_typing = AsyncMock(return_value=MagicMock())
 
         # Seed the session_rooms so send_typing can find the room
-        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+        ch._session_rooms["matrix:!room1:example.org"] = "!room1:example.org"
 
-        await ch.send_typing("matrix:@alice:example.org", typing=True)
+        await ch.send_typing("matrix:!room1:example.org", typing=True)
         await asyncio.sleep(0)  # let the event loop tick
 
         assert "!room1:example.org" in ch._typing_tasks
         assert not ch._typing_tasks["!room1:example.org"].done()
 
         # Cleanup
-        await ch.send_typing("matrix:@alice:example.org", typing=False)
+        await ch.send_typing("matrix:!room1:example.org", typing=False)
 
     @pytest.mark.asyncio
     async def test_send_typing_false_cancels_task_and_sends_stop(self) -> None:
@@ -249,11 +250,11 @@ class TestMatrixChannelTyping:
 
         ch._client = MagicMock()
         ch._client.room_typing = fake_room_typing
-        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+        ch._session_rooms["matrix:!room1:example.org"] = "!room1:example.org"
 
-        await ch.send_typing("matrix:@alice:example.org", typing=True)
+        await ch.send_typing("matrix:!room1:example.org", typing=True)
         await asyncio.sleep(0)
-        await ch.send_typing("matrix:@alice:example.org", typing=False)
+        await ch.send_typing("matrix:!room1:example.org", typing=False)
         await asyncio.sleep(0)
 
         # The stop call (typing_state=False) must have been sent
@@ -278,18 +279,18 @@ class TestMatrixChannelTyping:
 
         ch._client = MagicMock()
         ch._client.room_typing = fake_room_typing
-        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+        ch._session_rooms["matrix:!room1:example.org"] = "!room1:example.org"
 
         original = matrix_mod._TYPING_KEEPALIVE_S
         matrix_mod._TYPING_KEEPALIVE_S = 0.05  # speed up test
 
         try:
-            await ch.send_typing("matrix:@alice:example.org", typing=True)
+            await ch.send_typing("matrix:!room1:example.org", typing=True)
             await asyncio.sleep(0.2)  # enough for 2+ keepalive ticks
             assert call_count >= 2
         finally:
             matrix_mod._TYPING_KEEPALIVE_S = original
-            await ch.send_typing("matrix:@alice:example.org", typing=False)
+            await ch.send_typing("matrix:!room1:example.org", typing=False)
 
     @pytest.mark.asyncio
     async def test_typing_429_retries_after_delay(self) -> None:
@@ -318,19 +319,19 @@ class TestMatrixChannelTyping:
 
         ch._client = MagicMock()
         ch._client.room_typing = fake_room_typing
-        ch._session_rooms["matrix:@alice:example.org"] = "!room1:example.org"
+        ch._session_rooms["matrix:!room1:example.org"] = "!room1:example.org"
 
         original = matrix_mod._TYPING_KEEPALIVE_S
         matrix_mod._TYPING_KEEPALIVE_S = 0.01
 
         try:
-            await ch.send_typing("matrix:@alice:example.org", typing=True)
+            await ch.send_typing("matrix:!room1:example.org", typing=True)
             await asyncio.sleep(0.3)
             # Should have retried after the rate limit
             assert call_count >= 2
         finally:
             matrix_mod._TYPING_KEEPALIVE_S = original
-            await ch.send_typing("matrix:@alice:example.org", typing=False)
+            await ch.send_typing("matrix:!room1:example.org", typing=False)
 
 
 class TestMatrixChannelSend:
@@ -1670,7 +1671,8 @@ class TestMatrixEncryptedMediaIntake:
 
         assert not ch._queue.empty(), "Expected an InboundMessage to be queued for media BadEvent"
         msg = ch._queue.get_nowait()
-        assert msg.session.sender_id == "@alice:example.org"
+        assert msg.session.sender_id == "!room1:example.org"
+        assert msg.metadata["matrix_sender_id"] == "@alice:example.org"
         # _download_attachment must be called with just the event (same as _handle_media)
         ch._download_attachment.assert_awaited_once_with(event)
 
