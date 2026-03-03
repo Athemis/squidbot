@@ -78,6 +78,38 @@ class TestMatrixChannelReceive:
         assert msgs[0].metadata["matrix_sender_id"] == "@alice:example.org"
 
     @pytest.mark.asyncio
+    async def test_open_policy_accepts_reaction_with_room_scoped_session(self) -> None:
+        """Accepted reactions are queued with room-scoped session and sender metadata."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(group_policy="open")
+        ch = MatrixChannel(config=config)
+
+        room = MagicMock()
+        room.room_id = "!room1:example.org"
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.event_id = "$reaction1"
+        event.source = {
+            "type": "m.reaction",
+            "content": {
+                "m.relates_to": {
+                    "rel_type": "m.annotation",
+                    "event_id": "$target",
+                    "key": "👍",
+                }
+            },
+        }
+
+        await ch._handle_reaction(room, event)
+
+        assert not ch._queue.empty()
+        msg = ch._queue.get_nowait()
+        assert msg.session.channel == "matrix"
+        assert msg.session.sender_id == "!room1:example.org"
+        assert msg.metadata["matrix_sender_id"] == "@alice:example.org"
+
+    @pytest.mark.asyncio
     async def test_open_policy_skips_own_messages(self, fake_nio: MagicMock) -> None:
         """Own messages (sender == bot user_id) are never yielded."""
         from squidbot.adapters.channels.matrix import MatrixChannel
