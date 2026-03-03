@@ -57,8 +57,10 @@ _BLOCK_MATH_PATTERN = (
 # Fenced block math: ```math or ~~~math code fence.
 # Registered before mistune's fenced_code rule so we intercept first.
 # The named group `fence` captures the opening delimiter (3+ backticks or tildes);
-# (?P=fence) enforces that the closing fence uses the same character and length,
-# matching GFM spec §4.5 (closing fence must be same type, length >= opening).
+# (?P=fence) is a back-reference that enforces the closing fence uses the exact same
+# character and length as the opening fence. This is stricter than GFM spec §4.5,
+# which only requires the closing fence to be the same type and at least as long as
+# the opening; mismatched lengths are rare enough in practice that this is acceptable.
 _BLOCK_MATH_FENCE_PATTERN = (
     r"^ {0,3}(?P<fence>`{3,}|~{3,})[ \t]*math[ \t]*\n"
     r"(?P<math_text_f>[\s\S]+?)"
