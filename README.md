@@ -85,6 +85,14 @@ llm:
       model: "llama3.2"
       max_tokens: 2048
       max_context_tokens: 8192
+    # kimi-instant:
+    #   provider: openrouter
+    #   model: "moonshotai/Kimi-K2.5"
+    #   temperature: 0.6
+    #   top_p: 0.95
+    #   extra_body:
+    #     thinking:
+    #       type: "disabled"
 
   pools:
     smart:
@@ -172,6 +180,95 @@ channels:
     allow_from: []
     tls: true
     tls_verify: true
+```
+
+### Model-specific inference parameters
+
+You can set optional inference parameters per model under `llm.models.<name>`. These
+parameters are passed through to the provider for that model only.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `temperature` | number | Sampling randomness. Do not set for OpenAI o-series models. |
+| `top_p` | number | Nucleus sampling. Do not set for OpenAI o-series models. |
+| `presence_penalty` | number | Penalizes introducing tokens already present in context. |
+| `frequency_penalty` | number | Penalizes repeated token frequency in generated output. |
+| `reasoning_effort` | string | Reasoning level for models that support it (for example: `low`, `medium`, `high`). |
+| `extra_body` | mapping | Provider-specific request fields merged into the JSON request body. |
+| `max_tokens` | integer | Per-request output cap for that model entry (forwarded only when explicitly configured in that model block). |
+
+Provider support for these fields is model/API specific; unsupported fields may be rejected at runtime.
+
+#### Kimi K2.5 (thinking vs instant)
+
+Thinking is generally on by default. Use separate entries so pools can select either
+a deeper thinking mode or a faster instant mode:
+
+```yaml
+llm:
+  models:
+    kimi-thinking:
+      provider: openrouter
+      model: "moonshotai/Kimi-K2.5"
+      temperature: 1.0
+      top_p: 0.95
+
+    kimi-instant:
+      provider: openrouter
+      model: "moonshotai/Kimi-K2.5"
+      temperature: 0.6
+      top_p: 0.95
+      extra_body:
+        thinking:
+          type: "disabled"
+```
+
+#### GLM-5 (preserve reasoning content)
+
+Enable reasoning-content preservation on the provider, then define a model entry:
+
+```yaml
+llm:
+  providers:
+    zhipu:
+      api_base: "https://open.bigmodel.cn/api/paas/v4"
+      api_key: "your-zhipu-api-key"
+      supports_reasoning_content: true
+
+  models:
+    glm-5-thinking:
+      provider: zhipu
+      model: "glm-5"
+      temperature: 1.0
+      max_tokens: 131072
+      extra_body:
+        thinking:
+          type: "enabled"
+          clear_thinking: false
+```
+
+#### OpenAI o-series (`reasoning_effort`)
+
+For o-series models, prefer `reasoning_effort` and leave sampling controls unset.
+Do not configure `temperature` or `top_p` for these models.
+
+```yaml
+llm:
+  providers:
+    openai:
+      api_base: "https://api.openai.com/v1"
+      api_key: "sk-..."
+
+  models:
+    o4-mini-fast:
+      provider: openai
+      model: "o4-mini"
+      reasoning_effort: low
+
+    o4-mini-deep:
+      provider: openai
+      model: "o4-mini"
+      reasoning_effort: high
 ```
 
 ## CLI

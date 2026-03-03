@@ -259,3 +259,84 @@ def test_history_context_messages_must_be_greater_than_zero():
 def test_history_context_messages_valid():
     cfg = AgentConfig(history_context_messages=42)
     assert cfg.history_context_messages == 42
+
+
+# --- Inference parameter tests ---
+
+
+def test_llm_model_config_inference_defaults() -> None:
+    cfg = LLMModelConfig(provider="openai", model="gpt-4o")
+    assert cfg.temperature is None
+    assert cfg.top_p is None
+    assert cfg.presence_penalty is None
+    assert cfg.frequency_penalty is None
+    assert cfg.reasoning_effort is None
+    assert cfg.extra_body == {}
+    assert cfg.max_tokens == 8192
+
+
+def test_llm_model_config_full_params() -> None:
+    cfg = LLMModelConfig(
+        provider="openai",
+        model="o3",
+        temperature=0.6,
+        top_p=0.95,
+        presence_penalty=0.1,
+        frequency_penalty=0.2,
+        reasoning_effort="high",
+        extra_body={"min_p": 0.01},
+    )
+    assert cfg.temperature == 0.6
+    assert cfg.top_p == 0.95
+    assert cfg.presence_penalty == 0.1
+    assert cfg.frequency_penalty == 0.2
+    assert cfg.reasoning_effort == "high"
+    assert cfg.extra_body == {"min_p": 0.01}
+
+
+def test_llm_model_config_reasoning_effort_invalid() -> None:
+    from pydantic import ValidationError as PydanticValidationError
+
+    with pytest.raises(PydanticValidationError):
+        LLMModelConfig(provider="openai", model="o3", reasoning_effort="ultra")
+
+
+def test_llm_model_config_json_round_trip() -> None:
+    cfg = LLMModelConfig(
+        provider="moonshot",
+        model="kimi-k2.5",
+        temperature=1.0,
+        extra_body={"thinking": {"type": "enabled"}},
+    )
+    data = json.loads(cfg.model_dump_json())
+    restored = LLMModelConfig.model_validate(data)
+    assert restored.temperature == 1.0
+    assert restored.extra_body == {"thinking": {"type": "enabled"}}
+
+
+def test_settings_with_inference_params_loads_from_json(tmp_path) -> None:
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "llm": {
+                    "providers": {"local": {"api_base": "http://localhost:8001/v1"}},
+                    "models": {
+                        "kimi": {
+                            "provider": "local",
+                            "model": "kimi-k2.5",
+                            "temperature": 0.6,
+                            "top_p": 0.95,
+                            "extra_body": {"thinking": {"type": "disabled"}},
+                        }
+                    },
+                    "pools": {"default": [{"model": "kimi"}]},
+                }
+            }
+        )
+    )
+    settings = Settings.load(config_file)
+    model_cfg = settings.llm.models["kimi"]
+    assert model_cfg.temperature == 0.6
+    assert model_cfg.top_p == 0.95
+    assert model_cfg.extra_body == {"thinking": {"type": "disabled"}}

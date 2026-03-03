@@ -318,6 +318,10 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
         model_cfg = settings.llm.models.get(entry.model)
         if not model_cfg:
             raise ValueError(f"LLM model '{entry.model}' not found in llm.models")
+        model_fields_set: set[str] = getattr(model_cfg, "model_fields_set", set())
+        max_tokens: int | None = model_cfg.max_tokens
+        if isinstance(model_fields_set, set) and "max_tokens" not in model_fields_set:
+            max_tokens = None
         provider_cfg = settings.llm.providers.get(model_cfg.provider)
         if not provider_cfg:
             raise ValueError(f"LLM provider '{model_cfg.provider}' not found in llm.providers")
@@ -333,6 +337,13 @@ def _resolve_llm(settings: Settings, pool_name: str) -> LLMPort:
                 model=model_cfg.model,
                 supports_reasoning_content=provider_cfg.supports_reasoning_content,
                 client=client_cache[cache_key],
+                max_tokens=max_tokens,
+                temperature=model_cfg.temperature,
+                top_p=model_cfg.top_p,
+                presence_penalty=model_cfg.presence_penalty,
+                frequency_penalty=model_cfg.frequency_penalty,
+                reasoning_effort=model_cfg.reasoning_effort,
+                extra_body=model_cfg.extra_body,
             )
         )
 
