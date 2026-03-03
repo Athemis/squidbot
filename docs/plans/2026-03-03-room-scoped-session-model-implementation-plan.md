@@ -12,7 +12,7 @@
 
 ---
 
-### Task 1: Add failing tests for new session semantics
+## Task 1: Add failing tests for new session semantics
 
 **Files:**
 - Modify: `tests/adapters/channels/test_matrix.py`
@@ -33,7 +33,7 @@
 **Step 3: Confirm failures are due to missing behavior**
 - Expect failures about old sender-scoped session assumptions and missing forwarding args.
 
-### Task 2: Implement minimal production changes
+## Task 2: Implement minimal production changes
 
 **Files:**
 - Modify: `squidbot/adapters/channels/matrix.py`
@@ -47,7 +47,7 @@
 
 **Step 2: Agent loop attribution override**
 - Add optional `user_sender_id` to `AgentLoop.run(...)`.
-- Persist using `user_sender_id` fallbacking to `session.sender_id`.
+- Persist using `user_sender_id`, falling back to `session.sender_id`.
 
 **Step 3: Gateway forwarding**
 - In `_channel_loop` and `_channel_loop_with_state`, pass `user_sender_id` from inbound metadata (`matrix_sender_id` when present).
@@ -57,7 +57,7 @@
 - Add optional `current_sender_id` to `MessageTool` constructor.
 - Use this value for owner checks and sender-override comparisons.
 
-### Task 3: Verify GREEN and quality gates
+## Task 3: Verify GREEN and quality gates
 
 **Step 1: Re-run targeted tests**
 - Run: `uv run pytest tests/adapters/channels/test_matrix.py tests/core/test_agent.py tests/cli/test_gateway.py tests/adapters/tools/test_message.py -v`

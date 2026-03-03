@@ -130,6 +130,16 @@ def _owner_matrix_ids(settings: Settings) -> set[str]:
     return owner_ids
 
 
+def _resolve_current_sender_id(session: Any, metadata: dict[str, Any]) -> str:
+    """Resolve sender attribution for persistence and routing policy checks."""
+    if session.channel != "matrix":
+        return session.sender_id
+    sender_from_metadata = metadata.get("matrix_sender_id")
+    if isinstance(sender_from_metadata, str) and sender_from_metadata:
+        return sender_from_metadata
+    return session.sender_id
+
+
 async def _channel_loop_with_state(
     channel: ChannelPort,
     loop: Any,
@@ -181,12 +191,7 @@ async def _channel_loop_with_state(
             )
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
-        sender_from_metadata = inbound.metadata.get("matrix_sender_id")
-        current_sender_id = (
-            sender_from_metadata
-            if isinstance(sender_from_metadata, str) and sender_from_metadata
-            else inbound.session.sender_id
-        )
+        current_sender_id = _resolve_current_sender_id(inbound.session, inbound.metadata)
         extra = [
             memory_write_tool,
             MessageTool(
@@ -256,12 +261,7 @@ async def _channel_loop(
             tracker.update(channel, inbound.session, inbound.metadata)
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
-        sender_from_metadata = inbound.metadata.get("matrix_sender_id")
-        current_sender_id = (
-            sender_from_metadata
-            if isinstance(sender_from_metadata, str) and sender_from_metadata
-            else inbound.session.sender_id
-        )
+        current_sender_id = _resolve_current_sender_id(inbound.session, inbound.metadata)
         extra = [
             memory_write_tool,
             MessageTool(

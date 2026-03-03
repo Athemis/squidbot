@@ -110,6 +110,77 @@ class TestMatrixChannelReceive:
         assert msg.metadata["matrix_sender_id"] == "@alice:example.org"
 
     @pytest.mark.asyncio
+    async def test_text_event_missing_room_id_is_dropped(self) -> None:
+        """Text events without room id are ignored to avoid collapsed matrix: sessions."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(group_policy="open")
+        ch = MatrixChannel(config=config)
+
+        room = MagicMock()
+        room.room_id = ""
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.room_id = ""
+        event.event_id = "$evt-missing-room"
+        event.body = "hello bot"
+        event.source = {"content": {}}
+        event.server_timestamp = int(datetime.now().timestamp() * 1000)
+
+        await ch._handle_text(room, event)
+
+        assert ch._queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_media_event_missing_room_id_is_dropped(self) -> None:
+        """Media enqueue path drops events missing room id."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(group_policy="open")
+        ch = MatrixChannel(config=config)
+
+        room = MagicMock()
+        room.room_id = ""
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.room_id = ""
+        event.event_id = "$media-missing-room"
+        event.source = {"content": {}}
+
+        ch._enqueue_media_message(room, event, "[Anhang: x]", None)
+
+        assert ch._queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_reaction_event_missing_room_id_is_dropped(self) -> None:
+        """Reaction events without room id are ignored to avoid collapsed matrix: sessions."""
+        from squidbot.adapters.channels.matrix import MatrixChannel
+
+        config = _make_config(group_policy="open")
+        ch = MatrixChannel(config=config)
+
+        room = MagicMock()
+        room.room_id = ""
+        event = MagicMock()
+        event.sender = "@alice:example.org"
+        event.room_id = ""
+        event.event_id = "$reaction-missing-room"
+        event.source = {
+            "type": "m.reaction",
+            "content": {
+                "m.relates_to": {
+                    "rel_type": "m.annotation",
+                    "event_id": "$target",
+                    "key": "👍",
+                }
+            },
+        }
+
+        await ch._handle_reaction(room, event)
+
+        assert ch._queue.empty()
+
+    @pytest.mark.asyncio
     async def test_open_policy_skips_own_messages(self, fake_nio: MagicMock) -> None:
         """Own messages (sender == bot user_id) are never yielded."""
         from squidbot.adapters.channels.matrix import MatrixChannel

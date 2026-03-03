@@ -115,6 +115,17 @@ async def test_channel_loop_forwards_user_sender_id_from_metadata(tmp_path: Path
     assert fake_loop.run.await_args.kwargs.get("user_sender_id") == "@alice:example.org"
 
 
+def test_resolve_current_sender_id_ignores_matrix_metadata_for_non_matrix_channel() -> None:
+    """Only Matrix sessions may use matrix_sender_id metadata overrides."""
+    from squidbot.cli.gateway import _resolve_current_sender_id
+    from squidbot.core.models import Session
+
+    session = Session(channel="email", sender_id="owner@example.org")
+    metadata = {"matrix_sender_id": "@alice:example.org"}
+
+    assert _resolve_current_sender_id(session, metadata) == "owner@example.org"
+
+
 async def test_mcp_server_that_raises_is_skipped() -> None:
     """A connection whose connect() raises must be skipped (not propagated) with a warning."""
     from unittest.mock import MagicMock
