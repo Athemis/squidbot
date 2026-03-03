@@ -527,3 +527,21 @@ async def test_slash_new_returns_confirmation_without_llm_call(storage, memory):
     assert len(channel.sent) == 1
     assert "new conversation" in channel.sent[0].text.lower()
     assert list(llm._responses) == ["from llm"]
+
+
+async def test_unknown_slash_command_returns_help_hint_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/wat", channel)
+
+    assert len(channel.sent) == 1
+    assert "unknown command" in channel.sent[0].text.lower()
+    assert "/help" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]

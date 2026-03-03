@@ -9,6 +9,7 @@ exchange persistence with channel/sender metadata.
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -502,3 +503,56 @@ async def test_build_messages_applies_session_reset_boundary(storage: InMemorySt
     contents = [m.content for m in messages[1:-1]]
     assert "[cli / local]\nold current session" not in contents
     assert "other session" in "\n".join(str(c) for c in contents)
+
+
+async def test_build_messages_reset_boundary_handles_legacy_entries(
+    storage: InMemoryStorage,
+) -> None:
+    """Legacy messages without session_id are matched by channel+sender only."""
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
+    manager.reset_session_context(session)
+    reset_at = manager._session_reset_at[session.id]
+
+    storage._history = [
+        Message(
+            role="user",
+            content="legacy other channel",
+            channel="matrix",
+            sender_id="local",
+            timestamp=reset_at,
+        ),
+        Message(
+            role="assistant",
+            content="legacy assistant same channel",
+            channel="cli",
+            sender_id="assistant",
+            timestamp=reset_at,
+        ),
+        Message(
+            role="user",
+            content="legacy matching old",
+            channel="cli",
+            sender_id="local",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+        Message(
+            role="user",
+            content="legacy matching new",
+            channel="cli",
+            sender_id="local",
+            timestamp=reset_at,
+        ),
+    ]
+
+    messages = await manager.build_messages(
+        user_message="new prompt",
+        system_prompt="sys",
+        session=session,
+    )
+
+    rendered = "\n".join(str(m.content) for m in messages[1:-1])
+    assert "legacy other channel" in rendered
+    assert "legacy assistant same channel" in rendered
+    assert "legacy matching old" not in rendered
+    assert "legacy matching new" in rendered
