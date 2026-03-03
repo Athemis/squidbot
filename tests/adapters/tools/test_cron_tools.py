@@ -107,6 +107,40 @@ class TestCronAddTool:
         assert negative_result.is_error
         assert "Invalid schedule" in negative_result.content
 
+    async def test_add_once_rejects_non_boolean(self, tmp_path: Path) -> None:
+        tool = CronAddTool(
+            storage=_storage(tmp_path),
+            default_channel="email:user@example.com",
+            default_metadata={},
+        )
+        result = await tool.execute(name="Test", message="Ping", schedule="0 9 * * *", once="yes")
+        assert result.is_error
+        assert "once" in result.content
+
+    async def test_add_creates_once_job(self, tmp_path: Path) -> None:
+        storage = _storage(tmp_path)
+        tool = CronAddTool(
+            storage=storage,
+            default_channel="email:user@example.com",
+            default_metadata={},
+        )
+        result = await tool.execute(
+            name="One-time", message="Ping", schedule="0 15 15 3 *", once=True
+        )
+        assert not result.is_error
+        jobs = await storage.load_cron_jobs()
+        assert jobs[0].once is True
+
+    async def test_add_rejects_once_with_interval(self, tmp_path: Path) -> None:
+        tool = CronAddTool(
+            storage=_storage(tmp_path),
+            default_channel="email:user@example.com",
+            default_metadata={},
+        )
+        result = await tool.execute(name="Bad", message="Ping", schedule="every 3600", once=True)
+        assert result.is_error
+        assert "once" in result.content.lower()
+
 
 class TestCronListRemoveSetEnabled:
     async def test_list_remove_and_toggle(self, tmp_path: Path) -> None:
