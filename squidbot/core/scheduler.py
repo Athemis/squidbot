@@ -171,14 +171,16 @@ class CronScheduler:
                 kept.append(job)
                 continue
             changed = True
+            fired_ok = False
             try:  # noqa: SIM105 — contextlib.suppress doesn't support async
                 await on_due(job)
+                fired_ok = True
             except Exception:
                 pass
-            if not job.once:
+            if not job.once or not fired_ok:
                 job.last_run = now
                 kept.append(job)
-            # once=True: intentionally not appended → deleted after firing
+            # once=True and fired_ok: intentionally not appended → deleted after firing
         if changed:
             try:
                 await self._storage.save_cron_jobs(kept)

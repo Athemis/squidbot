@@ -135,6 +135,42 @@ async def test_tick_deletes_once_job_after_firing() -> None:
     assert storage.saved == []  # job was deleted
 
 
+async def test_tick_retains_once_job_when_on_due_raises() -> None:
+    from squidbot.core.scheduler import CronScheduler
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved: list[CronJob] = []
+            self.jobs = [
+                CronJob(
+                    id="ccc00003",
+                    name="one-time-fail",
+                    message="ping",
+                    schedule="* * * * *",
+                    channel="cli:local",
+                    once=True,
+                )
+            ]
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(self.jobs)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            self.saved = list(jobs)
+
+    storage = FakeStorage()
+    scheduler = CronScheduler(storage=storage)
+
+    async def always_fails(job: CronJob) -> None:
+        raise RuntimeError("delivery failed")
+
+    await scheduler._tick(always_fails)
+
+    # Job must NOT be deleted when on_due raises — no silent data loss
+    assert len(storage.saved) == 1
+    assert storage.saved[0].id == "ccc00003"
+
+
 async def test_tick_keeps_recurring_job_after_firing() -> None:
     from squidbot.core.scheduler import CronScheduler
 
