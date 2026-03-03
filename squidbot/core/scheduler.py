@@ -15,9 +15,8 @@ from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from loguru import logger
-
 from cronsim import CronSim
+from loguru import logger
 
 from squidbot.core.models import CronJob
 from squidbot.core.ports import MemoryPort

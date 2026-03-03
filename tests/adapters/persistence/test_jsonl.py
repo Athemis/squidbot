@@ -132,6 +132,38 @@ async def test_cron_jobs_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cron_jobs_roundtrip_preserves_once_flag(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    job = CronJob(
+        id="job-2",
+        name="One-time",
+        message="ping",
+        schedule="30 15 3 3 *",
+        channel="cli:local",
+        once=True,
+    )
+    await storage.save_cron_jobs([job])
+    loaded = await storage.load_cron_jobs()
+    assert loaded[0].once is True
+
+
+@pytest.mark.asyncio
+async def test_cron_jobs_roundtrip_once_defaults_false_for_legacy(tmp_path: Path) -> None:
+    """Jobs saved without 'once' key (legacy format) load with once=False."""
+    import json
+
+    storage = JsonlMemory(base_dir=tmp_path)
+    cron_path = tmp_path / "cron" / "jobs.json"
+    cron_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = [
+        {"id": "x", "name": "old", "message": "hi", "schedule": "* * * * *", "channel": "cli:local"}
+    ]
+    cron_path.write_text(json.dumps(legacy), encoding="utf-8")
+    loaded = await storage.load_cron_jobs()
+    assert loaded[0].once is False
+
+
+@pytest.mark.asyncio
 async def test_load_cron_jobs_invalid_json_returns_empty(tmp_path: Path) -> None:
     storage = JsonlMemory(base_dir=tmp_path)
     cron_path = tmp_path / "cron" / "jobs.json"
