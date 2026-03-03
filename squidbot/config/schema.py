@@ -32,6 +32,14 @@ class LLMModelConfig(BaseModel):
     model: str
     max_tokens: int = 8192
     max_context_tokens: int = 100_000
+    # Inference parameters — all optional; provider must support them.
+    # See README § "Model-specific inference parameters" for provider notes.
+    temperature: float | None = None
+    top_p: float | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
+    extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMPoolEntry(BaseModel):
