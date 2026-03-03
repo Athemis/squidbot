@@ -47,6 +47,3 @@ squidbot.yaml
 
 # Sisyphus agent working data
 .sisyphus/
-
-# OpenCode / codenomad runtime artifacts
-.codenomad/

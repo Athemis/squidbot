@@ -3,7 +3,7 @@ Cron scheduler for recurring and one-time tasks.
 
 Parses cron expressions ("0 9 * * *") and interval expressions ("every 3600").
 The scheduler runs as a background asyncio task and triggers the agent loop
-for each due job. One-time jobs are automatically deleted after firing.
+for each due job.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cronsim import CronSim
-from loguru import logger
 
 from squidbot.core.models import CronJob
 from squidbot.core.ports import MemoryPort
@@ -158,34 +157,19 @@ class CronScheduler:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
-        try:
-            jobs = await self._storage.load_cron_jobs()
-        except Exception:
-            logger.exception("Failed to load cron jobs")
-            return
+        jobs = await self._storage.load_cron_jobs()
         now = datetime.now(UTC)
-        kept: list[CronJob] = []
-        changed = False
+        updated = False
         for job in jobs:
-            if not is_due(job, now=now):
-                kept.append(job)
-                continue
-            changed = True
-            fired_ok = False
-            try:  # noqa: SIM105 — contextlib.suppress doesn't support async
-                await on_due(job)
-                fired_ok = True
-            except Exception:
-                pass
-            if not job.once or not fired_ok:
+            if is_due(job, now=now):
                 job.last_run = now
-                kept.append(job)
-            # once=True and fired_ok: intentionally not appended → deleted after firing
-        if changed:
-            try:
-                await self._storage.save_cron_jobs(kept)
-            except Exception:
-                logger.exception("Failed to save cron jobs")
+                updated = True
+                try:  # noqa: SIM105 — contextlib.suppress doesn't support async
+                    await on_due(job)
+                except Exception:
+                    pass
+        if updated:
+            await self._storage.save_cron_jobs(jobs)
 
     def stop(self) -> None:
         self._running = False

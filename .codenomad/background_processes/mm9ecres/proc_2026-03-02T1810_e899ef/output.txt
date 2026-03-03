@@ -1,2 +1,0 @@
-Success: no issues found in 44 source files
-EXIT:0

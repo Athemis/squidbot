@@ -57,13 +57,6 @@ class CronAddTool:
                 "description": "Target session ID for delivery, e.g. 'matrix:@user:matrix.org'.",
             },
             "enabled": {"type": "boolean", "description": "Whether the job is enabled."},
-            "once": {
-                "type": "boolean",
-                "description": (
-                    "If true, the job runs exactly once and is deleted after firing. "
-                    "Requires a cron expression (e.g. '30 15 3 3 *'), not an interval."
-                ),
-            },
         },
         "required": ["name", "message", "schedule"],
     }
@@ -114,12 +107,6 @@ class CronAddTool:
                 tool_call_id="", content="Error: enabled must be a boolean", is_error=True
             )
 
-        once_raw = kwargs.get("once", False)
-        if not isinstance(once_raw, bool):
-            return ToolResult(
-                tool_call_id="", content="Error: once must be a boolean", is_error=True
-            )
-
         metadata, metadata_error = _build_cron_metadata(
             target_channel=target_channel,
             default_metadata=self._default_metadata,
@@ -137,7 +124,6 @@ class CronAddTool:
             enabled=enabled_raw,
             timezone=timezone,
             metadata=metadata,
-            once=once_raw,
         )
         jobs = await self._storage.load_cron_jobs()
         try:

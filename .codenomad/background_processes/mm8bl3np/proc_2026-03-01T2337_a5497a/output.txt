@@ -1,3 +1,0 @@
- squidbot/adapters/channels/matrix.py | 6 ++++++
- 1 file changed, 6 insertions(+)
-EXIT:0
