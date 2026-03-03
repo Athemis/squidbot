@@ -9,7 +9,6 @@ contains no I/O or external service calls.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from squidbot.core.models import Message, Session
@@ -73,7 +72,6 @@ class MemoryManager:
         self._skills_cache: (
             tuple[frozenset[tuple[str, str, bool, bool, str, float]], str] | None
         ) = None
-        self._session_reset_at: dict[str, datetime] = {}
 
     def _is_owner(self, sender_id: str, channel: str) -> bool:
         """
@@ -138,6 +136,9 @@ class MemoryManager:
         user_message: str,
         system_prompt: str,
         session: Session | None = None,
+        *,
+        session_id: str | None = None,
+        load_history: bool = True,
     ) -> list[Message]:
         """
         Construct the full message list for an LLM call.
@@ -148,7 +149,9 @@ class MemoryManager:
         Args:
             user_message: The current user input.
             system_prompt: The base system prompt (AGENTS.md content).
-            session: Optional session used for session-scoped reset filtering.
+            session: Optional physical session for legacy matching fallback.
+            session_id: Optional logical session ID used for history selection.
+            load_history: Whether to inject history into the prompt.
 
         Returns:
             Ordered list of messages ready to send to the LLM.
@@ -158,8 +161,16 @@ class MemoryManager:
             self._storage.load_global_memory(),
         )
 
-        if session is not None:
-            history = self._filter_history_for_session(history, session)
+        if not load_history:
+            history = []
+        else:
+            target_session_id = session_id or (session.id if session is not None else None)
+            if target_session_id is not None:
+                history = self._filter_history_for_session(
+                    history,
+                    target_session_id=target_session_id,
+                    fallback_session=session,
+                )
 
         # Label each history message with channel/sender context
         labelled_history = [self._label_message(msg) for msg in history]
@@ -197,37 +208,39 @@ class MemoryManager:
         ]
         return messages
 
-    def reset_session_context(self, session: Session) -> None:
-        """Start a new context window for the given session.
-
-        Args:
-            session: Session whose prompt-context window should be reset.
-
-        Returns:
-            None.
-        """
-        self._session_reset_at[session.id] = datetime.now()
-
     def _filter_history_for_session(
-        self, history: list[Message], session: Session
+        self,
+        history: list[Message],
+        *,
+        target_session_id: str,
+        fallback_session: Session | None,
     ) -> list[Message]:
-        """Filter history based on the latest reset boundary for a session."""
-        reset_at = self._session_reset_at.get(session.id)
-        if reset_at is None:
-            return history
-
+        """Filter history to rows that belong to the logical session."""
         filtered: list[Message] = []
         for msg in history:
-            # Keep entries that belong to other sessions untouched.
-            if msg.session_id is not None and msg.session_id != session.id:
-                filtered.append(msg)
-                continue
-            if msg.session_id is None and not self._is_legacy_session_match(msg, session):
-                filtered.append(msg)
-                continue
-            if msg.timestamp >= reset_at:
+            if self._history_matches_session(
+                msg,
+                target_session_id=target_session_id,
+                fallback_session=fallback_session,
+            ):
                 filtered.append(msg)
         return filtered
+
+    def _history_matches_session(
+        self,
+        msg: Message,
+        *,
+        target_session_id: str,
+        fallback_session: Session | None,
+    ) -> bool:
+        """Return True when a history row belongs to the logical session."""
+        if msg.session_id is not None:
+            return msg.session_id == target_session_id
+        if fallback_session is None:
+            return False
+        if target_session_id != fallback_session.id:
+            return False
+        return self._is_legacy_session_match(msg, fallback_session)
 
     def _is_legacy_session_match(self, msg: Message, session: Session) -> bool:
         """Best-effort matching for older history entries without session_id."""

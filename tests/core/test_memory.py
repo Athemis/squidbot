@@ -9,7 +9,6 @@ exchange persistence with channel/sender metadata.
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -469,29 +468,22 @@ async def test_always_available_skill_body_injected_into_system_prompt() -> None
     assert "<body>always_skill</body>" in messages[0].content
 
 
-async def test_build_messages_applies_session_reset_boundary(storage: InMemoryStorage) -> None:
-    """After /new, matching-session history before reset is excluded."""
-    manager = MemoryManager(storage=storage)
-    session = Session(channel="cli", sender_id="local")
-    manager.reset_session_context(session)
-    reset_at = manager._session_reset_at[session.id]
-
+async def test_build_messages_filters_to_logical_session_id(storage: InMemoryStorage) -> None:
+    """History injection keeps only rows for the requested logical session ID."""
     storage._history = [
         Message(
             role="user",
-            content="old current session",
+            content="current session",
             channel="cli",
             sender_id="local",
             session_id="cli:local",
-            timestamp=reset_at - timedelta(microseconds=1),
         ),
         Message(
             role="assistant",
-            content="old reply current session",
+            content="current assistant",
             channel="cli",
             sender_id="assistant",
             session_id="cli:local",
-            timestamp=reset_at - timedelta(microseconds=1),
         ),
         Message(
             role="user",
@@ -499,77 +491,96 @@ async def test_build_messages_applies_session_reset_boundary(storage: InMemorySt
             channel="cli",
             sender_id="other",
             session_id="cli:other",
-            timestamp=reset_at - timedelta(microseconds=1),
         ),
     ]
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
 
     messages = await manager.build_messages(
         user_message="new prompt",
         system_prompt="sys",
         session=session,
+        session_id="cli:local",
     )
 
-    contents = [m.content for m in messages[1:-1]]
-    assert "[cli / local]\nold current session" not in contents
-    assert "other session" in "\n".join(str(c) for c in contents)
+    rendered = "\n".join(str(m.content) for m in messages[1:-1])
+    assert "current session" in rendered
+    assert "current assistant" in rendered
+    assert "other session" not in rendered
 
 
-async def test_build_messages_reset_boundary_handles_legacy_entries(
+async def test_build_messages_disables_history_backfill_when_requested(
     storage: InMemoryStorage,
 ) -> None:
-    """Legacy messages without session_id are matched with channel fallback rules."""
+    """When load_history=False, prompt contains no prior history rows."""
+    storage._history = [
+        Message(
+            role="user",
+            content="should not be present",
+            channel="cli",
+            sender_id="local",
+            session_id="cli:local",
+        )
+    ]
     manager = MemoryManager(storage=storage)
     session = Session(channel="cli", sender_id="local")
-    manager.reset_session_context(session)
-    reset_at = manager._session_reset_at[session.id]
 
+    messages = await manager.build_messages(
+        user_message="new prompt",
+        system_prompt="sys",
+        session=session,
+        session_id="cli:local#g1",
+        load_history=False,
+    )
+
+    assert len(messages) == 2
+    assert messages[0].role == "system"
+    assert messages[1].role == "user"
+
+
+async def test_build_messages_legacy_rows_match_only_base_session_id(
+    storage: InMemoryStorage,
+) -> None:
+    """Legacy rows without session_id are not backfilled into generated sessions."""
     storage._history = [
+        Message(
+            role="user",
+            content="legacy current",
+            channel="cli",
+            sender_id="local",
+        ),
+        Message(
+            role="assistant",
+            content="legacy assistant",
+            channel="cli",
+            sender_id="assistant",
+        ),
         Message(
             role="user",
             content="legacy other channel",
             channel="matrix",
             sender_id="local",
-            timestamp=reset_at,
-        ),
-        Message(
-            role="assistant",
-            content="legacy assistant old",
-            channel="cli",
-            sender_id="assistant",
-            timestamp=reset_at - timedelta(microseconds=1),
-        ),
-        Message(
-            role="assistant",
-            content="legacy assistant new",
-            channel="cli",
-            sender_id="assistant",
-            timestamp=reset_at,
-        ),
-        Message(
-            role="user",
-            content="legacy matching old",
-            channel="cli",
-            sender_id="local",
-            timestamp=reset_at - timedelta(microseconds=1),
-        ),
-        Message(
-            role="user",
-            content="legacy matching new",
-            channel="cli",
-            sender_id="local",
-            timestamp=reset_at,
         ),
     ]
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
 
-    messages = await manager.build_messages(
-        user_message="new prompt",
+    base_messages = await manager.build_messages(
+        user_message="base",
         system_prompt="sys",
         session=session,
+        session_id=session.id,
+    )
+    generated_messages = await manager.build_messages(
+        user_message="generated",
+        system_prompt="sys",
+        session=session,
+        session_id=f"{session.id}#g1",
     )
 
-    rendered = "\n".join(str(m.content) for m in messages[1:-1])
-    assert "legacy other channel" in rendered
-    assert "legacy assistant old" not in rendered
-    assert "legacy assistant new" in rendered
-    assert "legacy matching old" not in rendered
-    assert "legacy matching new" in rendered
+    base_rendered = "\n".join(str(m.content) for m in base_messages[1:-1])
+    generated_rendered = "\n".join(str(m.content) for m in generated_messages[1:-1])
+    assert "legacy current" in base_rendered
+    assert "legacy assistant" in base_rendered
+    assert "legacy other channel" not in base_rendered
+    assert generated_rendered == ""

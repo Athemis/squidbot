@@ -36,17 +36,21 @@ and Email without relying on LLM interpretation.
 
 ### Session reset model (`/new`)
 
-- Add in-memory reset boundaries to `MemoryManager`, keyed by `session.id`.
-- `MemoryManager.build_messages(...)` accepts optional `session` and filters history for
-  that session to only include entries at/after the reset boundary.
-- Cross-channel memory for other sessions remains available (existing behavior).
+- `/new` increments a logical session generation in `AgentLoop` (e.g. `cli:local#g1`).
+- The first user turn after `/new` runs with `load_history=False`, so there is no automatic
+  history backfill into the prompt.
+- After that first turn, history loading resumes but is restricted to the current logical
+  session ID only.
+- Older global history remains available through explicit retrieval tools (for example,
+  `search_history`) rather than implicit prompt injection.
 
 ### Session attribution for robust filtering
 
 - Introduce optional `session_id` on `Message`.
 - Persisted user+assistant messages include `session_id` from `AgentLoop`.
-- For legacy history entries without `session_id`, filtering falls back to
-  `(channel, sender_id)` matching for compatibility.
+- For legacy history entries without `session_id`, fallback matching only applies to the
+  base physical session ID (not generated sessions), preventing accidental backfill after
+  `/new`.
 
 ## Data Flow
 
@@ -54,9 +58,11 @@ and Email without relying on LLM interpretation.
 2. `AgentLoop` parses slash command.
 3. If command exists:
    - `/help`: send command list and return.
-   - `/new`: set reset boundary for current session, send confirmation, return.
+   - `/new`: bump logical session generation, mark next turn `load_history=False`,
+     send confirmation, return.
 4. Non-command input follows normal LLM/tool pipeline.
-5. During normal turns, `build_messages(..., session=...)` applies reset filtering.
+5. During normal turns, `build_messages(..., session_id=...)` injects only matching
+   logical-session history.
 
 ## Error Handling
 

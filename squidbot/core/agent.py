@@ -86,6 +86,21 @@ class AgentLoop:
         self._memory = memory
         self._registry = registry
         self._system_prompt = system_prompt
+        self._session_generation: dict[str, int] = {}
+        self._session_backfill_next_turn: dict[str, bool] = {}
+
+    def _effective_session_id(self, session: Session) -> str:
+        """Return the logical session ID used for prompt history and persistence."""
+        generation = self._session_generation.get(session.id, 0)
+        if generation == 0:
+            return session.id
+        return f"{session.id}#g{generation}"
+
+    def _consume_backfill_flag(self, session: Session) -> bool:
+        """Return whether to backfill history for this turn, consuming one-shot overrides."""
+        load_history = self._session_backfill_next_turn.get(session.id, True)
+        self._session_backfill_next_turn[session.id] = True
+        return load_history
 
     def _build_tool_definitions(
         self, extra_tools: Sequence[ToolPort] | None
@@ -287,7 +302,10 @@ class AgentLoop:
             slash_result = handle_slash_command(user_message)
             if slash_result.handled:
                 if slash_result.reset_requested:
-                    self._memory.reset_session_context(session)
+                    next_generation = self._session_generation.get(session.id, 0) + 1
+                    self._session_generation[session.id] = next_generation
+                    # /new starts a fresh logical session without automatic history backfill.
+                    self._session_backfill_next_turn[session.id] = False
                 await channel.send(
                     OutboundMessage(
                         session=session,
@@ -299,11 +317,16 @@ class AgentLoop:
 
         await channel.send_typing(session.id)
 
+        effective_session_id = self._effective_session_id(session)
+        load_history = self._consume_backfill_flag(session)
+
         try:
             messages = await self._memory.build_messages(
                 user_message=text_fallback,
                 system_prompt=self._system_prompt,
                 session=session,
+                session_id=effective_session_id,
+                load_history=load_history,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: build_messages failed, fallback to minimal context: {}", exc)
@@ -396,7 +419,7 @@ class AgentLoop:
                 sender_id=user_sender_id or session.sender_id,
                 user_message=text_fallback,
                 assistant_reply=final_text,
-                session_id=session.id,
+                session_id=effective_session_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: persist_exchange failed for session={}: {}", session.id, exc)
