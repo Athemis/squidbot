@@ -156,14 +156,16 @@ class MemoryManager:
         Returns:
             Ordered list of messages ready to send to the LLM.
         """
-        history, global_memory = await asyncio.gather(
-            self._storage.load_history(last_n=self._history_context_messages),
-            self._storage.load_global_memory(),
-        )
-
-        if not load_history:
-            history = []
+        if load_history:
+            history, global_memory = await asyncio.gather(
+                self._storage.load_history(last_n=self._history_context_messages),
+                self._storage.load_global_memory(),
+            )
         else:
+            history = []
+            global_memory = await self._storage.load_global_memory()
+
+        if load_history:
             target_session_id = session_id or (session.id if session is not None else None)
             if target_session_id is not None:
                 history = self._filter_history_for_session(

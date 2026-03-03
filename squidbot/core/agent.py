@@ -98,9 +98,7 @@ class AgentLoop:
 
     def _consume_backfill_flag(self, session: Session) -> bool:
         """Return whether to backfill history for this turn, consuming one-shot overrides."""
-        load_history = self._session_backfill_next_turn.get(session.id, True)
-        self._session_backfill_next_turn[session.id] = True
-        return load_history
+        return self._session_backfill_next_turn.pop(session.id, True)
 
     def _build_tool_definitions(
         self, extra_tools: Sequence[ToolPort] | None

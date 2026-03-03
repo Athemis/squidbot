@@ -538,6 +538,53 @@ async def test_build_messages_disables_history_backfill_when_requested(
     assert messages[1].role == "user"
 
 
+async def test_build_messages_load_history_false_skips_history_io() -> None:
+    """When load_history=False, load_history() is not called on storage."""
+
+    class TrackingStorage:
+        def __init__(self) -> None:
+            self.history_calls = 0
+
+        async def load_history(self, last_n: int | None = None) -> list[Message]:
+            self.history_calls += 1
+            return [
+                Message(
+                    role="user",
+                    content="should never be loaded",
+                    channel="cli",
+                    sender_id="local",
+                    session_id="cli:local",
+                )
+            ]
+
+        async def load_global_memory(self) -> str:
+            return ""
+
+        async def append_message(self, message: Message) -> None: ...
+
+        async def save_global_memory(self, content: str) -> None: ...
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return []
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None: ...
+
+    storage = TrackingStorage()
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
+
+    messages = await manager.build_messages(
+        user_message="new prompt",
+        system_prompt="sys",
+        session=session,
+        session_id="cli:local#g1",
+        load_history=False,
+    )
+
+    assert storage.history_calls == 0
+    assert len(messages) == 2
+
+
 async def test_build_messages_legacy_rows_match_only_base_session_id(
     storage: InMemoryStorage,
 ) -> None:

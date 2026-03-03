@@ -551,7 +551,7 @@ async def test_unknown_slash_command_returns_help_hint_without_llm_call(storage,
 
 
 async def test_slash_new_starts_fresh_logical_session_without_history_backfill(storage, memory):
-    token = "TKN-9f3a7c21-6b2e-4d7a-8e1f-91d2c4b8a7f3"
+    token = "TEST_TOKEN"
 
     class ProbeLLM:
         def __init__(self) -> None:
@@ -587,3 +587,4 @@ async def test_slash_new_starts_fresh_logical_session_without_history_backfill(s
     second_prompt = "\n".join(str(m.content) for m in llm.calls[1])
     assert token not in second_prompt
     assert channel.sent[-1].text == "I do not know."
+    assert SESSION.id not in loop._session_backfill_next_turn
