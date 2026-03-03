@@ -43,6 +43,7 @@ class Message:
     timestamp: datetime = field(default_factory=datetime.now)
     channel: str | None = None
     sender_id: str | None = None
+    session_id: str | None = None
 
     def to_openai_dict(self, *, include_reasoning_content: bool = False) -> dict[str, Any]:
         """Serialize to OpenAI API message format.

@@ -16,7 +16,7 @@ import pytest
 
 from squidbot.config.schema import OwnerAliasEntry
 from squidbot.core.memory import MemoryManager
-from squidbot.core.models import Message
+from squidbot.core.models import Message, Session
 
 if TYPE_CHECKING:
     from squidbot.core.models import CronJob
@@ -254,6 +254,7 @@ async def test_persist_exchange_appends_user_then_assistant_with_metadata(
         sender_id="@alex:matrix.org",
         user_message="hey",
         assistant_reply="hi",
+        session_id="matrix:@alex:matrix.org",
     )
 
     assert len(storage._history) == 2
@@ -301,6 +302,7 @@ async def test_persist_exchange_uses_batch_when_available() -> None:
         sender_id="user",
         user_message="hello",
         assistant_reply="world",
+        session_id="cli:user",
     )
 
     assert len(append_messages_calls) == 1, "append_messages should be called once"
@@ -460,3 +462,43 @@ async def test_always_available_skill_body_injected_into_system_prompt() -> None
     messages = await manager.build_messages("hi", "sys")
     assert messages[0].role == "system"
     assert "<body>always_skill</body>" in messages[0].content
+
+
+async def test_build_messages_applies_session_reset_boundary(storage: InMemoryStorage) -> None:
+    """After /new, matching-session history before reset is excluded."""
+    storage._history = [
+        Message(
+            role="user",
+            content="old current session",
+            channel="cli",
+            sender_id="local",
+            session_id="cli:local",
+        ),
+        Message(
+            role="assistant",
+            content="old reply current session",
+            channel="cli",
+            sender_id="assistant",
+            session_id="cli:local",
+        ),
+        Message(
+            role="user",
+            content="other session",
+            channel="cli",
+            sender_id="other",
+            session_id="cli:other",
+        ),
+    ]
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
+    manager.reset_session_context(session)
+
+    messages = await manager.build_messages(
+        user_message="new prompt",
+        system_prompt="sys",
+        session=session,
+    )
+
+    contents = [m.content for m in messages[1:-1]]
+    assert "[cli / local]\nold current session" not in contents
+    assert "other session" in "\n".join(str(c) for c in contents)

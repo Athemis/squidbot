@@ -25,6 +25,7 @@ from squidbot.core.models import (
 )
 from squidbot.core.ports import ChannelPort, LLMPort, ToolPort
 from squidbot.core.registry import ToolRegistry
+from squidbot.core.slash_commands import handle_slash_command
 
 # Maximum number of tool-call rounds per user message.
 # Prevents infinite loops in case of buggy tool chains.
@@ -282,12 +283,27 @@ class AgentLoop:
         else:
             text_fallback = user_message
 
+        if isinstance(user_message, str):
+            slash_result = handle_slash_command(user_message)
+            if slash_result.handled:
+                if slash_result.reset_requested:
+                    self._memory.reset_session_context(session)
+                await channel.send(
+                    OutboundMessage(
+                        session=session,
+                        text=slash_result.response_text,
+                        metadata=outbound_metadata or {},
+                    )
+                )
+                return
+
         await channel.send_typing(session.id)
 
         try:
             messages = await self._memory.build_messages(
                 user_message=text_fallback,
                 system_prompt=self._system_prompt,
+                session=session,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: build_messages failed, fallback to minimal context: {}", exc)
@@ -380,6 +396,7 @@ class AgentLoop:
                 sender_id=user_sender_id or session.sender_id,
                 user_message=text_fallback,
                 assistant_reply=final_text,
+                session_id=session.id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: persist_exchange failed for session={}: {}", session.id, exc)
