@@ -196,7 +196,9 @@ parameters are passed through to the provider for that model only.
 | `extra_body` | mapping | Provider-specific request fields merged into the JSON request body. |
 | `max_tokens` | integer | Per-request output cap for that model entry. |
 
-#### Kimi K2.5 (thinking vs instant)
+Provider support for these fields is model/API specific; unsupported fields may be rejected at runtime.
+
+#### Kimi K2 (`moonshotai/kimi-k2-0905`, thinking vs instant)
 
 Use separate entries so pools can select either a deeper "thinking" mode or a faster
 "instant" mode:
@@ -246,6 +248,11 @@ Do not configure `temperature` or `top_p` for these models.
 
 ```yaml
 llm:
+  providers:
+    openai:
+      api_base: "https://api.openai.com/v1"
+      api_key: "sk-..."
+
   models:
     o4-mini-fast:
       provider: openai
