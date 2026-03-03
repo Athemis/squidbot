@@ -1,0 +1,1 @@
+5af089f fix: support inline-open block math ($$content\n...\n...content$$)

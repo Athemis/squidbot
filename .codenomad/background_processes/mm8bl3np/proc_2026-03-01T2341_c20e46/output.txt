@@ -1,0 +1,61 @@
+@dataclass
+class BadEvent:
+    """An event that failed event schema and type validation.
+
+    This type of event will be created if the event has a valid core structure
+    but failed validation for the given event type.
+
+    The event can still be inspected with the source attribute.
+
+    Attributes:
+        source (dict): The source dictionary of the event. This allows access
+            to all the event fields in a non-secure way.
+        event_id (str): A globally unique event identifier.
+        sender (str): The fully-qualified ID of the user who sent this
+            event.
+        server_timestamp (int): Timestamp in milliseconds on originating
+            homeserver when this event was sent.
+        type (str): The claimed type of the event.
+        decrypted (bool): A flag signaling if the event was decrypted.
+        verified (bool): A flag signaling if the event is verified, is True if
+            the event was sent from a verified device.
+        sender_key (str, optional): The public key of the sender that was used
+            to establish the encrypted session. Is only set if decrypted is
+            True, otherwise None.
+        session_id (str, optional): The unique identifier of the session that
+            was used to decrypt the message. Is only set if decrypted is True,
+            otherwise None.
+        transaction_id (str, optional): The unique identifier that was used
+            when the message was sent. Is only set if the message was sent from
+            our own device, otherwise None.
+
+    """
+
+    source: Dict[str, Any] = field()
+    event_id: str = field()
+    sender: str = field()
+    server_timestamp: int = field()
+    type: str = field()
+
+    decrypted: bool = field(default=False, init=False)
+    verified: bool = field(default=False, init=False)
+    sender_key: Optional[str] = field(default=None, init=False)
+    session_id: Optional[str] = field(default=None, init=False)
+    transaction_id: Optional[str] = field(default=None, init=False)
+
+    def __str__(self):
+        return f"Bad event of type {self.type}, from {self.sender}."
+
+    @classmethod
+    def from_dict(cls, parsed_dict: Dict[Any, Any]) -> BadEvent:
+        timestamp = parsed_dict["origin_server_ts"]
+
+        timestamp = max(0, timestamp)
+        return cls(
+            parsed_dict,
+            parsed_dict["event_id"],
+            parsed_dict["sender"],
+            timestamp,
+            parsed_dict["type"],
+        )
+

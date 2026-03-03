@@ -99,7 +99,6 @@ def test_is_due_for_fixed_offset_timezone():
 
 
 async def test_tick_deletes_once_job_after_firing() -> None:
-    from squidbot.core.models import CronJob
     from squidbot.core.scheduler import CronScheduler
 
     fired: list[CronJob] = []
@@ -137,7 +136,6 @@ async def test_tick_deletes_once_job_after_firing() -> None:
 
 
 async def test_tick_keeps_recurring_job_after_firing() -> None:
-    from squidbot.core.models import CronJob
     from squidbot.core.scheduler import CronScheduler
 
     class FakeStorage:

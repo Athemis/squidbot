@@ -3,7 +3,7 @@ Cron scheduler for recurring and one-time tasks.
 
 Parses cron expressions ("0 9 * * *") and interval expressions ("every 3600").
 The scheduler runs as a background asyncio task and triggers the agent loop
-for each due job.
+for each due job. One-time jobs are automatically deleted after firing.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from loguru import logger
 
 from cronsim import CronSim
 
@@ -157,7 +159,11 @@ class CronScheduler:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
-        jobs = await self._storage.load_cron_jobs()
+        try:
+            jobs = await self._storage.load_cron_jobs()
+        except Exception:
+            logger.exception("Failed to load cron jobs")
+            return
         now = datetime.now(UTC)
         kept: list[CronJob] = []
         changed = False
@@ -175,7 +181,10 @@ class CronScheduler:
                 kept.append(job)
             # once=True: intentionally not appended → deleted after firing
         if changed:
-            await self._storage.save_cron_jobs(kept)
+            try:
+                await self._storage.save_cron_jobs(kept)
+            except Exception:
+                logger.exception("Failed to save cron jobs")
 
     def stop(self) -> None:
         self._running = False

@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: `CronJob` Modell erweitern
+## Task 1: `CronJob` Modell erweitern
 
 **Files:**
 - Modify: `squidbot/core/models.py:138` (nach `last_run`)
@@ -59,7 +59,7 @@ git commit -m "feat: add once field to CronJob model"
 
 ---
 
-### Task 2: Validierung in `cron_ops.validate_job()`
+## Task 2: Validierung in `cron_ops.validate_job()`
 
 **Files:**
 - Modify: `squidbot/core/cron_ops.py:22-35`
@@ -105,7 +105,7 @@ git commit -m "feat: reject once=True with interval schedules in validate_job"
 
 ---
 
-### Task 3: `format_jobs()` — `[once]` Anzeige
+## Task 3: `format_jobs()` — `[once]` Anzeige
 
 **Files:**
 - Modify: `squidbot/core/cron_ops.py:89-102`
@@ -151,7 +151,7 @@ git commit -m "feat: show [once] label in format_jobs for one-time cron jobs"
 
 ---
 
-### Task 4: `set_enabled()` — `once` propagieren
+## Task 4: `set_enabled()` — `once` propagieren
 
 **Files:**
 - Modify: `squidbot/core/cron_ops.py:64-86`
@@ -184,7 +184,7 @@ git commit -m "fix: preserve once flag in set_enabled"
 
 ---
 
-### Task 5: `CronScheduler._tick()` — Job nach Auslösung löschen
+## Task 5: `CronScheduler._tick()` — Job nach Auslösung löschen
 
 **Files:**
 - Modify: `squidbot/core/scheduler.py:159-172`
@@ -315,7 +315,7 @@ git commit -m "feat: delete once-jobs after firing in CronScheduler._tick"
 
 ---
 
-### Task 6: `CronAddTool` — `once` Parameter hinzufügen
+## Task 6: `CronAddTool` — `once` Parameter hinzufügen
 
 **Files:**
 - Modify: `squidbot/adapters/tools/cron.py:27-129`
@@ -424,7 +424,7 @@ git commit -m "feat: add once parameter to CronAddTool"
 
 ---
 
-### Task 7: Abschluss-Check
+## Task 7: Abschluss-Check
 
 ```bash
 uv run pytest

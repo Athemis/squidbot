@@ -1,0 +1,132 @@
+diff --git a/squidbot/core/memory.py b/squidbot/core/memory.py
+index f377641..5af27e4 100644
+--- a/squidbot/core/memory.py
++++ b/squidbot/core/memory.py
+@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
+ 
+ from squidbot.core.models import Message
+ from squidbot.core.ports import MemoryPort, SkillsPort
++from squidbot.core.skills import build_skills_xml
+ 
+ if TYPE_CHECKING:
+     from squidbot.config.schema import OwnerAliasEntry
+@@ -65,6 +66,11 @@ class MemoryManager:
+             raise ValueError("history_context_messages must be > 0")
+         self._history_context_messages = history_context_messages
+ 
++        # Cache for the assembled skills block.
++        # Key: frozenset of (name, location_str, available, always) tuples.
++        # Value: the assembled XML + always-skill bodies string.
++        self._skills_cache: tuple[frozenset[tuple[str, str, bool, bool]], str] | None = None
++
+     def _is_owner(self, sender_id: str, channel: str) -> bool:
+         """
+         Return True if sender_id matches an owner alias for the given channel.
+@@ -148,21 +154,28 @@ class MemoryManager:
+         # Label each history message with channel/sender context
+         labelled_history = [self._label_message(msg) for msg in history]
+ 
+-        # Build system prompt with global memory appended
+-        full_system = system_prompt
++        # Assemble the system prompt using a list to avoid repeated string concatenation
++        system_parts: list[str] = [system_prompt]
+         if global_memory.strip():
+-            full_system += f"\n\n## Your Memory\n\n{global_memory}"
++            system_parts.append(f"## Your Memory\n\n{global_memory}")
+ 
+-        # Inject skills: XML index + full bodies of always-skills
++        # Inject skills: XML index + full bodies of always-skills (cached by fingerprint)
+         if self._skills is not None:
+-            from squidbot.core.skills import build_skills_xml  # noqa: PLC0415
+-
+             skill_list = self._skills.list_skills()
+-            full_system += f"\n\n{build_skills_xml(skill_list)}"
+-            for skill in skill_list:
+-                if skill.always and skill.available:
+-                    body = self._skills.load_skill_body(skill.name)
+-                    full_system += f"\n\n{body}"
++            fingerprint = frozenset(
++                (s.name, str(s.location), s.available, s.always) for s in skill_list
++            )
++
++            if self._skills_cache is None or self._skills_cache[0] != fingerprint:
++                parts: list[str] = [build_skills_xml(skill_list)]
++                for skill in skill_list:
++                    if skill.always and skill.available:
++                        parts.append(self._skills.load_skill_body(skill.name))
++                self._skills_cache = (fingerprint, "\n\n".join(parts))
++
++            system_parts.append(self._skills_cache[1])
++
++        full_system = "\n\n".join(system_parts)
+ 
+         messages: list[Message] = [
+             Message(role="system", content=full_system),
+diff --git a/tests/core/test_memory.py b/tests/core/test_memory.py
+index b0bd3bf..bd87579 100644
+--- a/tests/core/test_memory.py
++++ b/tests/core/test_memory.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ 
+ import asyncio
+ import time
++from pathlib import Path
+ from typing import TYPE_CHECKING, Any
+ 
+ import pytest
+@@ -316,3 +317,55 @@ async def test_build_messages_loads_history_and_memory_in_parallel() -> None:
+         f"load_history and load_global_memory started {delta * 1000:.1f}ms apart — "
+         "they are running sequentially, not in parallel"
+     )
++
++
++async def test_skills_xml_cached_between_calls() -> None:
++    """build_skills_xml is called only once when the skill list is unchanged."""
++    from unittest.mock import patch
++    from squidbot.core.skills import SkillMetadata
++
++    skill = SkillMetadata(
++        name="test_skill",
++        description="desc",
++        location=Path("/f.md"),
++        always=False,
++        available=True,
++    )
++
++    class FakeSkills:
++        def list_skills(self) -> list[SkillMetadata]:
++            return [skill]
++
++        def load_skill_body(self, name: str) -> str:
++            return "body"
++
++    class MinimalStorage:
++        async def load_history(self, last_n: int | None = None) -> list[Message]:
++            return []
++
++        async def load_global_memory(self) -> str:
++            return ""
++
++        async def append_message(self, m: Message) -> None: ...
++        async def save_global_memory(self, c: str) -> None: ...
++        async def load_cron_jobs(self) -> list:
++            return []  # type: ignore[return-value]
++
++        async def save_cron_jobs(self, j: list) -> None: ...
++
++    manager = MemoryManager(
++        storage=MinimalStorage(),  # type: ignore[arg-type]
++        skills=FakeSkills(),  # type: ignore[arg-type]
++    )
++
++    build_calls: list[int] = []
++
++    def counting_build(skills):  # type: ignore[no-untyped-def]
++        build_calls.append(1)
++        return "<skills/>"
++
++    with patch("squidbot.core.memory.build_skills_xml", side_effect=counting_build):
++        await manager.build_messages("hi", "sys")
++        await manager.build_messages("hi again", "sys")
++
++    assert len(build_calls) == 1, f"build_skills_xml called {len(build_calls)} times"

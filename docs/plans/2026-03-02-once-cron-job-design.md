@@ -55,7 +55,7 @@ Current behaviour: for every due job, set `last_run = now`, then save.
 
 New behaviour:
 
-```
+```text
 for each due job:
     invoke on_due(job)
     if job.once:
@@ -75,7 +75,7 @@ error message.
 
 `format_jobs()`: append `[once]` to the name line for one-time jobs:
 
-```
+```text
   [on] abc12345  Termin-Erinnerung  [once]
        schedule: 30 15 3 3 *  timezone: Europe/Berlin  channel: matrix:@user:…
        message:  Nicht vergessen: Zahnarzt
@@ -98,7 +98,7 @@ Pass `once` through to `CronJob` construction.
 
 ## Data Flow
 
-```
+```text
 Agent calls cron_add(schedule="30 15 3 3 *", once=True, timezone="Europe/Berlin")
   → CronAddTool.execute() validates, builds CronJob(once=True)
   → saved to jobs.json

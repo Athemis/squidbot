@@ -1,0 +1,27 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- /home/opencode/projects/squidbot/.codenomad/worktrees/perf-performance-optimization/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/opencode/projects/squidbot/.codenomad/worktrees/perf-performance-optimization
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, cov-7.0.0, anyio-4.12.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 16 items
+
+tests/adapters/persistence/test_jsonl.py::test_global_history_empty_on_new_storage PASSED [  6%]
+tests/adapters/persistence/test_jsonl.py::test_append_and_load_history PASSED [ 12%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_returns_last_n PASSED [ 18%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_skips_malformed_jsonl_line PASSED [ 25%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_tolerates_invalid_utf8_bytes PASSED [ 31%]
+tests/adapters/persistence/test_jsonl.py::test_summary_and_cursor_api_removed PASSED [ 37%]
+tests/adapters/persistence/test_jsonl.py::test_message_channel_sender_roundtrip PASSED [ 43%]
+tests/adapters/persistence/test_jsonl.py::test_message_reasoning_content_roundtrip PASSED [ 50%]
+tests/adapters/persistence/test_jsonl.py::test_global_memory_roundtrip PASSED [ 56%]
+tests/adapters/persistence/test_jsonl.py::test_cron_jobs_roundtrip PASSED [ 62%]
+tests/adapters/persistence/test_jsonl.py::test_load_cron_jobs_invalid_json_returns_empty PASSED [ 68%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_last_n_zero PASSED [ 75%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_last_n_reads_bounded_tail PASSED [ 81%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_last_n_skips_malformed_trailing_lines PASSED [ 87%]
+tests/adapters/persistence/test_jsonl.py::test_no_mkdir_after_init PASSED [ 93%]
+tests/adapters/persistence/test_jsonl.py::test_load_history_uses_cache_after_first_load PASSED [100%]
+
+============================== 16 passed in 1.18s ==============================

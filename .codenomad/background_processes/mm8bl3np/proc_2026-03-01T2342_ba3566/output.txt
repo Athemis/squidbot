@@ -1,0 +1,18 @@
+@dataclass
+class Event:
+    """Matrix Event class.
+
+    This is the base event class, most events inherit from this class.
+
+    Attributes:
+        source (dict): The source dictionary of the event. This allows access
+            to all the event fields in a non-secure way.
+        event_id (str): A globally unique event identifier.
+        sender (str): The fully-qualified ID of the user who sent this
+            event.
+        server_timestamp (int): Timestamp in milliseconds on originating
+            homeserver when this event was sent.
+        decrypted (bool): A flag signaling if the event was decrypted.
+        verified (bool): A flag signaling if the event is verified, is True if
+            the event was sent from a verified device.
+        sender_key (str, optional): The public k
