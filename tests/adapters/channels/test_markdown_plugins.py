@@ -521,6 +521,28 @@ class TestMatrixMathPlugin:
         assert "data-mx-maths" not in result
         assert "language-python" in result
 
+    def test_block_math_fenced_long_fence(self) -> None:
+        """Four-backtick fence ````math renders as div (fence length >= 3)."""
+        src = "````math\nE = mc^2\n````"
+        result = _matrix_md(src)
+        assert '<div data-mx-maths="E = mc^2">' in result
+
+    def test_block_math_fenced_mismatched_types_no_match(self) -> None:
+        """Mixed fence types (```math closed by ~~~) do not render as math."""
+        src = "```math\nE = mc^2\n~~~"
+        result = _matrix_md(src)
+        assert "data-mx-maths" not in result
+
+    def test_inline_math_no_trailing_whitespace(self) -> None:
+        """$expr $ with trailing space before closing $ is not treated as math."""
+        result = _matrix_md("Result: $x $")
+        assert "data-mx-maths" not in result
+
+    def test_inline_math_no_leading_whitespace(self) -> None:
+        """$ expr$ with leading space after opening $ is not treated as math."""
+        result = _matrix_md("Result: $ x$")
+        assert "data-mx-maths" not in result
+
 
 class TestMatrixSpoilerPlugin:
     """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""

@@ -56,13 +56,13 @@ _BLOCK_MATH_PATTERN = (
 )
 # Fenced block math: ```math or ~~~math code fence.
 # Registered before mistune's fenced_code rule so we intercept first.
-# Both backtick and tilde fences are accepted on open and close independently;
-# mismatched types (e.g. ```math closed by ~~~) also match — intentional
-# simplification, as mixed fences are unreachable in normal usage.
+# The named group `fence` captures the opening delimiter (3+ backticks or tildes);
+# (?P=fence) enforces that the closing fence uses the same character and length,
+# matching GFM spec §4.5 (closing fence must be same type, length >= opening).
 _BLOCK_MATH_FENCE_PATTERN = (
-    r"^ {0,3}(?:```|~~~)[ \t]*math[ \t]*\n"
+    r"^ {0,3}(?P<fence>`{3,}|~{3,})[ \t]*math[ \t]*\n"
     r"(?P<math_text_f>[\s\S]+?)"
-    r"\n {0,3}(?:```|~~~)[ \t]*$"
+    r"\n {0,3}(?P=fence)[ \t]*$"
 )
 # Inline math — two supported forms:
 #
@@ -73,7 +73,7 @@ _BLOCK_MATH_FENCE_PATTERN = (
 # form when input starts with $`.  Content must not contain backticks.
 _INLINE_MATH_PATTERN = (
     r"\$`(?P<math_text_bt>[^`]+)`\$"
-    r"|\$(?!\s)(?P<math_text>.+?)(?!\s)\$"
+    r"|\$(?!\s)(?P<math_text>.+?)(?<!\s)\$"
 )
 
 

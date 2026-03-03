@@ -426,7 +426,7 @@ git commit -m "feat: add fenced block math syntax (\`\`\`math)"
 
 Find the module docstring at the top of `matrix_markdown.py`.  Replace the `plugin_mx_math` bullet with:
 
-```
+```text
 - plugin_mx_math: mistune plugin that converts LaTeX math syntax to the Matrix
   spec v1.11+ data-mx-maths format.  Supported syntaxes:
     · $...$          standard inline math
