@@ -45,6 +45,28 @@ def test_resolve_llm_forwards_top_p() -> None:
     assert openai_adapter.call_args.kwargs["top_p"] == 0.7
 
 
+def test_resolve_llm_forwards_presence_penalty() -> None:
+    settings = _make_settings(
+        LLMModelConfig(provider="openrouter", model="gpt-test", presence_penalty=1.1)
+    )
+
+    with patch("squidbot.adapters.llm.openai.OpenAIAdapter") as openai_adapter:
+        _resolve_llm(settings, "default")
+
+    assert openai_adapter.call_args.kwargs["presence_penalty"] == 1.1
+
+
+def test_resolve_llm_forwards_frequency_penalty() -> None:
+    settings = _make_settings(
+        LLMModelConfig(provider="openrouter", model="gpt-test", frequency_penalty=0.9)
+    )
+
+    with patch("squidbot.adapters.llm.openai.OpenAIAdapter") as openai_adapter:
+        _resolve_llm(settings, "default")
+
+    assert openai_adapter.call_args.kwargs["frequency_penalty"] == 0.9
+
+
 def test_resolve_llm_forwards_reasoning_effort() -> None:
     settings = _make_settings(
         LLMModelConfig(provider="openrouter", model="gpt-test", reasoning_effort="high")
@@ -89,5 +111,7 @@ def test_resolve_llm_forwards_inference_defaults() -> None:
     assert call_kwargs["max_tokens"] == 8192
     assert call_kwargs["temperature"] is None
     assert call_kwargs["top_p"] is None
+    assert call_kwargs["presence_penalty"] is None
+    assert call_kwargs["frequency_penalty"] is None
     assert call_kwargs["reasoning_effort"] is None
     assert call_kwargs["extra_body"] == {}
