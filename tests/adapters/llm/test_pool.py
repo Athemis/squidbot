@@ -175,6 +175,13 @@ def test_resolve_llm_shares_client_for_same_provider() -> None:
     class FakeModel:
         provider = "main"
         model = "test-model"
+        max_tokens = 8192
+        temperature = None
+        top_p = None
+        presence_penalty = None
+        frequency_penalty = None
+        reasoning_effort = None
+        extra_body: dict[str, object] = {}
 
     class FakeLLM:
         default_pool = "default"
