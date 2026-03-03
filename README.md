@@ -10,10 +10,11 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Multi-model LLM pools** — named pools with ordered fallback; define providers, models, and pools independently
 - **Skills system** — on-demand skill loading, agent-created skills, hot-reload without restart
 - **Tools** — shell commands, file read/write/edit, web search, memory write, MCP servers, sub-agents (spawn)
+- **Slash commands** — cross-channel `/help` and `/new`, handled in core without an LLM roundtrip
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
 - **Long-term memory** — manual-only: global `MEMORY.md` (agent-curated, cross-channel) plus global `history.jsonl`; use `search_history` for explicit recall of older details
-- **Hexagonal architecture** — ports & adapters, `mypy --strict`, 382 tests
+- **Hexagonal architecture** — ports & adapters, `mypy --strict`, comprehensive test suite
 
 ## Installation
 
@@ -287,6 +288,11 @@ squidbot cron remove <id>     Remove a cron job
 squidbot skills list          List all discovered skills and their availability
 ```
 
+Interactive slash commands (available across CLI, Matrix, and Email):
+
+- `/help` — list available slash commands
+- `/new` — start a new conversation context for the current session
+
 ## Architecture
 
 Hexagonal (Ports & Adapters). The core domain has zero knowledge of external services.
@@ -338,6 +344,8 @@ Manual-only persistence, global across all channels:
 - **Global history** (`~/.squidbot/history.jsonl`) — append-only history across all channels,
   with entries labelled by channel/sender. Recent messages are included in prompt context,
   and older details are recalled explicitly with the `search_history` tool.
+- **Session context reset** (`/new`) — starts a new prompt-context window for the current
+  session while keeping global history append-only.
 
 **Persistence layout:**
 

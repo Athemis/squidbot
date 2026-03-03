@@ -9,9 +9,10 @@ contains no I/O or external service calls.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from squidbot.core.models import Message
+from squidbot.core.models import Message, Session
 from squidbot.core.ports import MemoryPort, SkillsPort
 from squidbot.core.skills import build_skills_xml
 
@@ -72,6 +73,7 @@ class MemoryManager:
         self._skills_cache: (
             tuple[frozenset[tuple[str, str, bool, bool, str, float]], str] | None
         ) = None
+        self._session_reset_at: dict[str, datetime] = {}
 
     def _is_owner(self, sender_id: str, channel: str) -> bool:
         """
@@ -128,12 +130,14 @@ class MemoryManager:
             timestamp=msg.timestamp,
             channel=msg.channel,
             sender_id=msg.sender_id,
+            session_id=msg.session_id,
         )
 
     async def build_messages(
         self,
         user_message: str,
         system_prompt: str,
+        session: Session | None = None,
     ) -> list[Message]:
         """
         Construct the full message list for an LLM call.
@@ -144,6 +148,7 @@ class MemoryManager:
         Args:
             user_message: The current user input.
             system_prompt: The base system prompt (AGENTS.md content).
+            session: Optional session used for session-scoped reset filtering.
 
         Returns:
             Ordered list of messages ready to send to the LLM.
@@ -152,6 +157,9 @@ class MemoryManager:
             self._storage.load_history(last_n=self._history_context_messages),
             self._storage.load_global_memory(),
         )
+
+        if session is not None:
+            history = self._filter_history_for_session(history, session)
 
         # Label each history message with channel/sender context
         labelled_history = [self._label_message(msg) for msg in history]
@@ -189,12 +197,53 @@ class MemoryManager:
         ]
         return messages
 
+    def reset_session_context(self, session: Session) -> None:
+        """Start a new context window for the given session.
+
+        Args:
+            session: Session whose prompt-context window should be reset.
+
+        Returns:
+            None.
+        """
+        self._session_reset_at[session.id] = datetime.now()
+
+    def _filter_history_for_session(
+        self, history: list[Message], session: Session
+    ) -> list[Message]:
+        """Filter history based on the latest reset boundary for a session."""
+        reset_at = self._session_reset_at.get(session.id)
+        if reset_at is None:
+            return history
+
+        filtered: list[Message] = []
+        for msg in history:
+            # Keep entries that belong to other sessions untouched.
+            if msg.session_id is not None and msg.session_id != session.id:
+                filtered.append(msg)
+                continue
+            if msg.session_id is None and not self._is_legacy_session_match(msg, session):
+                filtered.append(msg)
+                continue
+            if msg.timestamp >= reset_at:
+                filtered.append(msg)
+        return filtered
+
+    def _is_legacy_session_match(self, msg: Message, session: Session) -> bool:
+        """Best-effort matching for older history entries without session_id."""
+        if msg.channel != session.channel:
+            return False
+        if msg.role == "assistant":
+            return True
+        return msg.sender_id == session.sender_id
+
     async def persist_exchange(
         self,
         channel: str,
         sender_id: str,
         user_message: str,
         assistant_reply: str,
+        session_id: str,
     ) -> None:
         """
         Save a completed user–assistant exchange to global history.
@@ -212,10 +261,21 @@ class MemoryManager:
             sender_id: The sender identifier for the user message.
             user_message: The user's input text.
             assistant_reply: The final text response from the assistant.
+            session_id: Session identifier for both persisted messages.
         """
-        user_msg = Message(role="user", content=user_message, channel=channel, sender_id=sender_id)
+        user_msg = Message(
+            role="user",
+            content=user_message,
+            channel=channel,
+            sender_id=sender_id,
+            session_id=session_id,
+        )
         assistant_msg = Message(
-            role="assistant", content=assistant_reply, channel=channel, sender_id="assistant"
+            role="assistant",
+            content=assistant_reply,
+            channel=channel,
+            sender_id="assistant",
+            session_id=session_id,
         )
         if hasattr(self._storage, "append_messages"):
             await self._storage.append_messages([user_msg, assistant_msg])

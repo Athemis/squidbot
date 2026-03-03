@@ -9,6 +9,7 @@ exchange persistence with channel/sender metadata.
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +17,7 @@ import pytest
 
 from squidbot.config.schema import OwnerAliasEntry
 from squidbot.core.memory import MemoryManager
-from squidbot.core.models import Message
+from squidbot.core.models import Message, Session
 
 if TYPE_CHECKING:
     from squidbot.core.models import CronJob
@@ -254,6 +255,7 @@ async def test_persist_exchange_appends_user_then_assistant_with_metadata(
         sender_id="@alex:matrix.org",
         user_message="hey",
         assistant_reply="hi",
+        session_id="matrix:@alex:matrix.org",
     )
 
     assert len(storage._history) == 2
@@ -264,11 +266,13 @@ async def test_persist_exchange_appends_user_then_assistant_with_metadata(
     assert user_msg.content == "hey"
     assert user_msg.channel == "matrix"
     assert user_msg.sender_id == "@alex:matrix.org"
+    assert user_msg.session_id == "matrix:@alex:matrix.org"
 
     assert assistant_msg.role == "assistant"
     assert assistant_msg.content == "hi"
     assert assistant_msg.channel == "matrix"
     assert assistant_msg.sender_id == "assistant"
+    assert assistant_msg.session_id == "matrix:@alex:matrix.org"
 
 
 async def test_persist_exchange_uses_batch_when_available() -> None:
@@ -301,6 +305,7 @@ async def test_persist_exchange_uses_batch_when_available() -> None:
         sender_id="user",
         user_message="hello",
         assistant_reply="world",
+        session_id="cli:user",
     )
 
     assert len(append_messages_calls) == 1, "append_messages should be called once"
@@ -311,8 +316,10 @@ async def test_persist_exchange_uses_batch_when_available() -> None:
     assert len(batch) == 2
     assert batch[0].role == "user"
     assert batch[0].content == "hello"
+    assert batch[0].session_id == "cli:user"
     assert batch[1].role == "assistant"
     assert batch[1].content == "world"
+    assert batch[1].session_id == "cli:user"
 
 
 def test_init_rejects_zero_history_context_messages(storage: InMemoryStorage) -> None:
@@ -460,3 +467,109 @@ async def test_always_available_skill_body_injected_into_system_prompt() -> None
     messages = await manager.build_messages("hi", "sys")
     assert messages[0].role == "system"
     assert "<body>always_skill</body>" in messages[0].content
+
+
+async def test_build_messages_applies_session_reset_boundary(storage: InMemoryStorage) -> None:
+    """After /new, matching-session history before reset is excluded."""
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
+    manager.reset_session_context(session)
+    reset_at = manager._session_reset_at[session.id]
+
+    storage._history = [
+        Message(
+            role="user",
+            content="old current session",
+            channel="cli",
+            sender_id="local",
+            session_id="cli:local",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+        Message(
+            role="assistant",
+            content="old reply current session",
+            channel="cli",
+            sender_id="assistant",
+            session_id="cli:local",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+        Message(
+            role="user",
+            content="other session",
+            channel="cli",
+            sender_id="other",
+            session_id="cli:other",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+    ]
+
+    messages = await manager.build_messages(
+        user_message="new prompt",
+        system_prompt="sys",
+        session=session,
+    )
+
+    contents = [m.content for m in messages[1:-1]]
+    assert "[cli / local]\nold current session" not in contents
+    assert "other session" in "\n".join(str(c) for c in contents)
+
+
+async def test_build_messages_reset_boundary_handles_legacy_entries(
+    storage: InMemoryStorage,
+) -> None:
+    """Legacy messages without session_id are matched with channel fallback rules."""
+    manager = MemoryManager(storage=storage)
+    session = Session(channel="cli", sender_id="local")
+    manager.reset_session_context(session)
+    reset_at = manager._session_reset_at[session.id]
+
+    storage._history = [
+        Message(
+            role="user",
+            content="legacy other channel",
+            channel="matrix",
+            sender_id="local",
+            timestamp=reset_at,
+        ),
+        Message(
+            role="assistant",
+            content="legacy assistant old",
+            channel="cli",
+            sender_id="assistant",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+        Message(
+            role="assistant",
+            content="legacy assistant new",
+            channel="cli",
+            sender_id="assistant",
+            timestamp=reset_at,
+        ),
+        Message(
+            role="user",
+            content="legacy matching old",
+            channel="cli",
+            sender_id="local",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+        Message(
+            role="user",
+            content="legacy matching new",
+            channel="cli",
+            sender_id="local",
+            timestamp=reset_at,
+        ),
+    ]
+
+    messages = await manager.build_messages(
+        user_message="new prompt",
+        system_prompt="sys",
+        session=session,
+    )
+
+    rendered = "\n".join(str(m.content) for m in messages[1:-1])
+    assert "legacy other channel" in rendered
+    assert "legacy assistant old" not in rendered
+    assert "legacy assistant new" in rendered
+    assert "legacy matching old" not in rendered
+    assert "legacy matching new" in rendered

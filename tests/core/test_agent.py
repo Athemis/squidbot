@@ -109,7 +109,12 @@ class EchoTool:
 
 
 class BuildMessagesFailingMemory(MemoryManager):
-    async def build_messages(self, user_message: str, system_prompt: str) -> list[Message]:
+    async def build_messages(
+        self,
+        user_message: str,
+        system_prompt: str,
+        session: Session | None = None,
+    ) -> list[Message]:
         raise RuntimeError("build failed")
 
 
@@ -120,6 +125,7 @@ class PersistExchangeFailingMemory(MemoryManager):
         sender_id: str,
         user_message: str,
         assistant_reply: str,
+        session_id: str,
     ) -> None:
         raise RuntimeError("persist failed")
 
@@ -486,3 +492,56 @@ async def test_raising_serial_tool_produces_error_message(storage, memory):
     loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
     await loop.run(SESSION, "try raising", channel)
     assert any("handled" in m.text for m in channel.sent)
+
+
+async def test_slash_help_returns_command_list_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/help", channel)
+
+    assert len(channel.sent) == 1
+    assert "/new" in channel.sent[0].text
+    assert "/help" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_new_returns_confirmation_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/new", channel)
+
+    assert len(channel.sent) == 1
+    assert "new conversation" in channel.sent[0].text.lower()
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_unknown_slash_command_returns_help_hint_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/wat", channel)
+
+    assert len(channel.sent) == 1
+    assert "unknown command" in channel.sent[0].text.lower()
+    assert "/help" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]

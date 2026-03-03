@@ -63,6 +63,8 @@ def _serialize_message(message: Message) -> str:
         d["channel"] = message.channel
     if message.sender_id is not None:
         d["sender_id"] = message.sender_id
+    if message.session_id is not None:
+        d["session_id"] = message.session_id
     return json.dumps(d, ensure_ascii=False)
 
 
@@ -91,6 +93,7 @@ def deserialize_message(line: str) -> Message:
         timestamp=datetime.fromisoformat(d["timestamp"]),
         channel=d.get("channel"),
         sender_id=d.get("sender_id"),
+        session_id=d.get("session_id"),
     )
 
 

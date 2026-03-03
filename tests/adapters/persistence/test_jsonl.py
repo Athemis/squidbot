@@ -108,6 +108,21 @@ async def test_message_reasoning_content_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_session_id_roundtrip(tmp_path: Path) -> None:
+    storage = JsonlMemory(base_dir=tmp_path)
+    msg = Message(
+        role="user",
+        content="hello",
+        channel="cli",
+        sender_id="local",
+        session_id="cli:local",
+    )
+    await storage.append_message(msg)
+    loaded = await storage.load_history()
+    assert loaded[0].session_id == "cli:local"
+
+
+@pytest.mark.asyncio
 async def test_global_memory_roundtrip(tmp_path: Path) -> None:
     storage = JsonlMemory(base_dir=tmp_path)
     await storage.save_global_memory("facts")
@@ -392,6 +407,7 @@ async def test_persist_exchange_opens_file_once(tmp_path: Path) -> None:
             sender_id="user",
             user_message="hello",
             assistant_reply="world",
+            session_id="cli:user",
         )
 
     assert open_count == 1, f"history.jsonl was opened {open_count} times"
