@@ -10,23 +10,6 @@ syntax. These tests serve as unit-level verification of the markdown rendering p
 from __future__ import annotations
 
 
-def _matrix_md(src: str) -> str:
-    """Render Markdown through the Matrix plugin stack.
-
-    Convenience wrapper that applies plugin_mx_math and sanitize_for_matrix,
-    matching what _render_markdown does in the Matrix channel adapter.
-
-    Args:
-        src: Markdown source text.
-
-    Returns:
-        Sanitized HTML string suitable for Matrix formatted_body.
-    """
-    from squidbot.adapters.channels.matrix import _render_markdown
-
-    return _render_markdown(src)
-
-
 class TestTablePlugin:
     """Test table plugin renders Markdown tables to HTML.
 
@@ -372,184 +355,6 @@ Math: x^n^, H~2~O.
         assert isinstance(result, str)
 
 
-class TestMatrixMathPlugin:
-    """Test Matrix-specific math plugin renders to data-mx-maths attributes.
-
-    Tests verify that block ($$...$$) and inline ($...$) math syntax is
-    converted to the Matrix spec v1.11+ format: data-mx-maths attribute
-    with a <code> fallback for non-LaTeX clients.
-    """
-
-    def test_block_math_renders_div_with_data_mx_maths(self) -> None:
-        """Block math $$...$$ renders to <div data-mx-maths="...">."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown("$$\nE=mc^2\n$$")
-        assert '<div data-mx-maths="E=mc^2">' in result
-        assert "<code>E=mc^2</code>" in result
-
-    def test_inline_math_renders_span_with_data_mx_maths(self) -> None:
-        """Inline math $...$ renders to <span data-mx-maths="...">."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown("The formula $E=mc^2$ is famous.")
-        assert '<span data-mx-maths="E=mc^2">' in result
-        assert "<code>E=mc^2</code>" in result
-
-    def test_block_math_quotes_escaped_in_attribute(self) -> None:
-        """LaTeX containing double quotes is safely escaped in the attribute."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown('$$\n\\text{"hello"}\n$$')
-        attr_part = result.split('data-mx-maths="')[1].split('"')[0]
-        assert '"' not in attr_part
-
-    def test_block_math_multiline(self) -> None:
-        """Multi-line block math content is preserved."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown("$$\na^2 + b^2 = c^2\n$$")
-        assert "data-mx-maths=" in result
-        assert "a^2" in result
-
-    def test_block_math_single_line_renders_div(self) -> None:
-        """Single-line $$...$$ renders to <div data-mx-maths>, not <span>."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown("$$a^2 + b^2 = c^2$$")
-        assert '<div data-mx-maths="a^2 + b^2 = c^2">' in result
-        assert (
-            "<span" not in result or "data-mx-maths" not in result.split("<span")[1].split(">")[0]
-        )
-
-    def test_block_math_single_line_no_stray_dollar(self) -> None:
-        """Single-line $$...$$ leaves no stray $ in output."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown("$$E=mc^2$$")
-        assert "$" not in result
-
-    def test_math_does_not_appear_in_email(self) -> None:
-        """Email _md does NOT render data-mx-maths (Matrix-only plugin)."""
-        from squidbot.adapters.channels.email import _md
-
-        result = _md("$$\nE=mc^2\n$$")
-        assert "data-mx-maths" not in result
-
-    def test_math_coexists_with_other_plugins(self) -> None:
-        """Math plugin works alongside strikethrough and table plugins."""
-        from squidbot.adapters.channels.matrix import _render_markdown
-
-        result = _render_markdown("~~old~~ value: $x^2$\n\n$$\n\\alpha\n$$")
-        assert "<del>old</del>" in result
-        assert "data-mx-maths" in result
-
-    def test_block_math_inline_open_align(self) -> None:
-        """$$\\begin{align}...\\end{align}$$ renders as div, not raw $$."""
-        src = "$$\\begin{align}\nf(x) &= x + 1\n\\end{align}$$"
-        result = _matrix_md(src)
-        assert '<div data-mx-maths="' in result
-        assert "$$" not in result
-
-    def test_block_math_inline_open_bmatrix(self) -> None:
-        """$$\\begin{bmatrix}...\\end{bmatrix}$$ renders as div."""
-        src = "$$\\begin{bmatrix}\n1 & 2 \\\\\n3 & 4\n\\end{bmatrix}$$"
-        result = _matrix_md(src)
-        assert '<div data-mx-maths="' in result
-        assert "$$" not in result
-
-    def test_block_math_inline_open_cases(self) -> None:
-        """$$\\begin{cases}...\\end{cases}$$ renders as div."""
-        src = "$$\\begin{cases}\nx & x \\geq 0 \\\\\n-x & x < 0\n\\end{cases}$$"
-        result = _matrix_md(src)
-        assert '<div data-mx-maths="' in result
-        assert "$$" not in result
-
-    def test_block_math_inline_open_content_preserved(self) -> None:
-        """Content between inline-open $$ is preserved verbatim in attribute."""
-        src = "$$\\begin{align}\nf(x) &= x + 1\n\\end{align}$$"
-        result = _matrix_md(src)
-        assert "\\begin{align}" in result
-        assert "\\end{align}" in result
-
-    def test_inline_math_backtick_form(self) -> None:
-        r"""$`expr`$ renders as span with data-mx-maths."""
-        result = _matrix_md(r"Energy: $`E = mc^2`$")
-        assert '<span data-mx-maths="E = mc^2">' in result
-
-    def test_inline_math_backtick_pipe_expression(self) -> None:
-        r"""$`a | b`$ works for expressions containing pipe characters."""
-        result = _matrix_md(r"$`a | b`$")
-        assert '<span data-mx-maths="a | b">' in result
-
-    def test_inline_math_backtick_does_not_affect_plain_code(self) -> None:
-        """`code` remains a code span; no math interpretation."""
-        result = _matrix_md("`code`")
-        assert "<code>code</code>" in result
-        assert "data-mx-maths" not in result
-
-    def test_inline_math_backtick_no_stray_backticks(self) -> None:
-        r"""$`expr`$ leaves no stray backticks in output."""
-        result = _matrix_md(r"$`x^2`$")
-        # The backtick delimiters must not appear in rendered output
-        assert "$`" not in result
-        assert "`$" not in result
-
-    def test_block_math_fenced_backtick(self) -> None:
-        """```math fence renders as div with data-mx-maths."""
-        src = "```math\nE = mc^2\n```"
-        result = _matrix_md(src)
-        assert '<div data-mx-maths="E = mc^2">' in result
-
-    def test_block_math_fenced_multiline(self) -> None:
-        """Multi-line ```math fence preserves all content lines."""
-        src = "```math\n\\frac{a}{b}\n= c\n```"
-        result = _matrix_md(src)
-        assert "\\frac{a}{b}" in result
-        assert '<div data-mx-maths="' in result
-
-    def test_block_math_fenced_tilde(self) -> None:
-        """~~~math tilde fence also renders as div with data-mx-maths."""
-        src = "~~~math\nE = mc^2\n~~~"
-        result = _matrix_md(src)
-        assert '<div data-mx-maths="E = mc^2">' in result
-
-    def test_block_math_fenced_no_interference_with_code(self) -> None:
-        """```python fence is unaffected — renders as code block, not math."""
-        src = "```python\nprint('hello')\n```"
-        result = _matrix_md(src)
-        assert "data-mx-maths" not in result
-        assert "language-python" in result
-
-    def test_block_math_fenced_long_fence(self) -> None:
-        """Four-backtick fence ````math renders as div (fence length >= 3)."""
-        src = "````math\nE = mc^2\n````"
-        result = _matrix_md(src)
-        assert '<div data-mx-maths="E = mc^2">' in result
-
-    def test_block_math_fenced_mismatched_types_no_match(self) -> None:
-        """Mixed fence types (```math closed by ~~~) do not render as math."""
-        src = "```math\nE = mc^2\n~~~"
-        result = _matrix_md(src)
-        assert "data-mx-maths" not in result
-
-    def test_inline_math_no_trailing_whitespace(self) -> None:
-        """$expr $ with trailing space before closing $ is not treated as math."""
-        result = _matrix_md("Result: $x $")
-        assert "data-mx-maths" not in result
-
-    def test_inline_math_no_leading_whitespace(self) -> None:
-        """$ expr$ with leading space after opening $ is not treated as math."""
-        result = _matrix_md("Result: $ x$")
-        assert "data-mx-maths" not in result
-
-    def test_inline_math_does_not_capture_double_dollar_delimiters(self) -> None:
-        """Literal $$...$$ text in a sentence is not partially parsed as inline math."""
-        result = _matrix_md("Delimiters: $$...$$")
-        assert "data-mx-maths" not in result
-        assert "$$...$$" in result
-
-
 class TestMatrixSpoilerPlugin:
     """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""
 
@@ -577,13 +382,14 @@ class TestMatrixSpoilerPlugin:
         result = _md("||spoiler||")
         assert "data-mx-spoiler" not in result
 
-    def test_spoiler_coexists_with_math_plugin(self) -> None:
-        """Spoiler and math plugins work together."""
+    def test_spoiler_coexists_with_other_markdown(self) -> None:
+        """Spoiler and standard markdown plugins work together."""
         from squidbot.adapters.channels.matrix import _render_markdown
 
-        result = _render_markdown("||secret: $E=mc^2$||")
+        result = _render_markdown("||secret: **bold**|| and ~~old~~")
         assert "data-mx-spoiler" in result
-        assert "data-mx-maths" in result
+        assert "<strong>bold</strong>" in result
+        assert "<del>old</del>" in result
 
     def test_block_spoiler_single_line_renders_span(self) -> None:
         """>! single line renders to <span data-mx-spoiler>.
@@ -700,12 +506,12 @@ class TestSanitizeForMatrix:
         assert "data-mx-spoiler" in result
         assert "hidden" in result
 
-    def test_span_data_mx_maths_passes(self) -> None:
-        """<span data-mx-maths> produced by plugin passes nh3 unchanged."""
+    def test_span_data_mx_maths_is_stripped(self) -> None:
+        """data-mx-maths is not permitted once Matrix math plugin is removed."""
         from squidbot.adapters.channels.matrix_markdown import sanitize_for_matrix
 
         result = sanitize_for_matrix('<span data-mx-maths="x^2"><code>x^2</code></span>')
-        assert 'data-mx-maths="x^2"' in result
+        assert "data-mx-maths" not in result
 
     def test_code_class_language_passes(self) -> None:
         """code[class=language-python] is permitted."""

@@ -1,23 +1,12 @@
-"""Matrix-specific mistune plugins and HTML sanitizer for squidbot.
+"""Matrix-specific spoiler plugins and HTML sanitizer for squidbot.
 
-Provides:
-- plugin_mx_math: mistune plugin that converts LaTeX math syntax to the Matrix
-  spec v1.11+ data-mx-maths format.  Supported syntaxes:
-    · $...$          standard inline math
-    · $`...`$        GFM backtick inline math
-    · $$...$$        block math (delimiter on own line, single-line, or inline-open)
-    · ```math        GFM fenced block math (backtick or tilde fence)
-- plugin_mx_spoiler: mistune plugin that converts ||text|| to Matrix
-  data-mx-spoiler format.
-- plugin_mx_block_spoiler: mistune plugin that converts >!-prefixed lines to
-  Matrix data-mx-spoiler format as a block-level element.
-- sanitize_for_matrix: nh3-based HTML sanitizer enforcing the Matrix spec
-  v1.17 permitted HTML allowlist.
+Provides spoiler parsing for inline ``||...||`` and block ``>!...`` syntaxes,
+then sanitizes rendered HTML to the Matrix v1.17 allowlist via nh3. This module
+is used by the Matrix channel adapter when building ``formatted_body`` payloads.
 """
 
 from __future__ import annotations
 
-import html
 from typing import TYPE_CHECKING, Any
 
 import nh3
@@ -28,111 +17,7 @@ if TYPE_CHECKING:
     from mistune.core import BaseRenderer, BlockState, InlineState
     from mistune.inline_parser import InlineParser
 
-__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sanitize_for_matrix"]
-
-# ---------------------------------------------------------------------------
-# Math plugin
-# ---------------------------------------------------------------------------
-
-# Block math — three supported forms:
-#
-#  Form A: $$ on its own line, content on next lines, $$ on its own line
-#    $$
-#    content
-#    $$
-#
-#  Form B: everything on one line  $$content$$
-#
-#  Form C: $$ opens with content on same line, closes at end of last line
-#    $$\begin{align}
-#    ...
-#    \end{align}$$
-#
-# Python regex requires distinct named groups across alternatives.
-_BLOCK_MATH_PATTERN = (
-    r"^ {0,3}\$\$[ \t]*\n(?P<math_text>[\s\S]+?)\n\$\$[ \t]*$"
-    r"|^ {0,3}\$\$[ \t]*(?P<math_text_s>[^\n$][^\n]*?)[ \t]*\$\$[ \t]*$"
-    r"|^ {0,3}\$\$(?P<math_text_m>[^\n$][^\n]*\n[\s\S]+?)\$\$[ \t]*$"
-)
-# Fenced block math: ```math or ~~~math code fence.
-# Registered before mistune's fenced_code rule so we intercept first.
-# The named group `fence` captures the opening delimiter (3+ backticks or tildes);
-# (?P=fence) is a back-reference that enforces the closing fence uses the exact same
-# character and length as the opening fence. This is stricter than GFM spec §4.5,
-# which only requires the closing fence to be the same type and at least as long as
-# the opening; mismatched lengths are rare enough in practice that this is acceptable.
-_BLOCK_MATH_FENCE_PATTERN = (
-    r"^ {0,3}(?P<fence>`{3,}|~{3,})[ \t]*math[ \t]*\n"
-    r"(?P<math_text_f>[\s\S]+?)"
-    r"\n {0,3}(?P=fence)[ \t]*$"
-)
-# Inline math — two supported forms:
-#
-#  Backtick form (GFM):  $`expr`$   — preferred when expr contains | or _
-#  Standard dollar form: $expr$
-#
-# Backtick form is listed first so the alternation prefers it over the dollar
-# form when input starts with $`.  Content must not contain backticks.
-_INLINE_MATH_PATTERN = (
-    r"\$`(?P<math_text_bt>[^`]+)`\$"
-    r"|(?<!\$)\$(?![\s$])(?P<math_text>.+?)(?<![\s$])\$(?!\$)"
-)
-
-
-def plugin_mx_math(md: Markdown) -> None:
-    """Mistune plugin that renders math to Matrix data-mx-maths format.
-
-    Block math ($$...$$) becomes <div data-mx-maths="...">.
-    Inline math ($...$) becomes <span data-mx-maths="...">.
-    The LaTeX source is HTML-escaped in the attribute; <code> provides a
-    plain-text fallback for clients that cannot render LaTeX.
-
-    Per Matrix Spec v1.11 (MSC2191): clients that support math read the
-    data-mx-maths attribute; clients without LaTeX support show the child.
-
-    Args:
-        md: The Markdown instance to extend.
-    """
-
-    def _parse_block_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        math_text: str = (
-            m.group("math_text") or m.group("math_text_s") or m.group("math_text_m") or ""
-        )
-        state.append_token({"type": "mx_block_math", "raw": math_text})
-        return int(m.end()) + 1
-
-    def _parse_fenced_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        math_text: str = m.group("math_text_f") or ""
-        # Emit mx_block_math tokens so the existing renderer is reused.
-        state.append_token({"type": "mx_block_math", "raw": math_text})
-        return int(m.end()) + 1
-
-    def _parse_inline_math(inline: InlineParser, m: Any, state: InlineState) -> int:
-        math_text: str = m.group("math_text_bt") or m.group("math_text") or ""
-        state.append_token({"type": "mx_inline_math", "raw": math_text})
-        return int(m.end())
-
-    def _render_block_math(renderer: BaseRenderer, text: str) -> str:
-        attr = html.escape(text, quote=True)
-        body = html.escape(text, quote=False)
-        return f'<div data-mx-maths="{attr}"><code>{body}</code></div>\n'
-
-    def _render_inline_math(renderer: BaseRenderer, text: str) -> str:
-        attr = html.escape(text, quote=True)
-        body = html.escape(text, quote=False)
-        return f'<span data-mx-maths="{attr}"><code>{body}</code></span>'
-
-    md.block.register("mx_block_math", _BLOCK_MATH_PATTERN, _parse_block_math, before="list")
-    md.block.register(
-        "mx_fenced_math", _BLOCK_MATH_FENCE_PATTERN, _parse_fenced_math, before="fenced_code"
-    )
-    # before="codespan" so $`...`$ is matched before mistune consumes the backtick as a code span
-    md.inline.register(
-        "mx_inline_math", _INLINE_MATH_PATTERN, _parse_inline_math, before="codespan"
-    )
-    if md.renderer and md.renderer.NAME == "html":
-        md.renderer.register("mx_block_math", _render_block_math)
-        md.renderer.register("mx_inline_math", _render_inline_math)
+__all__ = ["plugin_mx_spoiler", "plugin_mx_block_spoiler", "sanitize_for_matrix"]
 
 
 # ---------------------------------------------------------------------------
@@ -264,12 +149,11 @@ _MATRIX_TAGS: set[str] = {
 # Attributes permitted per tag (Matrix spec v1.17).
 # Tags not listed here permit no attributes.
 _MATRIX_ATTRIBUTES: dict[str, set[str]] = {
-    "span": {"data-mx-bg-color", "data-mx-color", "data-mx-spoiler", "data-mx-maths"},
+    "span": {"data-mx-bg-color", "data-mx-color", "data-mx-spoiler"},
     "a": {"href", "target"},
     "img": {"width", "height", "alt", "title", "src"},
     "ol": {"start"},
     "code": {"class"},
-    "div": {"data-mx-maths"},
 }
 
 # "mxc" is included so nh3 does not reject mxc:// URIs before attribute_filter

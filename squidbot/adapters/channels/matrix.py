@@ -29,7 +29,6 @@ from loguru import logger
 
 from squidbot.adapters.channels.matrix_markdown import (
     plugin_mx_block_spoiler,
-    plugin_mx_math,
     plugin_mx_spoiler,
     sanitize_for_matrix,
 )
@@ -71,7 +70,7 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
 
 _md = mistune.create_markdown(
     escape=False,
-    plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler, plugin_mx_block_spoiler],
+    plugins=[*MARKDOWN_PLUGINS, plugin_mx_spoiler, plugin_mx_block_spoiler],
 )
 
 
@@ -97,10 +96,9 @@ def _is_media_shaped_bad_event(event: nio.BadEvent) -> bool:
 def _render_markdown(text: str) -> str:
     """Render Markdown to HTML for Matrix formatted_body.
 
-    Passes raw HTML through mistune (escape=False), applies plugin_mx_math
-    for LaTeX → data-mx-maths and plugin_mx_spoiler for ||...|| →
-    data-mx-spoiler, then sanitizes the result with the Matrix spec v1.17
-    nh3 allowlist.
+    Passes raw HTML through mistune (escape=False), applies spoiler plugins
+    for ||...|| and >!... spoiler forms, then sanitizes the result with the
+    Matrix spec v1.17 nh3 allowlist.
     """
     rendered = cast(str, _md(text)).strip()
     return sanitize_for_matrix(rendered)
