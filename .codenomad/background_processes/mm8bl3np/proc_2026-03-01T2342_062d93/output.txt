@@ -1,8 +1,0 @@
-type: RoomEncryptedFile
-has file attr: False
-has url attr: True
-url: mxc://example.com/abc
-key: {'k': 'base64key', 'kty': 'oct', 'alg': 'A256CTR', 'key_ops': ['encrypt', 'decrypt'], 'ext': True}
-hashes: {'sha256': 'base64hash'}
-iv: base64iv
-source content file: {'url': 'mxc://example.com/abc', 'key': {'k': 'base64key', 'kty': 'oct', 'alg': 'A256CTR', 'key_ops': ['encrypt', 'decrypt'], 'ext': True}, 'iv': 'base64iv', 'hashes': {'sha256': 'base64hash'}, 'v': 'v2'}

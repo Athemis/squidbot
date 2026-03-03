@@ -1,1 +1,0 @@
-./tests/adapters/channels/test_markdown_plugins.py

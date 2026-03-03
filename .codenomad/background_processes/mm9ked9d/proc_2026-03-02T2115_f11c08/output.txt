@@ -1,7 +1,0 @@
-Empty >!: '<span data-mx-spoiler=""></span>'
->!nospace: '<span data-mx-spoiler="">&gt;!nospace</span>'
-Multiline: '<span data-mx-spoiler="">first\nsecond</span>'
-Spoiler then normal: '<span data-mx-spoiler="">spoiler</span>\n<p>normal text</p>'
-Blockquote: '<blockquote>\n<p>normal quote</p>\n</blockquote>'
-Inline MD: '<span data-mx-spoiler=""><strong>bold</strong> and <em>italic</em></span>'
->! tab: '<span data-mx-spoiler="">hidden</span>'

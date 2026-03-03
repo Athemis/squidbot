@@ -1,9 +1,0 @@
-1e88577 fix(matrix): avoid false mention-policy drops for media events
-ffd0eb9 fix(matrix): remove triple callback registration and extract shared media queue logic
-c824404 fix(matrix): register RoomEncryptedMedia callback and BadEvent fallback
-74deeba fix(matrix): fix diagnostic log policy_result and strengthen test assertions
-cc31c99 feat(matrix): add inbound media parser diagnostics
-70a02ee test(matrix): fix test quality issues from code review
-565c8c8 test(matrix): add failing encrypted media intake coverage
-d7e6cd1 docs(matrix): overhaul plans based on nio source + nanobot-redux reference
-1d69a72 docs(matrix): resolve gap-analysis findings in encrypted media intake plans
