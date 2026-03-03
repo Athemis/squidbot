@@ -141,8 +141,9 @@ class CronScheduler:
     via the provided callback, and updates last_run.
     """
 
-    def __init__(self, storage: MemoryPort) -> None:
+    def __init__(self, storage: MemoryPort, mutation_lock: asyncio.Lock | None = None) -> None:
         self._storage = storage
+        self._mutation_lock = mutation_lock
         self._running = False
 
     async def run(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
@@ -159,33 +160,61 @@ class CronScheduler:
 
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
         try:
-            jobs = await self._storage.load_cron_jobs()
+            if self._mutation_lock is None:
+                due_jobs = await self._tick_storage_phase()
+            else:
+                async with self._mutation_lock:
+                    due_jobs = await self._tick_storage_phase()
         except Exception:
-            logger.exception("Failed to load cron jobs")
+            logger.exception("Failed to prepare cron jobs")
             return
-        now = datetime.now(UTC)
-        kept: list[CronJob] = []
-        changed = False
-        for job in jobs:
-            if not is_due(job, now=now):
-                kept.append(job)
-                continue
-            changed = True
+
+        fired_once_job_ids: set[str] = set()
+        for job in due_jobs:
             fired_ok = False
             try:  # noqa: SIM105 — contextlib.suppress doesn't support async
                 await on_due(job)
                 fired_ok = True
             except Exception:
                 pass
-            if not job.once or not fired_ok:
-                job.last_run = now
-                kept.append(job)
-            # once=True and fired_ok: intentionally not appended → deleted after firing
+            if job.once and fired_ok:
+                fired_once_job_ids.add(job.id)
+
+        if not fired_once_job_ids:
+            return
+
+        try:
+            if self._mutation_lock is None:
+                await self._delete_jobs_by_id(fired_once_job_ids)
+            else:
+                async with self._mutation_lock:
+                    await self._delete_jobs_by_id(fired_once_job_ids)
+        except Exception:
+            logger.exception("Failed to save cron jobs")
+
+    async def _tick_storage_phase(self) -> list[CronJob]:
+        jobs = await self._storage.load_cron_jobs()
+        now = datetime.now(UTC)
+        due_jobs: list[CronJob] = []
+        changed = False
+        for job in jobs:
+            if not is_due(job, now=now):
+                continue
+            changed = True
+            job.last_run = now
+            due_jobs.append(job)
+
         if changed:
-            try:
-                await self._storage.save_cron_jobs(kept)
-            except Exception:
-                logger.exception("Failed to save cron jobs")
+            await self._storage.save_cron_jobs(jobs)
+
+        return due_jobs
+
+    async def _delete_jobs_by_id(self, job_ids: set[str]) -> None:
+        jobs = await self._storage.load_cron_jobs()
+        kept_jobs = [job for job in jobs if job.id not in job_ids]
+        if len(kept_jobs) == len(jobs):
+            return
+        await self._storage.save_cron_jobs(kept_jobs)
 
     def stop(self) -> None:
         self._running = False

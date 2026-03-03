@@ -149,6 +149,7 @@ async def _channel_loop_with_state(
     owner_aliases: list[OwnerAliasEntry] | None = None,
     workspace: Path | None = None,
     restrict_to_workspace: bool = False,
+    cron_mutation_lock: asyncio.Lock | None = None,
     tracker: LastChannelTracker | None = None,
 ) -> None:
     """
@@ -208,6 +209,7 @@ async def _channel_loop_with_state(
                 storage=storage,
                 default_channel=inbound.session.id,
                 default_metadata=inbound.metadata,
+                mutation_lock=cron_mutation_lock,
             ),
         ]
         has_multimodal = inbound.multimodal_content is not None
@@ -235,6 +237,7 @@ async def _channel_loop(
     owner_aliases: list[OwnerAliasEntry] | None = None,
     workspace: Path | None = None,
     restrict_to_workspace: bool = False,
+    cron_mutation_lock: asyncio.Lock | None = None,
     tracker: LastChannelTracker | None = None,
 ) -> None:
     """
@@ -278,6 +281,7 @@ async def _channel_loop(
                 storage=storage,
                 default_channel=inbound.session.id,
                 default_metadata=inbound.metadata,
+                mutation_lock=cron_mutation_lock,
             ),
         ]
         has_multimodal = inbound.multimodal_content is not None
@@ -416,6 +420,7 @@ def _load_bootstrap_prompt(workspace: Path, filenames: list[str]) -> str:
 async def _make_agent_loop(
     settings: Settings,
     storage_dir: Path | None = None,
+    cron_mutation_lock: asyncio.Lock | None = None,
 ) -> tuple[AgentLoop, list[McpConnectionProtocol], JsonlMemory]:
     """
     Construct the agent loop from configuration.
@@ -485,7 +490,7 @@ async def _make_agent_loop(
 
     from squidbot.adapters.tools.cron import build_global_cron_tools  # noqa: PLC0415
 
-    for cron_tool in build_global_cron_tools(storage=storage):
+    for cron_tool in build_global_cron_tools(storage=storage, mutation_lock=cron_mutation_lock):
         registry.register(cron_tool)
 
     if settings.tools.search_history.enabled:
@@ -655,7 +660,11 @@ async def _run_gateway(config_path: Path) -> None:
     else:
         logger.info("heartbeat: disabled")
 
-    agent_loop, mcp_connections, storage = await _make_agent_loop(settings)
+    cron_mutation_lock = asyncio.Lock()
+    agent_loop, mcp_connections, storage = await _make_agent_loop(
+        settings,
+        cron_mutation_lock=cron_mutation_lock,
+    )
     cron_jobs = await storage.load_cron_jobs()
     logger.info("cron: {} jobs loaded", len(cron_jobs))
     workspace = Path(settings.agents.workspace).expanduser()
@@ -695,7 +704,7 @@ async def _run_gateway(config_path: Path) -> None:
             outbound_metadata=job.metadata,
         )
 
-    scheduler = CronScheduler(storage=storage)
+    scheduler = CronScheduler(storage=storage, mutation_lock=cron_mutation_lock)
     hb_pool = settings.agents.heartbeat.pool or settings.llm.default_pool
     hb_llm = _resolve_llm(settings, hb_pool) if hb_pool != settings.llm.default_pool else None
     from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
@@ -738,6 +747,7 @@ async def _run_gateway(config_path: Path) -> None:
                         owner_aliases=list(settings.owner.aliases),
                         workspace=workspace,
                         restrict_to_workspace=restrict_to_workspace,
+                        cron_mutation_lock=cron_mutation_lock,
                         tracker=tracker,
                     )
                 )
@@ -765,6 +775,7 @@ async def _run_gateway(config_path: Path) -> None:
                         owner_aliases=list(settings.owner.aliases),
                         workspace=workspace,
                         restrict_to_workspace=restrict_to_workspace,
+                        cron_mutation_lock=cron_mutation_lock,
                         tracker=tracker,
                     )
                 )
