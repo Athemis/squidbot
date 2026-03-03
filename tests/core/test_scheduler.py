@@ -96,3 +96,165 @@ def test_is_due_for_fixed_offset_timezone():
 
     assert not is_due(job, now=datetime(2026, 2, 21, 7, 59, tzinfo=UTC))
     assert is_due(job, now=datetime(2026, 2, 21, 8, 0, tzinfo=UTC))
+
+
+async def test_tick_returns_early_when_load_raises() -> None:
+    from squidbot.core.scheduler import CronScheduler
+
+    class BrokenStorage:
+        async def load_cron_jobs(self) -> list[object]:
+            raise OSError("disk error")
+
+        async def save_cron_jobs(self, jobs: list[object]) -> None:
+            pass
+
+    scheduler = CronScheduler(storage=BrokenStorage())  # type: ignore[arg-type]
+    called = False
+
+    async def on_due(job: object) -> None:
+        nonlocal called
+        called = True
+
+    await scheduler._tick(on_due)  # must not raise
+    assert not called
+
+
+async def test_tick_swallows_save_error() -> None:
+    from squidbot.core.models import CronJob
+    from squidbot.core.scheduler import CronScheduler
+
+    class SaveBrokenStorage:
+        def __init__(self) -> None:
+            self.jobs = [
+                CronJob(
+                    id="ddd00004",
+                    name="recurring",
+                    message="ping",
+                    schedule="* * * * *",
+                    channel="cli:local",
+                )
+            ]
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(self.jobs)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            raise OSError("disk full")
+
+    scheduler = CronScheduler(storage=SaveBrokenStorage())  # type: ignore[arg-type]
+
+    async def noop(job: CronJob) -> None:
+        pass
+
+    await scheduler._tick(noop)  # must not raise
+
+
+async def test_tick_deletes_once_job_after_successful_firing() -> None:
+    from squidbot.core.models import CronJob
+    from squidbot.core.scheduler import CronScheduler
+
+    fired: list[CronJob] = []
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved: list[CronJob] = []
+            self.jobs = [
+                CronJob(
+                    id="aaa00001",
+                    name="one-time",
+                    message="ping",
+                    schedule="* * * * *",
+                    channel="cli:local",
+                    once=True,
+                )
+            ]
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(self.jobs)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            self.saved = list(jobs)
+
+    storage = FakeStorage()
+    scheduler = CronScheduler(storage=storage)  # type: ignore[arg-type]
+
+    async def capture(job: CronJob) -> None:
+        fired.append(job)
+
+    await scheduler._tick(capture)
+
+    assert len(fired) == 1
+    assert storage.saved == []  # job was deleted after successful firing
+
+
+async def test_tick_retains_once_job_when_on_due_raises() -> None:
+    from squidbot.core.models import CronJob
+    from squidbot.core.scheduler import CronScheduler
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved: list[CronJob] = []
+            self.jobs = [
+                CronJob(
+                    id="bbb00002",
+                    name="one-time-fail",
+                    message="ping",
+                    schedule="* * * * *",
+                    channel="cli:local",
+                    once=True,
+                )
+            ]
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(self.jobs)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            self.saved = list(jobs)
+
+    storage = FakeStorage()
+    scheduler = CronScheduler(storage=storage)  # type: ignore[arg-type]
+
+    async def always_fails(job: CronJob) -> None:
+        raise RuntimeError("delivery failed")
+
+    await scheduler._tick(always_fails)
+
+    assert len(storage.saved) == 1
+    assert storage.saved[0].id == "bbb00002"
+
+
+async def test_tick_keeps_recurring_job_after_firing() -> None:
+    from squidbot.core.models import CronJob
+    from squidbot.core.scheduler import CronScheduler
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved: list[CronJob] = []
+            self.jobs = [
+                CronJob(
+                    id="ccc00003",
+                    name="recurring",
+                    message="ping",
+                    schedule="* * * * *",
+                    channel="cli:local",
+                    once=False,
+                )
+            ]
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(self.jobs)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            self.saved = list(jobs)
+
+    storage = FakeStorage()
+    scheduler = CronScheduler(storage=storage)  # type: ignore[arg-type]
+
+    async def noop(job: CronJob) -> None:
+        pass
+
+    await scheduler._tick(noop)
+
+    assert len(storage.saved) == 1
+    assert storage.saved[0].id == "ccc00003"
+    assert storage.saved[0].last_run is not None

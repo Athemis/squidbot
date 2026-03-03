@@ -100,3 +100,31 @@ def test_format_jobs_matches_cli_layout() -> None:
 
 def test_format_jobs_empty_message() -> None:
     assert format_jobs([]) == "No cron jobs configured."
+
+
+def test_validate_job_rejects_once_with_interval_schedule() -> None:
+    error = validate_job(_job(schedule="every 3600", once=True))
+    assert error is not None
+    assert "once" in error.lower()
+
+
+def test_validate_job_accepts_once_with_cron_expression() -> None:
+    now = datetime(2026, 2, 27, 9, 0, tzinfo=UTC)
+    assert validate_job(_job(schedule="0 15 15 3 *", once=True), now=now) is None
+
+
+def test_set_enabled_preserves_once_flag() -> None:
+    jobs = [_job(id="x", once=True)]
+    updated, found = set_enabled(jobs, "x", False)
+    assert found is True
+    assert updated[0].once is True
+
+
+def test_format_jobs_shows_once_label() -> None:
+    rendered = format_jobs([_job(once=True)])
+    assert "[once]" in rendered
+
+
+def test_format_jobs_no_once_label_for_recurring() -> None:
+    rendered = format_jobs([_job(once=False)])
+    assert "[once]" not in rendered
