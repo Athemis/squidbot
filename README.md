@@ -87,11 +87,12 @@ llm:
       max_context_tokens: 8192
     # kimi-instant:
     #   provider: openrouter
-    #   model: "moonshotai/kimi-k2-0905"
-    #   temperature: 0.3
+    #   model: "moonshotai/Kimi-K2.5"
+    #   temperature: 0.6
     #   top_p: 0.95
     #   extra_body:
-    #     thinking: false
+    #     thinking:
+    #       type: "disabled"
 
   pools:
     smart:
@@ -198,32 +199,33 @@ parameters are passed through to the provider for that model only.
 
 Provider support for these fields is model/API specific; unsupported fields may be rejected at runtime.
 
-#### Kimi K2 (`moonshotai/kimi-k2-0905`, thinking vs instant)
+#### Kimi K2.5 (thinking vs instant)
 
-Use separate entries so pools can select either a deeper "thinking" mode or a faster
-"instant" mode:
+Thinking is generally on by default. Use separate entries so pools can select either
+a deeper thinking mode or a faster instant mode:
 
 ```yaml
 llm:
   models:
     kimi-thinking:
       provider: openrouter
-      model: "moonshotai/kimi-k2-0905"
-      extra_body:
-        thinking: true
+      model: "moonshotai/Kimi-K2.5"
+      temperature: 1.0
+      top_p: 0.95
 
     kimi-instant:
       provider: openrouter
-      model: "moonshotai/kimi-k2-0905"
-      temperature: 0.3
+      model: "moonshotai/Kimi-K2.5"
+      temperature: 0.6
       top_p: 0.95
       extra_body:
-        thinking: false
+        thinking:
+          type: "disabled"
 ```
 
 #### GLM-5 (preserve reasoning content)
 
-Enable reasoning-content preservation on the provider, then define a thinking model entry:
+Enable reasoning-content preservation on the provider, then define a model entry:
 
 ```yaml
 llm:
@@ -237,8 +239,12 @@ llm:
     glm-5-thinking:
       provider: zhipu
       model: "glm-5"
+      temperature: 1.0
+      max_tokens: 131072
       extra_body:
-        thinking: true
+        thinking:
+          type: "enabled"
+          clear_thinking: false
 ```
 
 #### OpenAI o-series (`reasoning_effort`)
