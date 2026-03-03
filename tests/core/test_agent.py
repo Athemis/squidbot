@@ -588,3 +588,29 @@ async def test_slash_new_starts_fresh_logical_session_without_history_backfill(s
     assert token not in second_prompt
     assert channel.sent[-1].text == "I do not know."
     assert SESSION.id not in loop._session_backfill_next_turn
+
+
+async def test_slash_new_evicts_old_session_generations(storage, memory):
+    """Session generation tracking evicts oldest entries when capacity is exceeded."""
+    llm = ScriptedLLM([])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+    loop._max_tracked_session_generations = 2
+
+    session_one = Session(channel="cli", sender_id="one")
+    session_two = Session(channel="cli", sender_id="two")
+    session_three = Session(channel="cli", sender_id="three")
+
+    await loop.run(session_one, "/new", channel)
+    await loop.run(session_two, "/new", channel)
+    await loop.run(session_three, "/new", channel)
+
+    assert len(loop._session_generation) == 2
+    assert session_one.id not in loop._session_generation
+    assert session_two.id in loop._session_generation
+    assert session_three.id in loop._session_generation
