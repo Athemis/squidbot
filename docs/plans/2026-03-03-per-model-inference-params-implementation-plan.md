@@ -531,8 +531,8 @@ class TestResolveLlmForwardsInferenceParams:
             from squidbot.cli.gateway import _resolve_llm  # noqa: PLC0415
             _resolve_llm(settings, "default")
             call_kwargs = MockAdapter.call_args.kwargs
-            # Bug fix: max_tokens was configured but never forwarded before this feature.
-            assert call_kwargs["max_tokens"] == 8192
+            # Omitted max_tokens should keep provider/model defaults.
+            assert call_kwargs["max_tokens"] is None
             assert call_kwargs["temperature"] is None
             assert call_kwargs["top_p"] is None
             assert call_kwargs["reasoning_effort"] is None
@@ -552,13 +552,18 @@ Expected: `FAILED` — `_resolve_llm` does not yet pass the new params to `OpenA
 Replace the `OpenAIAdapter(...)` call in `_resolve_llm()` (lines 273–279):
 
 ```python
+        model_fields_set = getattr(model_cfg, "model_fields_set", set())
+        max_tokens = model_cfg.max_tokens
+        if "max_tokens" not in model_fields_set:
+            max_tokens = None
+
         adapters.append(
             OpenAIAdapter(
                 api_base=provider_cfg.api_base,
                 api_key=provider_cfg.api_key,
                 model=model_cfg.model,
                 supports_reasoning_content=provider_cfg.supports_reasoning_content,
-                max_tokens=model_cfg.max_tokens,
+                max_tokens=max_tokens,
                 temperature=model_cfg.temperature,
                 top_p=model_cfg.top_p,
                 presence_penalty=model_cfg.presence_penalty,

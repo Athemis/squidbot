@@ -91,12 +91,11 @@ in `kwargs`, not in `extra_body`.
 `_resolve_llm()` already constructs `OpenAIAdapter` instances from config. Add
 the six new keyword arguments to the `OpenAIAdapter(...)` call.
 
-Note: `max_tokens` is always forwarded because `LLMModelConfig` always has a
-concrete `int` value (default `8192`). The adapter therefore receives `int`, not
-`int | None`, from the gateway. The `max_tokens: int | None = None` signature on
-`OpenAIAdapter.__init__` is needed to allow direct construction in unit tests
-without specifying a value; in production the gateway always supplies a concrete
-value.
+Note: `max_tokens` is forwarded only when explicitly set in the model config.
+`LLMModelConfig` still has a schema default (`8192`), but gateway wiring checks
+`model_fields_set` and sends `max_tokens=None` when the field is omitted in user
+config. This preserves provider/model defaults and avoids compatibility issues on
+APIs that reject `max_tokens` for specific model families.
 
 ## Data Flow
 
@@ -174,8 +173,7 @@ rejects them). Do not set them when using an o-series model.
   `extra_body` merging, `reasoning_effort` placement.
 - **Unit tests** for `LLMModelConfig` serialisation round-trip (JSON ↔ model).
 - **Unit tests** for `_resolve_llm` verifying parameters flow from config to adapter,
-  including an assertion that `max_tokens=8192` is forwarded when no override is set
-  (confirming the bug fix is tested at the wiring layer).
+  including `max_tokens=None` when omitted and forwarding when explicitly set.
 - All tests use `unittest.mock` — no real API calls.
 
 ## README Changes

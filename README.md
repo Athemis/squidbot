@@ -195,7 +195,7 @@ parameters are passed through to the provider for that model only.
 | `frequency_penalty` | number | Penalizes repeated token frequency in generated output. |
 | `reasoning_effort` | string | Reasoning level for models that support it (for example: `low`, `medium`, `high`). |
 | `extra_body` | mapping | Provider-specific request fields merged into the JSON request body. |
-| `max_tokens` | integer | Per-request output cap for that model entry. |
+| `max_tokens` | integer | Per-request output cap for that model entry (forwarded only when explicitly configured in that model block). |
 
 Provider support for these fields is model/API specific; unsupported fields may be rejected at runtime.
 
