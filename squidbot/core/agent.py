@@ -33,6 +33,7 @@ from squidbot.core.slash_commands import handle_slash_command
 # Prevents infinite loops in case of buggy tool chains.
 MAX_TOOL_ROUNDS = 20
 MAX_TRACKED_SESSION_GENERATIONS = 10_000
+MAX_LOG_TOKEN_LEN = 128
 
 
 def _sanitize_log_value(value: str) -> str:
@@ -43,7 +44,7 @@ def _sanitize_log_value(value: str) -> str:
         else "_"
         for char in value
     ]
-    return "".join(sanitized_chars)
+    return "".join(sanitized_chars)[:MAX_LOG_TOKEN_LEN]
 
 
 def _format_llm_error(exc: Exception) -> str:

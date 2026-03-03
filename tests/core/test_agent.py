@@ -446,6 +446,43 @@ async def test_tool_call_logs_info_sanitizes_malicious_session_id(storage, memor
     assert "status=forged=1" not in logs
 
 
+async def test_tool_call_logs_info_truncates_long_tokens(storage, memory) -> None:
+    long_session = Session(channel="cli", sender_id=("s" * 220) + "SESSIONTAIL")
+    long_tool_name = ("t" * 240) + "TOOLTAIL"
+    long_call_id = ("c" * 240) + "CALLTAIL"
+    tool_call = ToolCall(id=long_call_id, name=long_tool_name, arguments={})
+    llm = ScriptedLLM([[tool_call], "done"])
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=ToolRegistry(), system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(long_session, "run long-token tool", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    call_done_lines = [line for line in logs.splitlines() if "agent.tool.call.done" in line]
+    assert len(call_done_lines) == 1
+    call_done = call_done_lines[0]
+
+    def _field_value(line: str, field_name: str) -> str:
+        token = f"{field_name}="
+        start = line.index(token) + len(token)
+        end = line.find(" ", start)
+        if end == -1:
+            end = len(line)
+        return line[start:end]
+
+    assert len(_field_value(call_done, "session_id")) <= 128
+    assert len(_field_value(call_done, "tool")) <= 128
+    assert len(_field_value(call_done, "call_id")) <= 128
+    assert "SESSIONTAIL" not in logs
+    assert "TOOLTAIL" not in logs
+    assert "CALLTAIL" not in logs
+
+
 async def test_tool_call_round_preserves_reasoning_content(storage, memory):
     tool_call = ToolCall(id="tc_1", name="echo", arguments={"text": "world"})
 
