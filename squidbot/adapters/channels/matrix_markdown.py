@@ -1,19 +1,12 @@
-"""Matrix-specific mistune plugins and HTML sanitizer for squidbot.
+"""Matrix-specific spoiler plugins and HTML sanitizer for squidbot.
 
-Provides:
-- plugin_mx_math: mistune plugin that converts $$...$$ and $...$ LaTeX syntax
-  to the Matrix spec v1.11+ data-mx-maths format.
-- plugin_mx_spoiler: mistune plugin that converts ||text|| to Matrix
-  data-mx-spoiler format.
-- plugin_mx_block_spoiler: mistune plugin that converts >!-prefixed lines to
-  Matrix data-mx-spoiler format as a block-level element.
-- sanitize_for_matrix: nh3-based HTML sanitizer enforcing the Matrix spec
-  v1.17 permitted HTML allowlist.
+Provides spoiler parsing for inline ``||...||`` and block ``>!...`` syntaxes,
+then sanitizes rendered HTML to the Matrix v1.17 allowlist via nh3. This module
+is used by the Matrix channel adapter when building ``formatted_body`` payloads.
 """
 
 from __future__ import annotations
 
-import html
 from typing import TYPE_CHECKING, Any
 
 import nh3
@@ -24,55 +17,7 @@ if TYPE_CHECKING:
     from mistune.core import BaseRenderer, BlockState, InlineState
     from mistune.inline_parser import InlineParser
 
-__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sanitize_for_matrix"]
-
-# ---------------------------------------------------------------------------
-# Math plugin
-# ---------------------------------------------------------------------------
-
-# Reuse the same patterns as mistune's built-in math plugin.
-_BLOCK_MATH_PATTERN = r"^ {0,3}\$\$[ \t]*\n(?P<math_text>[\s\S]+?)\n\$\$[ \t]*$"
-_INLINE_MATH_PATTERN = r"\$(?!\s)(?P<math_text>.+?)(?!\s)\$"
-
-
-def plugin_mx_math(md: Markdown) -> None:
-    """Mistune plugin that renders math to Matrix data-mx-maths format.
-
-    Block math ($$...$$) becomes <div data-mx-maths="...">.
-    Inline math ($...$) becomes <span data-mx-maths="...">.
-    The LaTeX source is HTML-escaped in the attribute; <code> provides a
-    plain-text fallback for clients that cannot render LaTeX.
-
-    Per Matrix Spec v1.11 (MSC2191): clients that support math read the
-    data-mx-maths attribute; clients without LaTeX support show the child.
-
-    Args:
-        md: The Markdown instance to extend.
-    """
-
-    def _parse_block_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        state.append_token({"type": "mx_block_math", "raw": m.group("math_text")})
-        return int(m.end()) + 1
-
-    def _parse_inline_math(inline: InlineParser, m: Any, state: InlineState) -> int:
-        state.append_token({"type": "mx_inline_math", "raw": m.group("math_text")})
-        return int(m.end())
-
-    def _render_block_math(renderer: BaseRenderer, text: str) -> str:
-        attr = html.escape(text, quote=True)
-        body = html.escape(text, quote=False)
-        return f'<div data-mx-maths="{attr}"><code>{body}</code></div>\n'
-
-    def _render_inline_math(renderer: BaseRenderer, text: str) -> str:
-        attr = html.escape(text, quote=True)
-        body = html.escape(text, quote=False)
-        return f'<span data-mx-maths="{attr}"><code>{body}</code></span>'
-
-    md.block.register("mx_block_math", _BLOCK_MATH_PATTERN, _parse_block_math, before="list")
-    md.inline.register("mx_inline_math", _INLINE_MATH_PATTERN, _parse_inline_math, before="link")
-    if md.renderer and md.renderer.NAME == "html":
-        md.renderer.register("mx_block_math", _render_block_math)
-        md.renderer.register("mx_inline_math", _render_inline_math)
+__all__ = ["plugin_mx_spoiler", "plugin_mx_block_spoiler", "sanitize_for_matrix"]
 
 
 # ---------------------------------------------------------------------------
@@ -204,12 +149,11 @@ _MATRIX_TAGS: set[str] = {
 # Attributes permitted per tag (Matrix spec v1.17).
 # Tags not listed here permit no attributes.
 _MATRIX_ATTRIBUTES: dict[str, set[str]] = {
-    "span": {"data-mx-bg-color", "data-mx-color", "data-mx-spoiler", "data-mx-maths"},
+    "span": {"data-mx-bg-color", "data-mx-color", "data-mx-spoiler"},
     "a": {"href", "target"},
     "img": {"width", "height", "alt", "title", "src"},
     "ol": {"start"},
     "code": {"class"},
-    "div": {"data-mx-maths"},
 }
 
 # "mxc" is included so nh3 does not reject mxc:// URIs before attribute_filter
