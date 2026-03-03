@@ -16,6 +16,8 @@ from squidbot.adapters.tools.cron import (
 from squidbot.core.models import CronJob
 from squidbot.core.scheduler import CronScheduler
 
+ASYNC_TEST_TIMEOUT_SECONDS = 1.0
+
 
 def _storage(tmp_path: Path) -> JsonlMemory:
     return JsonlMemory(base_dir=tmp_path)
@@ -177,9 +179,34 @@ class TestCronListRemoveSetEnabled:
         final_jobs = await storage.load_cron_jobs()
         assert final_jobs == []
 
+    async def test_remove_returns_error_when_storage_raises(self) -> None:
+        class BrokenStorage:
+            async def load_cron_jobs(self) -> list[CronJob]:
+                raise RuntimeError("boom")
+
+            async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+                raise RuntimeError("unreachable")
+
+        tool = CronRemoveTool(storage=BrokenStorage())  # type: ignore[arg-type]
+
+        result = await tool.execute(job_id="abc12345")
+
+        assert result.is_error
+        assert "boom" in result.content
+
 
 class TestCronToolConcurrency:
     """Mutating cron tools must declare concurrent=False (read-modify-write TOCTOU risk)."""
+
+    class InMemoryStorage:
+        def __init__(self, jobs: list[CronJob]) -> None:
+            self.jobs = list(jobs)
+
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(self.jobs)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            self.jobs = list(jobs)
 
     def test_cron_add_concurrent_is_false(self, tmp_path: Path) -> None:
         tool = CronAddTool(
@@ -196,16 +223,6 @@ class TestCronToolConcurrency:
         assert tool.concurrent is False
 
     async def test_tick_allows_on_due_to_mutate_cron_jobs_with_shared_lock(self) -> None:
-        class InMemoryStorage:
-            def __init__(self, jobs: list[CronJob]) -> None:
-                self.jobs = list(jobs)
-
-            async def load_cron_jobs(self) -> list[CronJob]:
-                return list(self.jobs)
-
-            async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
-                self.jobs = list(jobs)
-
         now = datetime.now(UTC)
         due_job = CronJob(
             id="duejob01",
@@ -223,15 +240,15 @@ class TestCronToolConcurrency:
             channel="email:user@example.com",
             last_run=now,
         )
-        storage = InMemoryStorage([due_job, removable_job])
+        storage = self.InMemoryStorage([due_job, removable_job])
         mutation_lock = asyncio.Lock()
 
         scheduler = CronScheduler(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
         remove_tool = CronRemoveTool(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
 
@@ -239,22 +256,12 @@ class TestCronToolConcurrency:
             remove_result = await remove_tool.execute(job_id="deljob01")
             assert not remove_result.is_error
 
-        await asyncio.wait_for(scheduler._tick(on_due), timeout=0.2)
+        await asyncio.wait_for(scheduler._tick(on_due), timeout=ASYNC_TEST_TIMEOUT_SECONDS)
 
         saved_jobs = await storage.load_cron_jobs()
         assert [job.id for job in saved_jobs] == ["duejob01"]
 
     async def test_remove_completes_while_scheduler_callback_waits(self) -> None:
-        class InMemoryStorage:
-            def __init__(self, jobs: list[CronJob]) -> None:
-                self.jobs = list(jobs)
-
-            async def load_cron_jobs(self) -> list[CronJob]:
-                return list(self.jobs)
-
-            async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
-                self.jobs = list(jobs)
-
         now = datetime.now(UTC)
         due_job = CronJob(
             id="duejob01",
@@ -272,15 +279,15 @@ class TestCronToolConcurrency:
             channel="email:user@example.com",
             last_run=now,
         )
-        storage = InMemoryStorage([due_job, removable_job])
+        storage = self.InMemoryStorage([due_job, removable_job])
         mutation_lock = asyncio.Lock()
 
         scheduler = CronScheduler(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
         remove_tool = CronRemoveTool(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
         on_due_started = asyncio.Event()
@@ -294,7 +301,7 @@ class TestCronToolConcurrency:
         await on_due_started.wait()
 
         remove_task = asyncio.create_task(remove_tool.execute(job_id="deljob01"))
-        remove_result = await asyncio.wait_for(remove_task, timeout=0.2)
+        remove_result = await asyncio.wait_for(remove_task, timeout=ASYNC_TEST_TIMEOUT_SECONDS)
         assert not remove_result.is_error
 
         allow_on_due_finish.set()
@@ -304,16 +311,6 @@ class TestCronToolConcurrency:
         assert [job.id for job in saved_jobs] == ["duejob01"]
 
     async def test_concurrent_mutations_complete_while_scheduler_callback_is_waiting(self) -> None:
-        class InMemoryStorage:
-            def __init__(self, jobs: list[CronJob]) -> None:
-                self.jobs = list(jobs)
-
-            async def load_cron_jobs(self) -> list[CronJob]:
-                return list(self.jobs)
-
-            async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
-                self.jobs = list(jobs)
-
         now = datetime.now(UTC)
         due_job = CronJob(
             id="duejob01",
@@ -340,25 +337,25 @@ class TestCronToolConcurrency:
             enabled=True,
             last_run=now,
         )
-        storage = InMemoryStorage([due_job, removable_job, toggle_job])
+        storage = self.InMemoryStorage([due_job, removable_job, toggle_job])
         mutation_lock = asyncio.Lock()
 
         scheduler = CronScheduler(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
         add_tool = CronAddTool(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             default_channel="email:user@example.com",
             default_metadata={},
             mutation_lock=mutation_lock,
         )
         remove_tool = CronRemoveTool(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
         toggle_tool = CronSetEnabledTool(  # type: ignore[arg-type]
-            storage=storage,
+            storage=storage,  # type: ignore[arg-type]
             mutation_lock=mutation_lock,
         )
         on_due_started = asyncio.Event()
@@ -379,13 +376,13 @@ class TestCronToolConcurrency:
         )
         toggle_result, add_result = await asyncio.wait_for(
             asyncio.gather(toggle_task, add_task),
-            timeout=0.2,
+            timeout=ASYNC_TEST_TIMEOUT_SECONDS,
         )
         assert not toggle_result.is_error
         assert not add_result.is_error
 
         allow_on_due_finish.set()
-        await asyncio.wait_for(tick_task, timeout=0.2)
+        await asyncio.wait_for(tick_task, timeout=ASYNC_TEST_TIMEOUT_SECONDS)
 
         saved_jobs = await storage.load_cron_jobs()
         ids = {job.id for job in saved_jobs}

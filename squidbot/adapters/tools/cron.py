@@ -15,11 +15,14 @@ async def _run_with_optional_lock(
     mutation_lock: asyncio.Lock | None,
     operation: Callable[[], Awaitable[ToolResult]],
 ) -> ToolResult:
-    if mutation_lock is None:
-        return await operation()
+    try:
+        if mutation_lock is None:
+            return await operation()
 
-    async with mutation_lock:
-        return await operation()
+        async with mutation_lock:
+            return await operation()
+    except Exception as exc:
+        return ToolResult(tool_call_id="", content=f"Error: {exc}", is_error=True)
 
 
 class CronListTool:

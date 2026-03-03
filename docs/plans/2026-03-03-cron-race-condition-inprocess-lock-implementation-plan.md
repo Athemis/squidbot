@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Add a failing regression test for scheduler/tool interleaving
+## Task 1: Add a failing regression test for scheduler/tool interleaving
 
 **Files:**
 - Modify: `tests/adapters/tools/test_cron_tools.py`
@@ -31,7 +31,7 @@ Run: `uv run pytest tests/adapters/tools/test_cron_tools.py::TestCronToolConcurr
 
 Expected: FAIL because no shared lock exists yet.
 
-### Task 2: Add lock support to scheduler
+## Task 2: Add lock support to scheduler
 
 **Files:**
 - Modify: `squidbot/core/scheduler.py`
@@ -53,7 +53,7 @@ Run: `uv run pytest tests/adapters/tools/test_cron_tools.py::TestCronToolConcurr
 
 Expected: still FAIL (mutating tools not synchronized yet).
 
-### Task 3: Add lock support to mutating cron tools
+## Task 3: Add lock support to mutating cron tools
 
 **Files:**
 - Modify: `squidbot/adapters/tools/cron.py`
@@ -88,7 +88,7 @@ Run: `uv run pytest tests/adapters/tools/test_cron_tools.py::TestCronToolConcurr
 
 Expected: PASS.
 
-### Task 4: Wire shared lock in gateway composition root
+## Task 4: Wire shared lock in gateway composition root
 
 **Files:**
 - Modify: `squidbot/cli/gateway.py`
@@ -111,7 +111,7 @@ Run: `uv run pytest tests/adapters/tools/test_cron_tools.py tests/core/test_sche
 
 Expected: PASS.
 
-### Task 5: Full verification
+## Task 5: Full verification
 
 **Files:**
 - Verify only
@@ -134,7 +134,7 @@ Run: `uv run pytest`
 
 Expected: PASS.
 
-### Task 6: Prepare commit (when requested)
+## Task 6: Prepare commit (when requested)
 
 **Files:**
 - Modify: `squidbot/core/scheduler.py`
