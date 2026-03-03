@@ -61,6 +61,13 @@ class OpenAIAdapter:
         supports_reasoning_content: bool = False,
         *,
         client: AsyncOpenAI | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        reasoning_effort: str | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
         """
         Args:
@@ -70,10 +77,55 @@ class OpenAIAdapter:
             supports_reasoning_content: Whether provider supports reasoning content fields.
             client: Optional pre-constructed AsyncOpenAI client to reuse. If not
                     provided, a new client is created from api_base and api_key.
+            max_tokens: Optional max output tokens for completion.
+            temperature: Optional sampling temperature.
+            top_p: Optional nucleus sampling threshold.
+            presence_penalty: Optional penalty for introducing new tokens.
+            frequency_penalty: Optional penalty for repeated tokens.
+            reasoning_effort: Optional reasoning effort level for compatible models.
+            extra_body: Optional provider-specific request payload extensions.
         """
         self._client = client or AsyncOpenAI(base_url=api_base, api_key=api_key)
         self._model = model
         self._supports_reasoning_content = supports_reasoning_content
+        self._max_tokens = max_tokens
+        self._temperature = temperature
+        self._top_p = top_p
+        self._presence_penalty = presence_penalty
+        self._frequency_penalty = frequency_penalty
+        self._reasoning_effort = reasoning_effort
+        self._extra_body: dict[str, Any] = extra_body or {}
+
+    def _build_kwargs(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        *,
+        stream: bool,
+    ) -> dict[str, Any]:
+        """Build request kwargs for OpenAI-compatible chat completions."""
+        kwargs: dict[str, Any] = {"model": self._model, "messages": messages}
+
+        if stream:
+            kwargs["stream"] = True
+        if tools:
+            kwargs["tools"] = tools
+        if self._max_tokens is not None:
+            kwargs["max_tokens"] = self._max_tokens
+        if self._temperature is not None:
+            kwargs["temperature"] = self._temperature
+        if self._top_p is not None:
+            kwargs["top_p"] = self._top_p
+        if self._presence_penalty is not None:
+            kwargs["presence_penalty"] = self._presence_penalty
+        if self._frequency_penalty is not None:
+            kwargs["frequency_penalty"] = self._frequency_penalty
+        if self._reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self._reasoning_effort
+        if self._extra_body:
+            kwargs["extra_body"] = self._extra_body
+
+        return kwargs
 
     async def chat(
         self,
@@ -110,9 +162,7 @@ class OpenAIAdapter:
         accumulated_tool_calls: dict[int, dict[str, Any]] = {}
         accumulated_reasoning: list[str] = []
 
-        kwargs: dict[str, Any] = {"model": self._model, "messages": messages, "stream": True}
-        if tools:
-            kwargs["tools"] = tools
+        kwargs = self._build_kwargs(messages, tools, stream=True)
 
         async with await self._client.chat.completions.create(**kwargs) as stream:
             async for chunk in stream:
@@ -169,9 +219,7 @@ class OpenAIAdapter:
         tools: list[dict[str, Any]] | None,
     ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
         """Non-streaming completion."""
-        kwargs: dict[str, Any] = {"model": self._model, "messages": messages}
-        if tools:
-            kwargs["tools"] = tools
+        kwargs = self._build_kwargs(messages, tools, stream=False)
 
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
