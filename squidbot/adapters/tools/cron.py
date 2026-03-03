@@ -13,7 +13,10 @@ class CronListTool:
     """List all configured cron jobs."""
 
     name = "cron_list"
-    description = "List all configured cron jobs."
+    description = (
+        "List all configured cron jobs. Output marks one-time jobs with [once], "
+        "which fire once and are then removed."
+    )
     parameters = {"type": "object", "properties": {}, "required": []}
 
     def __init__(self, storage: MemoryPort) -> None:
@@ -33,7 +36,10 @@ class CronAddTool:
 
     name = "cron_add"
     concurrent = False
-    description = "Create a cron job with schedule, target channel, and message."
+    description = (
+        "Create a cron job with schedule, target channel, and message. Set once=true "
+        "for one-time cron-expression jobs that self-delete after successful firing."
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -45,7 +51,9 @@ class CronAddTool:
             "schedule": {
                 "type": "string",
                 "description": (
-                    "Cron expression (e.g. '0 9 * * *') or interval form ('every 3600')."
+                    "Schedule format. Use cron expressions like '0 9 * * *' or "
+                    "'30 15 15 3 *'. Interval form 'every N' is recurring and cannot "
+                    "be combined with once=true."
                 ),
             },
             "timezone": {
@@ -60,8 +68,9 @@ class CronAddTool:
             "once": {
                 "type": "boolean",
                 "description": (
-                    "If true, the job fires exactly once and is then deleted. "
-                    "Only valid with cron expressions, not 'every N' intervals."
+                    "If true, fire exactly once and delete the job after successful "
+                    "delivery. Use only with cron expressions (for example, a specific "
+                    "date/time), not with 'every N' intervals."
                 ),
             },
         },
@@ -190,7 +199,9 @@ class CronSetEnabledTool:
 
     name = "cron_set_enabled"
     concurrent = False
-    description = "Enable or disable a cron job by its ID."
+    description = (
+        "Enable or disable a cron job by its ID. This does not change schedule or once mode."
+    )
     parameters = {
         "type": "object",
         "properties": {
