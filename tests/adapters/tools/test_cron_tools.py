@@ -108,6 +108,60 @@ class TestCronAddTool:
         assert "Invalid schedule" in negative_result.content
 
 
+async def test_cron_add_tool_creates_once_job() -> None:
+    from squidbot.adapters.tools.cron import CronAddTool
+
+    jobs_store: list[CronJob] = []
+
+    class FakeStorage:
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return list(jobs_store)
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            jobs_store.clear()
+            jobs_store.extend(jobs)
+
+    tool = CronAddTool(
+        storage=FakeStorage(),  # type: ignore[arg-type]
+        default_channel="matrix:@user:example.com",
+        default_metadata={"matrix_room_id": "!abc:example.com"},
+    )
+    result = await tool.execute(
+        name="Zahnarzt",
+        message="Nicht vergessen!",
+        schedule="30 15 3 3 *",
+        once=True,
+    )
+    assert not result.is_error, result.content
+    assert len(jobs_store) == 1
+    assert jobs_store[0].once is True
+
+
+async def test_cron_add_tool_rejects_once_with_interval() -> None:
+    from squidbot.adapters.tools.cron import CronAddTool
+
+    class FakeStorage:
+        async def load_cron_jobs(self) -> list[CronJob]:
+            return []
+
+        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
+            pass
+
+    tool = CronAddTool(
+        storage=FakeStorage(),  # type: ignore[arg-type]
+        default_channel="matrix:@user:example.com",
+        default_metadata={"matrix_room_id": "!abc:example.com"},
+    )
+    result = await tool.execute(
+        name="Test",
+        message="msg",
+        schedule="every 3600",
+        once=True,
+    )
+    assert result.is_error
+    assert "once" in result.content.lower()
+
+
 class TestCronListRemoveSetEnabled:
     async def test_list_remove_and_toggle(self, tmp_path: Path) -> None:
         storage = _storage(tmp_path)

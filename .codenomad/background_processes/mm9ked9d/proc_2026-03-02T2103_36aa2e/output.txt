@@ -1,0 +1,2 @@
+ tests/adapters/channels/test_markdown_plugins.py | 47 ++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)

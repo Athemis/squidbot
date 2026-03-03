@@ -1,0 +1,161 @@
+ squidbot/adapters/channels/matrix.py             |  4 ++-
+ squidbot/adapters/channels/matrix_markdown.py    | 44 +++++++++++++++++++++++-
+ tests/adapters/channels/test_markdown_plugins.py | 23 +++++++++----
+ 3 files changed, 63 insertions(+), 8 deletions(-)
+---FULL DIFF---
+diff --git a/squidbot/adapters/channels/matrix.py b/squidbot/adapters/channels/matrix.py
+index 4d1500f..8aaf9e3 100644
+--- a/squidbot/adapters/channels/matrix.py
++++ b/squidbot/adapters/channels/matrix.py
+@@ -28,6 +28,7 @@ import nio
+ from loguru import logger
+ 
+ from squidbot.adapters.channels.matrix_markdown import (
++    plugin_mx_block_spoiler,
+     plugin_mx_math,
+     plugin_mx_spoiler,
+     sanitize_for_matrix,
+@@ -69,7 +70,8 @@ EMBEDDABLE_IMAGE_MIMES: frozenset[str] = frozenset(
+ )
+ 
+ _md = mistune.create_markdown(
+-    escape=False, plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler]
++    escape=False,
++    plugins=[*MARKDOWN_PLUGINS, plugin_mx_math, plugin_mx_spoiler, plugin_mx_block_spoiler],
+ )
+ 
+ 
+diff --git a/squidbot/adapters/channels/matrix_markdown.py b/squidbot/adapters/channels/matrix_markdown.py
+index 01d5535..e60ed67 100644
+--- a/squidbot/adapters/channels/matrix_markdown.py
++++ b/squidbot/adapters/channels/matrix_markdown.py
+@@ -5,6 +5,8 @@ Provides:
+   to the Matrix spec v1.11+ data-mx-maths format.
+ - plugin_mx_spoiler: mistune plugin that converts ||text|| to Matrix
+   data-mx-spoiler format.
++- plugin_mx_block_spoiler: mistune plugin that converts >!-prefixed lines to
++  Matrix data-mx-spoiler format as a block-level element.
+ - sanitize_for_matrix: nh3-based HTML sanitizer enforcing the Matrix spec
+   v1.17 permitted HTML allowlist.
+ """
+@@ -22,7 +24,7 @@ if TYPE_CHECKING:
+     from mistune.core import BaseRenderer, BlockState, InlineState
+     from mistune.inline_parser import InlineParser
+ 
+-__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "sanitize_for_matrix"]
++__all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sanitize_for_matrix"]
+ 
+ # ---------------------------------------------------------------------------
+ # Math plugin
+@@ -78,6 +80,7 @@ def plugin_mx_math(md: Markdown) -> None:
+ # ---------------------------------------------------------------------------
+ 
+ _INLINE_SPOILER_PATTERN = r"\|\|(?P<spoiler_text>.+?)\|\|"
++_BLOCK_SPOILER_PATTERN = r"(?:^>![ \t]?[^\n]*(?:\n|$))+"
+ 
+ 
+ def plugin_mx_spoiler(md: Markdown) -> None:
+@@ -112,6 +115,45 @@ def plugin_mx_spoiler(md: Markdown) -> None:
+         md.renderer.register("mx_inline_spoiler", _render_inline_spoiler)
+ 
+ 
++def plugin_mx_block_spoiler(md: Markdown) -> None:
++    """Mistune plugin that renders >!-prefixed lines to Matrix data-mx-spoiler format.
++
++    Block spoiler syntax (one or more lines starting with '>!') becomes
++    <span data-mx-spoiler>rendered inline content</span>.
++    Inner text is rendered as inline Markdown so **bold**, _italic_ etc. work.
++    Registered before 'block_quote' so '>!' is tested before '>'.
++
++    Args:
++        md: The Markdown instance to extend.
++    """
++
++    def _parse_block_spoiler(block: BlockParser, m: Any, state: BlockState) -> int:
++        raw = m.group(0)
++        # Strip the '>!' prefix (and optional single space/tab) from each line.
++        lines = []
++        for line in raw.splitlines():
++            if line.startswith(">! ") or line.startswith(">!\t"):
++                lines.append(line[3:])
++            elif line.rstrip() == ">!":
++                lines.append("")
++            else:
++                lines.append(line)
++        content = "\n".join(lines)
++        # Store as "text" so mistune's _iter_render processes it via the inline
++        # parser automatically before the renderer is called.
++        state.append_token({"type": "mx_block_spoiler", "text": content})
++        return int(m.end())
++
++    def _render_block_spoiler(renderer: BaseRenderer, text: str) -> str:
++        return f"<span data-mx-spoiler>{text}</span>\n"
++
++    md.block.register(
++        "mx_block_spoiler", _BLOCK_SPOILER_PATTERN, _parse_block_spoiler, before="block_quote"
++    )
++    if md.renderer and md.renderer.NAME == "html":
++        md.renderer.register("mx_block_spoiler", _render_block_spoiler)
++
++
+ # ---------------------------------------------------------------------------
+ # nh3 sanitizer — Matrix spec v1.17 allowlist
+ # ---------------------------------------------------------------------------
+diff --git a/tests/adapters/channels/test_markdown_plugins.py b/tests/adapters/channels/test_markdown_plugins.py
+index f4b4df4..9d7616f 100644
+--- a/tests/adapters/channels/test_markdown_plugins.py
++++ b/tests/adapters/channels/test_markdown_plugins.py
+@@ -447,29 +447,39 @@ class TestMatrixSpoilerPlugin:
+         assert "data-mx-maths" in result
+ 
+     def test_block_spoiler_single_line_renders_span(self) -> None:
+-        """>! single line renders to <span data-mx-spoiler>."""
++        """>! single line renders to <span data-mx-spoiler>.
++
++        nh3 normalises valueless attributes to attr="", both forms are valid HTML5.
++        """
+         from squidbot.adapters.channels.matrix import _render_markdown
+ 
+         result = _render_markdown(">! hidden content")
+-        assert "<span data-mx-spoiler>" in result
++        assert "data-mx-spoiler" in result
+         assert "hidden content" in result
+ 
+     def test_block_spoiler_multiline_renders_single_span(self) -> None:
+-        """Multi-line >! block produces one <span data-mx-spoiler>."""
++        """Multi-line >! block produces one <span data-mx-spoiler>.
++
++        nh3 normalises valueless attributes to attr="", both forms are valid HTML5.
++        """
+         from squidbot.adapters.channels.matrix import _render_markdown
+ 
+         result = _render_markdown(">! first line\n>!\n>! second line")
+-        assert result.count("<span data-mx-spoiler>") == 1
++        assert result.count("data-mx-spoiler") == 1
+         assert "first line" in result
+         assert "second line" in result
+ 
+     def test_block_spoiler_inline_markdown_rendered(self) -> None:
+-        """Inline markdown inside >! block is rendered."""
++        """Inline markdown inside >! block is rendered.
++
++        nh3 normalises valueless attributes to attr="", both forms are valid HTML5.
++        """
+         from squidbot.adapters.channels.matrix import _render_markdown
+ 
+         result = _render_markdown(">! **bold** and _italic_")
+-        assert "<span data-mx-spoiler>" in result
++        assert "data-mx-spoiler" in result
+         assert "<strong>bold</strong>" in result
++        assert "<em>italic</em>" in result
+ 
+     def test_block_spoiler_does_not_appear_in_email(self) -> None:
+         """>! lines are NOT rendered as spoiler in email channel."""
+@@ -477,6 +487,7 @@ class TestMatrixSpoilerPlugin:
+ 
+         result = _md(">! hidden")
+         assert "data-mx-spoiler" not in result
++        assert "hidden" in result
+ 
+     def test_block_spoiler_coexists_with_inline_spoiler(self) -> None:
+         """Block and inline spoiler both work in the same message."""

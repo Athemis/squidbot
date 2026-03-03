@@ -29,6 +29,10 @@ def validate_job(job: CronJob, *, now: datetime | None = None) -> str | None:
     Returns:
         Error message when invalid, otherwise None.
     """
+    if job.once and job.schedule.strip().startswith("every "):
+        return (
+            "once=True cannot be used with interval schedules ('every N'). Use a cron expression."
+        )
     next_run = parse_schedule(job, now=now)
     if next_run is None:
         return f"Invalid schedule '{job.schedule}'. Use cron syntax or 'every N'."
@@ -80,6 +84,7 @@ def set_enabled(jobs: list[CronJob], job_id: str, enabled: bool) -> tuple[list[C
                 enabled=enabled,
                 timezone=job.timezone,
                 last_run=job.last_run,
+                once=job.once,
                 metadata=dict(job.metadata),
             )
         )
@@ -94,7 +99,8 @@ def format_jobs(jobs: list[CronJob]) -> str:
     lines: list[str] = []
     for job in jobs:
         state = "on" if job.enabled else "off"
-        lines.append(f"  [{state}] {job.id}  {job.name}")
+        once_label = "  [once]" if job.once else ""
+        lines.append(f"  [{state}] {job.id}  {job.name}{once_label}")
         lines.append(
             f"       schedule: {job.schedule}  timezone: {job.timezone}  channel: {job.channel}"
         )

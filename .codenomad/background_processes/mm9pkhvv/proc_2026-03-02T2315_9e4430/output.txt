@@ -1,0 +1,104 @@
+diff --git a/squidbot/adapters/tools/cron.py b/squidbot/adapters/tools/cron.py
+index e907cf7..ee2724e 100644
+--- a/squidbot/adapters/tools/cron.py
++++ b/squidbot/adapters/tools/cron.py
+@@ -52,6 +52,13 @@ class CronAddTool:
+                 "description": "Target session ID for delivery, e.g. 'matrix:@user:matrix.org'.",
+             },
+             "enabled": {"type": "boolean", "description": "Whether the job is enabled."},
++            "once": {
++                "type": "boolean",
++                "description": (
++                    "If true, the job runs exactly once and is deleted after firing. "
++                    "Requires a cron expression (e.g. '30 15 3 3 *'), not an interval."
++                ),
++            },
+         },
+         "required": ["name", "message", "schedule"],
+     }
+@@ -102,6 +109,12 @@ class CronAddTool:
+                 tool_call_id="", content="Error: enabled must be a boolean", is_error=True
+             )
+ 
++        once_raw = kwargs.get("once", False)
++        if not isinstance(once_raw, bool):
++            return ToolResult(
++                tool_call_id="", content="Error: once must be a boolean", is_error=True
++            )
++
+         metadata, metadata_error = _build_cron_metadata(
+             target_channel=target_channel,
+             default_metadata=self._default_metadata,
+@@ -119,6 +132,7 @@ class CronAddTool:
+             enabled=enabled_raw,
+             timezone=timezone,
+             metadata=metadata,
++            once=once_raw,
+         )
+         jobs = await self._storage.load_cron_jobs()
+         try:
+diff --git a/tests/adapters/tools/test_cron_tools.py b/tests/adapters/tools/test_cron_tools.py
+index 5c1c9ac..8f54e5f 100644
+--- a/tests/adapters/tools/test_cron_tools.py
++++ b/tests/adapters/tools/test_cron_tools.py
+@@ -108,6 +108,60 @@ class TestCronAddTool:
+         assert "Invalid schedule" in negative_result.content
+ 
+ 
++async def test_cron_add_tool_creates_once_job() -> None:
++    from squidbot.adapters.tools.cron import CronAddTool
++
++    jobs_store: list[CronJob] = []
++
++    class FakeStorage:
++        async def load_cron_jobs(self) -> list[CronJob]:
++            return list(jobs_store)
++
++        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
++            jobs_store.clear()
++            jobs_store.extend(jobs)
++
++    tool = CronAddTool(
++        storage=FakeStorage(),  # type: ignore[arg-type]
++        default_channel="matrix:@user:example.com",
++        default_metadata={"matrix_room_id": "!abc:example.com"},
++    )
++    result = await tool.execute(
++        name="Zahnarzt",
++        message="Nicht vergessen!",
++        schedule="30 15 3 3 *",
++        once=True,
++    )
++    assert not result.is_error, result.content
++    assert len(jobs_store) == 1
++    assert jobs_store[0].once is True
++
++
++async def test_cron_add_tool_rejects_once_with_interval() -> None:
++    from squidbot.adapters.tools.cron import CronAddTool
++
++    class FakeStorage:
++        async def load_cron_jobs(self) -> list[CronJob]:
++            return []
++
++        async def save_cron_jobs(self, jobs: list[CronJob]) -> None:
++            pass
++
++    tool = CronAddTool(
++        storage=FakeStorage(),  # type: ignore[arg-type]
++        default_channel="matrix:@user:example.com",
++        default_metadata={"matrix_room_id": "!abc:example.com"},
++    )
++    result = await tool.execute(
++        name="Test",
++        message="msg",
++        schedule="every 3600",
++        once=True,
++    )
++    assert result.is_error
++    assert "once" in result.content.lower()
++
++
+ class TestCronListRemoveSetEnabled:
+     async def test_list_remove_and_toggle(self, tmp_path: Path) -> None:
+         storage = _storage(tmp_path)

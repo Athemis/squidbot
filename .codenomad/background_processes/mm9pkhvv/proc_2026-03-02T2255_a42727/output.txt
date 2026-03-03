@@ -1,0 +1,10 @@
+4cd9a71 docs(plans): update design doc with 2026-03-02 performance optimization changelog
+96ac086 fix: improve task list checkbox assertion strictness
+5a83df7 feat: enable mistune plugins for extended markdown support
+1561885 refactor(skills): rename fs.py to loader.py
+98ddf59 Merge pull request #45 from Athemis/feat/frontmatter-delimiter-hardening
+---
+__init__.py
+__pycache__
+cli.py
+email.py

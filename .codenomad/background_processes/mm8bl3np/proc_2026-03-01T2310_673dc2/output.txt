@@ -1,0 +1,442 @@
+diff --git a/tests/adapters/channels/test_matrix.py b/tests/adapters/channels/test_matrix.py
+index 60a56a6..cd5616f 100644
+--- a/tests/adapters/channels/test_matrix.py
++++ b/tests/adapters/channels/test_matrix.py
+@@ -1427,3 +1427,437 @@ class TestMatrixInboundGuardrails:
+             "@owner:example.org",
+             boom,
+         )
++
++
++class TestMatrixEncryptedMediaIntake:
++    """Encrypted media intake: RoomEncryptedMedia callbacks, BadEvent routing, and decryption."""
++
++    def _make_bad_event_with_media(
++        self,
++        msgtype: str = "m.file",
++        filename: str = "doc.pdf",
++        mxc: str = "mxc://example.com/abc",
++        key_k: str = "base64key",
++        iv: str = "base64iv",
++        sha256: str = "base64hash",
++    ) -> nio.BadEvent:
++        """Build a nio.BadEvent whose content has the encrypted-file shape."""
++        source: dict[str, Any] = {
++            "sender": "@alice:example.org",
++            "event_id": "$bad1",
++            "origin_server_ts": 0,
++            "room_id": "!room1:example.org",
++            "type": "m.room.message",
++            "unsigned": {},
++            "content": {
++                "msgtype": msgtype,
++                "body": filename,
++                "file": {
++                    "url": mxc,
++                    "key": {
++                        "k": key_k,
++                        "kty": "oct",
++                        "alg": "A256CTR",
++                        "key_ops": ["encrypt", "decrypt"],
++                        "ext": True,
++                    },
++                    "iv": iv,
++                    "hashes": {"sha256": sha256},
++                },
++            },
++        }
++        return nio.BadEvent(
++            source=source,
++            event_id="$bad1",
++            sender="@alice:example.org",
++            server_timestamp=0,
++            type="m.room.message",
++        )
++
++    def _make_plain_media_event(
++        self,
++        mxc: str = "mxc://example.org/abc123",
++        filename: str = "photo.jpg",
++        mime: str = "image/jpeg",
++        declared_size: int | None = None,
++    ) -> MagicMock:
++        """Build a minimal plain (non-encrypted) media event mock."""
++        event = MagicMock()
++        event.sender = "@alice:example.org"
++        event.room_id = "!room1:example.org"
++        event.event_id = "$media1"
++        event.url = mxc
++        event.file = None
++        event.body = filename
++        event.source = {"content": {}}
++        event.server_timestamp = int(datetime.now().timestamp() * 1000)
++        info = MagicMock()
++        info.mimetype = mime
++        if declared_size is not None:
++            info.size = declared_size
++        else:
++            del info.size
++        event.info = info
++        return event
++
++    # ── Callback registration ─────────────────────────────────────────────────
++
++    async def test_registers_room_message_and_room_encrypted_media_callbacks(self) -> None:
++        """_connect() registers _handle_media for both RoomMessageMedia and RoomEncryptedMedia.
++
++        This is the pre-existing RED test (added in this branch) verifying the callback
++        registration gap. The more complete version is
++        test_registers_room_message_media_encrypted_media_and_bad_event_callbacks.
++        """
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(user_id="@bot:example.org")
++        ch = MatrixChannel(config=config)
++        fake_cfg = MagicMock()
++        fake_client = MagicMock()
++        fake_client.add_event_callback = MagicMock()
++        fake_client.load_store = MagicMock()
++
++        with (
++            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", True)),
++            patch("squidbot.adapters.channels.matrix.nio.AsyncClientConfig", return_value=fake_cfg),
++            patch("squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client),
++        ):
++            await ch._connect()
++
++        registered_types = [call.args[1] for call in fake_client.add_event_callback.call_args_list]
++
++        assert nio.RoomMessageMedia in registered_types
++        assert nio.RoomEncryptedMedia in registered_types
++
++    # ── BadEvent routing ──────────────────────────────────────────────────────
++
++    async def test_encrypted_file_with_content_file_url_is_processed(self) -> None:
++        """Encrypted m.file with content.file.url is downloaded via _download_attachment.
++
++        Verifies the BadEvent-routing path: when nio returns BadEvent for an event
++        with content.file.url shape, _handle_bad_event must extract the mxc URL from
++        source['content']['file']['url'] and pass it through the download pipeline.
++        """
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(group_policy="open")
++        ch = MatrixChannel(config=config)
++        ch._client = MagicMock()
++        download_resp = MagicMock()
++        download_resp.body = b"%PDF-1.7 encrypted"
++        download_resp.content_type = "application/pdf"
++        ch._client.download = AsyncMock(return_value=download_resp)
++
++        event = MagicMock()
++        event.url = ""
++        event.file = None
++        event.body = "secret.pdf"
++        event.source = {
++            "content": {
++                "msgtype": "m.file",
++                "file": {
++                    "url": "mxc://example.org/encrypted_media_123",
++                },
++            }
++        }
++        event.info = MagicMock()
++        event.info.mimetype = "application/pdf"
++
++        text, multimodal = await ch._download_attachment(event)
++
++        ch._client.download.assert_awaited_once_with(
++            server_name="example.org",
++            media_id="encrypted_media_123",
++        )
++        assert "secret.pdf" in text
++        assert multimodal is None
++
++    async def test_media_event_not_dropped_only_due_to_filename_without_mention(self) -> None:
++        """Mention policy must not drop media events because the filename lacks a bot mention.
++
++        Media event bodies are filenames, not user text. The mention check in _accept_event
++        compares event.body against config.user_id — for media events this produces false
++        negatives. _handle_media (and _handle_bad_event) must bypass this check or use
++        a separate acceptance path for media msgtypes.
++        """
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(group_policy="mention")
++        ch = MatrixChannel(config=config)
++        ch._client = MagicMock()
++        ch._download_attachment = AsyncMock(return_value=("[Anhang: invoice.pdf]", None))
++
++        event = self._make_plain_media_event(filename="invoice.pdf", mime="application/pdf")
++        event.source = {"content": {"msgtype": "m.file"}}
++
++        await ch._handle_media(MagicMock(), event)
++
++        assert not ch._queue.empty()
++        ch._download_attachment.assert_awaited_once_with(event)
++
++    # ── Full encrypted-media callback registration ────────────────────────────
++
++    async def test_registers_room_message_media_encrypted_media_and_bad_event_callbacks(
++        self,
++    ) -> None:
++        """_connect() registers _handle_media for both RoomMessageMedia and RoomEncryptedMedia,
++        and _handle_bad_event for BadEvent."""
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(user_id="@bot:example.org")
++        ch = MatrixChannel(config=config)
++        fake_cfg = MagicMock()
++        fake_client = MagicMock()
++        fake_client.add_event_callback = MagicMock()
++        fake_client.load_store = MagicMock()
++
++        with (
++            patch.object(ch, "_crypto_store_path", return_value=("/tmp/store", True)),
++            patch("squidbot.adapters.channels.matrix.nio.AsyncClientConfig", return_value=fake_cfg),
++            patch("squidbot.adapters.channels.matrix.nio.AsyncClient", return_value=fake_client),
++        ):
++            await ch._connect()
++
++        calls = fake_client.add_event_callback.call_args_list
++
++        # _handle_media must be registered for (RoomMessageMedia, RoomEncryptedMedia) as a tuple
++        assert any(
++            c.args[0] == ch._handle_media
++            and isinstance(c.args[1], tuple)
++            and set(c.args[1]) == {nio.RoomMessageMedia, nio.RoomEncryptedMedia}
++            for c in calls
++        ), (
++            "_handle_media must be registered with (RoomMessageMedia, RoomEncryptedMedia) tuple. "
++            f"Actual calls: {calls}"
++        )
++
++        # _handle_bad_event must be registered for BadEvent
++        assert any(
++            c.args[0] == ch._handle_bad_event and c.args[1] is nio.BadEvent for c in calls
++        ), f"_handle_bad_event must be registered for nio.BadEvent. Actual calls: {calls}"
++
++    async def test_bad_event_with_media_shape_routes_to_media_pipeline(self) -> None:
++        """A BadEvent whose content has the encrypted-file shape is routed to the media pipeline."""
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(group_policy="open")
++        ch = MatrixChannel(config=config)
++        ch._client = MagicMock()
++        ch._download_attachment = AsyncMock(
++            return_value=("[Anhang: doc.pdf (application/pdf)] → /tmp/abc.pdf", None)
++        )
++
++        room = MagicMock()
++        room.room_id = "!room1:example.org"
++        event = self._make_bad_event_with_media(msgtype="m.file", filename="doc.pdf")
++
++        await ch._handle_bad_event(room, event)
++
++        assert not ch._queue.empty(), "Expected an InboundMessage to be queued for media BadEvent"
++        msg = ch._queue.get_nowait()
++        assert msg.session.sender_id == "@alice:example.org"
++        # _download_attachment must be called with just the event (same as _handle_media)
++        ch._download_attachment.assert_awaited_once_with(event)
++
++    async def test_bad_event_without_media_shape_is_ignored(self) -> None:
++        """A BadEvent whose content is a plain text event (no 'file' key) is ignored."""
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(group_policy="open")
++        ch = MatrixChannel(config=config)
++
++        source: dict[str, Any] = {
++            "sender": "@alice:example.org",
++            "event_id": "$bad2",
++            "origin_server_ts": 0,
++            "room_id": "!room1:example.org",
++            "type": "m.room.message",
++            "unsigned": {},
++            "content": {"msgtype": "m.text", "body": "hello"},
++        }
++        event = nio.BadEvent(
++            source=source,
++            event_id="$bad2",
++            sender="@alice:example.org",
++            server_timestamp=0,
++            type="m.room.message",
++        )
++
++        room = MagicMock()
++        room.room_id = "!room1:example.org"
++
++        await ch._handle_bad_event(room, event)
++
++        assert ch._queue.empty(), "Non-media BadEvent must not produce an InboundMessage"
++
++    async def test_room_encrypted_media_decrypt_uses_key_k_and_hashes_sha256(self) -> None:
++        """_download_attachment passes positional strings to decrypt_attachment,
++        not a dict — guards against the pre-existing bug on matrix.py:773."""
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config()
++        ch = MatrixChannel(config=config)
++
++        ciphertext = b"\x00" * 32
++
++        ch._client = MagicMock()
++        ch._client.download = AsyncMock(
++            return_value=MagicMock(body=ciphertext, content_type="application/pdf")
++        )
++
++        # nio.RoomEncryptedFile lacks room_id, info, and file attributes that
++        # _download_attachment reads (the event IS the encrypted wrapper; the production
++        # code detects E2EE via event.file, not by isinstance-checking the event type).
++        # A MagicMock lets us set exactly the attributes the current production code reads.
++        enc_file_event = MagicMock()
++        enc_file_event.sender = "@alice:example.org"
++        enc_file_event.room_id = "!room1:example.org"
++        enc_file_event.event_id = "$enc1"
++        enc_file_event.server_timestamp = 0
++        enc_file_event.body = "encrypted.pdf"
++        enc_file_event.source = {"content": {}}
++        enc_file_event.url = "mxc://example.com/enc"
++        enc_file_event.info = MagicMock()
++        enc_file_event.info.mimetype = "application/pdf"
++        # event.file triggers the E2EE decryption path in _download_attachment.
++        # Its attrs (key.k, hashes["sha256"], iv) are what the fixed code should read.
++        file_attr = MagicMock()
++        file_attr.url = "mxc://example.com/enc"
++        file_attr.key = MagicMock()
++        file_attr.key.k = "base64key"
++        file_attr.key.key_type = "oct"
++        file_attr.key.alg = "A256CTR"
++        file_attr.key.key_ops = ["encrypt", "decrypt"]
++        file_attr.key.ext = True
++        file_attr.iv = "base64iv"
++        file_attr.hashes = {"sha256": "base64hash"}
++        file_attr.v = "v2"
++        enc_file_event.file = file_attr
++
++        # Patch at source because matrix.py imports decrypt_attachment lazily inside the
++        # function body: `from nio.crypto.attachments import decrypt_attachment`
++        with patch("nio.crypto.attachments.decrypt_attachment") as mock_decrypt:
++            mock_decrypt.return_value = b"decrypted content"
++            await ch._download_attachment(enc_file_event)
++
++        mock_decrypt.assert_called_once()
++        call_args = mock_decrypt.call_args
++        # Must be called with positional strings: (ciphertext, key_str, hash_str, iv_str)
++        # NOT called with a dict as the second argument
++        positional = call_args.args
++        n = len(positional)
++        assert n == 4, (
++            f"Expected 4 positional args (ciphertext, key, hash, iv), got {n}: {positional}"
++        )
++        assert not isinstance(positional[1], dict), (
++            f"decrypt_attachment arg[1] (key) must be a string, not a dict. Got: {positional[1]!r}"
++        )
++        assert positional[1] == "base64key", f"Expected key='base64key', got: {positional[1]!r}"
++        assert positional[2] == "base64hash", f"Expected hash='base64hash', got: {positional[2]!r}"
++        assert positional[3] == "base64iv", f"Expected iv='base64iv', got: {positional[3]!r}"
++
++    async def test_bad_event_media_decrypt_uses_source_content_file_key_material(self) -> None:
++        """_handle_bad_event extracts key material from source['content']['file']
++        and passes positional strings to decrypt_attachment."""
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(group_policy="open")
++        ch = MatrixChannel(config=config)
++        ciphertext = b"\x00" * 32
++
++        event = self._make_bad_event_with_media(
++            mxc="mxc://example.com/badsec",
++            key_k="bad_base64key",
++            iv="bad_base64iv",
++            sha256="bad_base64hash",
++        )
++
++        room = MagicMock()
++        room.room_id = "!room1:example.org"
++
++        ch._client = MagicMock()
++        ch._client.download = AsyncMock(
++            return_value=MagicMock(body=ciphertext, content_type="application/pdf")
++        )
++
++        # Patch at source because matrix.py imports decrypt_attachment lazily inside the
++        # function body: `from nio.crypto.attachments import decrypt_attachment`
++        with patch("nio.crypto.attachments.decrypt_attachment") as mock_decrypt:
++            mock_decrypt.return_value = b"decrypted pdf content"
++            await ch._handle_bad_event(room, event)
++
++        mock_decrypt.assert_called_once()
++        call_args = mock_decrypt.call_args
++        positional = call_args.args
++        n = len(positional)
++        assert n == 4, (
++            f"Expected 4 positional args (ciphertext, key, hash, iv), got {n}: {positional}"
++        )
++        assert positional[1] == "bad_base64key", (
++            f"Expected key='bad_base64key', got: {positional[1]!r}"
++        )
++        assert positional[2] == "bad_base64hash", (
++            f"Expected hash='bad_base64hash', got: {positional[2]!r}"
++        )
++        assert positional[3] == "bad_base64iv", (
++            f"Expected iv='bad_base64iv', got: {positional[3]!r}"
++        )
++
++    async def test_malformed_declared_size_does_not_block_download(self) -> None:
++        """When a BadEvent has a malformed info.size, the preflight guard is skipped
++        and the download is still attempted through _handle_bad_event."""
++        from squidbot.adapters.channels.matrix import MatrixChannel
++
++        config = _make_config(group_policy="open")
++        ch = MatrixChannel(config=config)
++        ch._client = MagicMock()
++        download_mock = AsyncMock(
++            return_value=MagicMock(body=b"some file content", content_type="application/pdf")
++        )
++        ch._client.download = download_mock
++
++        # BadEvent whose content has file shape but malformed size in info
++        source: dict[str, Any] = {
++            "sender": "@alice:example.org",
++            "event_id": "$bad_size",
++            "origin_server_ts": 0,
++            "room_id": "!room1:example.org",
++            "type": "m.room.message",
++            "unsigned": {},
++            "content": {
++                "msgtype": "m.file",
++                "body": "doc.pdf",
++                "info": {"size": "not-a-number", "mimetype": "application/pdf"},
++                "file": {
++                    "url": "mxc://example.org/badsize123",
++                    "key": {
++                        "k": "base64key",
++                        "kty": "oct",
++                        "alg": "A256CTR",
++                        "key_ops": ["encrypt", "decrypt"],
++                        "ext": True,
++                    },
++                    "iv": "base64iv",
++                    "hashes": {"sha256": "base64hash"},
++                },
++            },
++        }
++        event = nio.BadEvent(
++            source=source,
++            event_id="$bad_size",
++            sender="@alice:example.org",
++            server_timestamp=0,
++            type="m.room.message",
++        )
++
++        room = MagicMock()
++        room.room_id = "!room1:example.org"
++
++        # Patch at source because matrix.py imports decrypt_attachment lazily inside the
++        # function body: `from nio.crypto.attachments import decrypt_attachment`
++        with patch("nio.crypto.attachments.decrypt_attachment", return_value=b"decrypted"):
++            await ch._handle_bad_event(room, event)
++
++        # Download must be attempted even when declared size is malformed
++        download_mock.assert_awaited_once()

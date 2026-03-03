@@ -1,0 +1,20 @@
+backtick fence: E = mc^2
+tilde fence: E = mc^2
+python fence (should be None): None
+mixed fence backtick/tilde (GFM: should NOT match): E = mc^2
+mixed fence tilde/backtick (GFM: should NOT match): E = mc^2
+multiline: \frac{a}{b}
+= c
+trailing spaces on close: E = mc^2
+nested fence (should match first close): E = mc^2
+
+--- Inline math pattern ---
+backtick inline: E = mc^2
+pipe expression: a | b
+standard dollar: E=mc^2
+plain code (should be None): None
+greedy [^`]+: x^2
+lazy [^`]+?: x^2
+
+--- _parse_fenced_math return value ---
+Both block parsers return m.end() + 1 - consistent

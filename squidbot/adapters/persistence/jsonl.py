@@ -476,6 +476,7 @@ class JsonlMemory:
                             enabled=d.get("enabled", True),
                             timezone=d.get("timezone", "local"),
                             last_run=last_run,
+                            once=d.get("once", False),
                             metadata=metadata,
                         )
                     )
@@ -504,6 +505,7 @@ class JsonlMemory:
                 "enabled": j.enabled,
                 "timezone": j.timezone,
                 "last_run": j.last_run.isoformat() if j.last_run else None,
+                "once": j.once,
                 "metadata": j.metadata,
             }
             for j in jobs

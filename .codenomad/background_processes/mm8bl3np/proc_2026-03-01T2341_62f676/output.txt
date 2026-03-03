@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import nio; import inspect; print(inspect.getsource(nio.BadEvent))
+    ^^^^^^^^^^
+ModuleNotFoundError: No module named 'nio'
