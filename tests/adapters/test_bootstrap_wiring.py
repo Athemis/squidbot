@@ -58,6 +58,7 @@ def test_bootstrap_files_onboard_excludes_bootstrap_md() -> None:
         "SOUL.md",
         "IDENTITY.md",
         "USER.md",
+        "HEARTBEAT.md",
         "AGENTS.md",
         "ENVIRONMENT.md",
     ]
