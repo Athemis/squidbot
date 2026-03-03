@@ -130,6 +130,7 @@ class MemoryManager:
             timestamp=msg.timestamp,
             channel=msg.channel,
             sender_id=msg.sender_id,
+            session_id=msg.session_id,
         )
 
     async def build_messages(
@@ -197,7 +198,14 @@ class MemoryManager:
         return messages
 
     def reset_session_context(self, session: Session) -> None:
-        """Start a new context window for the given session."""
+        """Start a new context window for the given session.
+
+        Args:
+            session: Session whose prompt-context window should be reset.
+
+        Returns:
+            None.
+        """
         self._session_reset_at[session.id] = datetime.now()
 
     def _filter_history_for_session(
