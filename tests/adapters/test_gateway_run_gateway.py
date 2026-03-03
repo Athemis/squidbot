@@ -61,12 +61,18 @@ async def test_run_gateway_with_all_channels_disabled_completes_and_closes_conne
             "squidbot.cli.gateway._make_agent_loop",
             new=AsyncMock(return_value=(fake_loop, [fake_conn], fake_storage)),
         ) as make_agent_loop,
-        patch("squidbot.core.scheduler.CronScheduler", return_value=scheduler),
+        patch("squidbot.core.scheduler.CronScheduler", return_value=scheduler) as scheduler_cls,
         patch("squidbot.core.heartbeat.HeartbeatService", return_value=heartbeat),
     ):
         await _run_gateway(Path("/tmp/squidbot.yaml"))
 
-    make_agent_loop.assert_awaited_once_with(settings)
+    make_agent_loop.assert_awaited_once()
+    await_args = make_agent_loop.await_args
+    assert await_args is not None
+    assert await_args.args == (settings,)
+    mutation_lock = await_args.kwargs["cron_mutation_lock"]
+    assert isinstance(mutation_lock, asyncio.Lock)
+    scheduler_cls.assert_called_once_with(storage=fake_storage, mutation_lock=mutation_lock)
     scheduler.run.assert_awaited_once()
     heartbeat.run.assert_awaited_once_with()
     fake_loop.run.assert_not_awaited()
