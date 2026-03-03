@@ -1,0 +1,6 @@
+bash: command substitution: line 1: unexpected EOF while looking for matching `''
+old (lazy): NO MATCH
+new (greedy): NO MATCH
+multiple (old): []
+multiple (new): []
+mixed fence match: E = mc^2

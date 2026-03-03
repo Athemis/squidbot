@@ -1,0 +1,30 @@
+diff --git a/squidbot/core/models.py b/squidbot/core/models.py
+index 0341036..033dea2 100644
+--- a/squidbot/core/models.py
++++ b/squidbot/core/models.py
+@@ -136,6 +136,7 @@ class CronJob:
+     enabled: bool = True
+     timezone: str = "local"
+     last_run: datetime | None = None
++    once: bool = False
+     metadata: dict[str, Any] = field(default_factory=dict)
+ 
+ 
+diff --git a/tests/core/test_cron_ops.py b/tests/core/test_cron_ops.py
+index e93b034..54084cf 100644
+--- a/tests/core/test_cron_ops.py
++++ b/tests/core/test_cron_ops.py
+@@ -100,3 +100,13 @@ def test_format_jobs_matches_cli_layout() -> None:
+ 
+ def test_format_jobs_empty_message() -> None:
+     assert format_jobs([]) == "No cron jobs configured."
++
++
++def test_cronjob_once_flag_defaults_to_false() -> None:
++    job = _job()
++    assert job.once is False
++
++
++def test_cronjob_once_flag_can_be_set() -> None:
++    job = _job(once=True)
++    assert job.once is True

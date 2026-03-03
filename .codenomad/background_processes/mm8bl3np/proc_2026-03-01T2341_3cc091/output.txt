@@ -1,0 +1,5 @@
+ ...6-03-01-matrix-encrypted-media-intake-design.md | 184 +++++--
+ ...x-encrypted-media-intake-implementation-plan.md | 300 ++++++++---
+ squidbot/adapters/channels/matrix.py               | 254 +++++++++-
+ tests/adapters/channels/test_matrix.py             | 561 +++++++++++++++++++++
+ 4 files changed, 1152 insertions(+), 147 deletions(-)

@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "<string>", line 20, in <module>
+    for name, rule in md.block.rules.items():
+                      ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'list' object has no attribute 'items'
+Without MULTILINE, match: <re.Match object; span=(0, 9), match='>! line1\n'>
+With MULTILINE, match: <re.Match object; span=(0, 18), match='>! line1\n>! line2\n'>

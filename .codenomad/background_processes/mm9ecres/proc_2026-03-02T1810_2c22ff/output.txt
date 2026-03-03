@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/opencode/projects/squidbot/.codenomad/worktrees/perf-performance-optimization
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0, cov-7.0.0, anyio-4.12.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 542 items
+
+tests/adapters/channels/test_email.py ................................   [  5%]
+tests/adapters/channels/test_matrix.py ................................. [ 11%]
+..............................                                           [ 17%]
+tests/adapters/channels/test_rich_cli.py .............                   [ 19%]
+tests/adapters/llm/test_openai.py .....                                  [ 20%]
+tests/adapters/llm/test_pool.py ........                                 [ 22%]
+tests/adapters/persistence/test_jsonl.py ...............                 [ 25%]
+tests/adapters/persistence/test_jsonl_global_memory.py ...               [ 25%]
+tests/adapters/test_bootstrap_wiring.py ........                         [ 27%]
+tests/adapters/test_channel_loops.py .......                             [ 28%]
+tests/adapters/test_cron_cli.py ..........                               [ 30%]
+tests/adapters/test_gateway_helpers.py ....                              [ 30%]
+tests/adapters/test_gateway_run_gateway.py ...                           [ 31%]
+tests/adapters/test_gateway_status.py .......                            [ 32%]
+tests/adapters/test_llm_wiring.py .......                                [ 34%]
+tests/adapters/test_onboard.py ................                          [ 37%]
+tests/adapters/test_search_history_wiring.py ..                          [ 37%]
+tests/adapters/test_skills_cli.py ..........                             [ 39%]
+tests/adapters/test_spawn_wiring.py .....                                [ 40%]
+tests/adapters/tools/test_cron_tools.py ......                           [ 41%]
+tests/adapters/tools/test_fetch_url.py ....                              [ 42%]
+tests/adapters/tools/test_files.py ...................                   [ 45%]
+tests/adapters/tools/test_mcp.py .............                           [ 47%]
+tests/adapters/tools/test_memory_write.py ....                           [ 48%]
+tests/adapters/tools/test_message.py ...............                     [ 51%]
+tests/adapters/tools/test_search_history.py .............                [ 53%]
+tests/adapters/tools/test_shell.py .....                                 [ 54%]
+tests/adapters/tools/test_spawn.py ..................................... [ 61%]
+.                                                                        [ 61%]
+tests/adapters/tools/test_web_search.py .................                [ 64%]
+tests/config/test_schema.py ..........                                   [ 66%]
+tests/core/test_agent.py .............                                   [ 69%]
+tests/core/test_config.py ...............................                [ 74%]
+tests/core/test_cron_ops.py ...........                                  [ 76%]
+tests/core/test_heartbeat.py ..................................          [ 83%]
+tests/core/test_memory.py .............                                  [ 85%]
+tests/core/test_models.py .................                              [ 88%]
+tests/core/test_persistence.py .......                                   [ 90%]
+tests/core/test_ports.py ......                                          [ 91%]
+tests/core/test_registry.py ....                                         [ 91%]
+tests/core/test_scheduler.py ..........                                  [ 93%]
+tests/core/test_skills.py .........................                      [ 98%]
+tests/core/test_text_extract.py ...                                      [ 98%]
+tests/core/test_tools.py ......                                          [100%]
+
+============================= 542 passed in 5.44s ==============================
+EXIT:0

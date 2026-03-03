@@ -1,0 +1,10 @@
+/home/opencode/.cache/uv/archive-v0/O0nbu7RUq3iT8FcGno9bg/mistune/block_parser.py
+/home/opencode/projects/squidbot-agent-ptk/.venv/lib/python3.14/site-packages/mistune/block_parser.py
+/home/opencode/projects/squidbot/.codenomad/worktrees/perf-performance-optimization/.venv/lib/python3.14/site-packages/mistune/block_parser.py
+/home/opencode/projects/squidbot/.codenomad/worktrees/feat-markdown-rendering/.venv/lib/python3.14/site-packages/mistune/block_parser.py
+/home/opencode/projects/squidbot/.venv/lib/python3.14/site-packages/mistune/block_parser.py
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import mistune; import inspect; print(inspect.getfile(mistune))
+    ^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'mistune'

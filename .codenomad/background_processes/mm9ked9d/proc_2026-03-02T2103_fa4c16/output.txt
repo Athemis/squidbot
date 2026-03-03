@@ -1,0 +1,58 @@
+diff --git a/tests/adapters/channels/test_markdown_plugins.py b/tests/adapters/channels/test_markdown_plugins.py
+index d20dadc..f4b4df4 100644
+--- a/tests/adapters/channels/test_markdown_plugins.py
++++ b/tests/adapters/channels/test_markdown_plugins.py
+@@ -446,6 +446,53 @@ class TestMatrixSpoilerPlugin:
+         assert "data-mx-spoiler" in result
+         assert "data-mx-maths" in result
+ 
++    def test_block_spoiler_single_line_renders_span(self) -> None:
++        """>! single line renders to <span data-mx-spoiler>."""
++        from squidbot.adapters.channels.matrix import _render_markdown
++
++        result = _render_markdown(">! hidden content")
++        assert "<span data-mx-spoiler>" in result
++        assert "hidden content" in result
++
++    def test_block_spoiler_multiline_renders_single_span(self) -> None:
++        """Multi-line >! block produces one <span data-mx-spoiler>."""
++        from squidbot.adapters.channels.matrix import _render_markdown
++
++        result = _render_markdown(">! first line\n>!\n>! second line")
++        assert result.count("<span data-mx-spoiler>") == 1
++        assert "first line" in result
++        assert "second line" in result
++
++    def test_block_spoiler_inline_markdown_rendered(self) -> None:
++        """Inline markdown inside >! block is rendered."""
++        from squidbot.adapters.channels.matrix import _render_markdown
++
++        result = _render_markdown(">! **bold** and _italic_")
++        assert "<span data-mx-spoiler>" in result
++        assert "<strong>bold</strong>" in result
++
++    def test_block_spoiler_does_not_appear_in_email(self) -> None:
++        """>! lines are NOT rendered as spoiler in email channel."""
++        from squidbot.adapters.channels.email import _md
++
++        result = _md(">! hidden")
++        assert "data-mx-spoiler" not in result
++
++    def test_block_spoiler_coexists_with_inline_spoiler(self) -> None:
++        """Block and inline spoiler both work in the same message."""
++        from squidbot.adapters.channels.matrix import _render_markdown
++
++        result = _render_markdown(">! block spoiler\n\n||inline spoiler||")
++        assert result.count("data-mx-spoiler") >= 2
++
++    def test_block_spoiler_does_not_break_blockquote(self) -> None:
++        """> blockquote still works alongside >! spoiler."""
++        from squidbot.adapters.channels.matrix import _render_markdown
++
++        result = _render_markdown("> normal quote")
++        assert "<blockquote>" in result
++        assert "data-mx-spoiler" not in result
++
+ 
+ class TestSanitizeForMatrix:
+     """Test nh3-based HTML sanitizer enforces Matrix spec v1.17 allowlist.

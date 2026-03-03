@@ -1,0 +1,6 @@
+1e88577 fix(matrix): avoid false mention-policy drops for media events
+ffd0eb9 fix(matrix): remove triple callback registration and extract shared media queue logic
+c824404 fix(matrix): register RoomEncryptedMedia callback and BadEvent fallback
+74deeba fix(matrix): fix diagnostic log policy_result and strengthen test assertions
+cc31c99 feat(matrix): add inbound media parser diagnostics
+EXIT:0

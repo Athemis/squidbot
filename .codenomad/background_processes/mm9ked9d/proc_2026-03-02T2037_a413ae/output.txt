@@ -1,0 +1,61 @@
+E501 Line too long (103 > 100)
+   --> tests/adapters/llm/test_pool.py:129:101
+    |
+128 | def test_adapters_with_same_base_and_key_share_client() -> None:
+129 |     """Two OpenAIAdapter instances with the same api_base+api_key must share one AsyncOpenAI client."""
+    |                                                                                                     ^^^
+130 |     from unittest.mock import MagicMock, patch
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> tests/adapters/llm/test_pool.py:140:9
+    |
+139 |       with patch("squidbot.adapters.llm.openai.AsyncOpenAI", side_effect=tracking_openai):
+140 | /         from squidbot.adapters.llm.openai import OpenAIAdapter
+141 | |         from openai import AsyncOpenAI as _AsyncOpenAI
+    | |______________________________________________________^
+142 |
+143 |           # Build a shared client manually (simulating what _resolve_llm does)
+    |
+help: Organize imports
+
+F841 Local variable `shared_client` is assigned to but never used
+   --> tests/adapters/llm/test_pool.py:144:9
+    |
+143 |         # Build a shared client manually (simulating what _resolve_llm does)
+144 |         shared_client = _AsyncOpenAI.__new__(_AsyncOpenAI)  # don't actually construct
+    |         ^^^^^^^^^^^^^
+145 |         # The test for this must go through the gateway._resolve_llm path.
+146 |         # Instead, test OpenAIAdapter's `client` param directly:
+    |
+help: Remove assignment to unused variable `shared_client`
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> tests/adapters/tools/test_search_history.py:221:5
+    |
+219 |       rule because they need to be parsed to populate the context window.
+220 |       """
+221 | /     from unittest.mock import patch
+222 | |     from squidbot.adapters.persistence.jsonl import _serialize_message, deserialize_message_safe
+223 | |     from squidbot.core.models import Message
+224 | |     from datetime import datetime
+    | |_________________________________^
+225 |
+226 |       history_file = tmp_path / "history.jsonl"
+    |
+help: Organize imports
+
+F401 [*] `typing.Any` imported but unused
+   --> tests/core/test_agent.py:382:24
+    |
+380 |     import tempfile
+381 |     import time
+382 |     from typing import Any
+    |                        ^^^
+383 |
+384 |     from squidbot.adapters.persistence.jsonl import JsonlMemory
+    |
+help: Remove unused import: `typing.Any`
+
+Found 5 errors.
+[*] 3 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
