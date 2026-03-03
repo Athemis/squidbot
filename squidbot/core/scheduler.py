@@ -16,6 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cronsim import CronSim
+from loguru import logger
 
 from squidbot.core.models import CronJob
 from squidbot.core.ports import MemoryPort
@@ -157,19 +158,34 @@ class CronScheduler:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
-        jobs = await self._storage.load_cron_jobs()
+        try:
+            jobs = await self._storage.load_cron_jobs()
+        except Exception:
+            logger.exception("Failed to load cron jobs")
+            return
         now = datetime.now(UTC)
-        updated = False
+        kept: list[CronJob] = []
+        changed = False
         for job in jobs:
-            if is_due(job, now=now):
+            if not is_due(job, now=now):
+                kept.append(job)
+                continue
+            changed = True
+            fired_ok = False
+            try:  # noqa: SIM105 — contextlib.suppress doesn't support async
+                await on_due(job)
+                fired_ok = True
+            except Exception:
+                pass
+            if not job.once or not fired_ok:
                 job.last_run = now
-                updated = True
-                try:  # noqa: SIM105 — contextlib.suppress doesn't support async
-                    await on_due(job)
-                except Exception:
-                    pass
-        if updated:
-            await self._storage.save_cron_jobs(jobs)
+                kept.append(job)
+            # once=True and fired_ok: intentionally not appended → deleted after firing
+        if changed:
+            try:
+                await self._storage.save_cron_jobs(kept)
+            except Exception:
+                logger.exception("Failed to save cron jobs")
 
     def stop(self) -> None:
         self._running = False

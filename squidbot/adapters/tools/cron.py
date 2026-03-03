@@ -57,6 +57,13 @@ class CronAddTool:
                 "description": "Target session ID for delivery, e.g. 'matrix:@user:matrix.org'.",
             },
             "enabled": {"type": "boolean", "description": "Whether the job is enabled."},
+            "once": {
+                "type": "boolean",
+                "description": (
+                    "If true, the job fires exactly once and is then deleted. "
+                    "Only valid with cron expressions, not 'every N' intervals."
+                ),
+            },
         },
         "required": ["name", "message", "schedule"],
     }
@@ -107,6 +114,12 @@ class CronAddTool:
                 tool_call_id="", content="Error: enabled must be a boolean", is_error=True
             )
 
+        once_raw = kwargs.get("once", False)
+        if not isinstance(once_raw, bool):
+            return ToolResult(
+                tool_call_id="", content="Error: once must be a boolean", is_error=True
+            )
+
         metadata, metadata_error = _build_cron_metadata(
             target_channel=target_channel,
             default_metadata=self._default_metadata,
@@ -122,6 +135,7 @@ class CronAddTool:
             schedule=schedule_raw,
             channel=target_channel,
             enabled=enabled_raw,
+            once=once_raw,
             timezone=timezone,
             metadata=metadata,
         )
