@@ -94,6 +94,7 @@ BOOTSTRAP_FILES_ONBOARD: list[str] = [
     "SOUL.md",
     "IDENTITY.md",
     "USER.md",
+    "HEARTBEAT.md",
     "AGENTS.md",
     "ENVIRONMENT.md",
 ]

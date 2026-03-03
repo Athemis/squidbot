@@ -94,9 +94,10 @@ async def test_onboard_existing_config_kept_on_empty_input(tmp_path: Path) -> No
         return s
 
     with (
-        # api_base, api_key, model, overwrite-all=N, N×5 per-file, alias=""
+        # api_base, api_key, model, overwrite-all=N, N×6 per-file, alias=""
         patch(
-            "squidbot.cli.onboard.input", side_effect=["", "", "", "N", "N", "N", "N", "N", "N", ""]
+            "squidbot.cli.onboard.input",
+            side_effect=["", "", "", "N", "N", "N", "N", "N", "N", "N", ""],
         ),
         patch("squidbot.cli.main._load_or_init_settings", side_effect=load_with_workspace),
         patch("builtins.print"),
@@ -142,7 +143,8 @@ async def test_onboard_existing_config_overwritten_with_new_input(tmp_path: Path
                 "https://second.example.com/v1",
                 "sk-second",
                 "gpt-4o",
-                # overwrite-all=N, then N×5 per-file (one per BOOTSTRAP_FILES_MAIN)
+                # overwrite-all=N, then N×6 per-file (one per BOOTSTRAP_FILES_ONBOARD)
+                "N",
                 "N",
                 "N",
                 "N",
@@ -184,6 +186,7 @@ async def test_onboard_creates_bootstrap_files_on_fresh_workspace(tmp_path: Path
 
     for filename in BOOTSTRAP_FILES_MAIN:
         assert (workspace / filename).exists(), f"{filename} not created"
+    assert (workspace / "HEARTBEAT.md").exists()
     assert (workspace / "BOOTSTRAP.md").exists()
 
 
@@ -426,3 +429,18 @@ def test_bundled_user_template_has_preferred_language_field() -> None:
     content = user_path.read_text(encoding="utf-8")
 
     assert "- **Preferred language:**" in content
+
+
+def test_bundled_heartbeat_template_is_empty() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    heartbeat_path = repo_root / "squidbot" / "workspace" / "HEARTBEAT.md"
+
+    content = heartbeat_path.read_text(encoding="utf-8")
+
+    assert "# HEARTBEAT" in content
+    assert "## Notes" in content
+    assert "## Active" in content
+    assert "## Completed" in content
+    assert "<!-- Keep only headings/comments to skip heartbeat checks. -->" in content
+    assert "<!-- Add recurring tasks as unchecked checkboxes" in content
+    assert "\n- [ ]" not in content
