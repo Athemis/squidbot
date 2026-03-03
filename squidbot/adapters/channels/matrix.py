@@ -427,8 +427,14 @@ class MatrixChannel:
             return
         text: str = getattr(event, "body", "")
         metadata = self._extract_metadata(event)
-        session = Session(channel="matrix", sender_id=event.sender)
         room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
+        if not room_id:
+            logger.debug(
+                "MatrixChannel: drop text event={} missing room_id",
+                getattr(event, "event_id", "?"),
+            )
+            return
+        session = Session(channel="matrix", sender_id=room_id)
         self._session_rooms[session.id] = room_id
         self._queue.put_nowait(InboundMessage(session=session, text=text, metadata=metadata))
 
@@ -495,8 +501,14 @@ class MatrixChannel:
             multimodal_content: Optional multimodal blocks for embeddable images.
         """
         metadata = self._extract_metadata(event)
-        session = Session(channel="matrix", sender_id=event.sender)
         room_id: str = getattr(event, "room_id", getattr(room, "room_id", ""))
+        if not room_id:
+            logger.debug(
+                "MatrixChannel: drop media event={} missing room_id",
+                getattr(event, "event_id", "?"),
+            )
+            return
+        session = Session(channel="matrix", sender_id=room_id)
         self._session_rooms[session.id] = room_id
         self._queue.put_nowait(
             InboundMessage(
@@ -547,12 +559,19 @@ class MatrixChannel:
             if sender == self._config.user_id:
                 return
             key = content.get("m.relates_to", {}).get("key", "?")
-            room_id = getattr(room, "room_id", "")
+            room_id = getattr(room, "room_id", getattr(event, "room_id", ""))
+            if not room_id:
+                logger.debug(
+                    "MatrixChannel: drop reaction event={} missing room_id",
+                    getattr(event, "event_id", "?"),
+                )
+                return
             metadata: dict[str, Any] = {
                 "matrix_room_id": room_id,
                 "matrix_event_id": getattr(event, "event_id", ""),
+                "matrix_sender_id": sender,
             }
-            session = Session(channel="matrix", sender_id=sender)
+            session = Session(channel="matrix", sender_id=room_id)
             self._session_rooms[session.id] = room_id
             self._queue.put_nowait(
                 InboundMessage(session=session, text=f"[Reaktion: {key}]", metadata=metadata)
@@ -692,6 +711,7 @@ class MatrixChannel:
         meta: dict[str, Any] = {
             "matrix_event_id": getattr(event, "event_id", ""),
             "matrix_room_id": getattr(event, "room_id", ""),
+            "matrix_sender_id": getattr(event, "sender", ""),
         }
         relates_to = event.source.get("content", {}).get("m.relates_to", {})
         if relates_to.get("rel_type") == "m.thread":

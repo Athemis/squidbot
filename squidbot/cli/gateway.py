@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from squidbot.config.schema import OwnerAliasEntry, Settings
     from squidbot.core.agent import AgentLoop
     from squidbot.core.heartbeat import LastChannelTracker
-    from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
+    from squidbot.core.models import ChannelStatus, CronJob, Session, SessionInfo
     from squidbot.core.ports import ChannelPort, LLMPort
     from squidbot.core.skills import SkillMetadata
 
@@ -130,6 +130,16 @@ def _owner_matrix_ids(settings: Settings) -> set[str]:
     return owner_ids
 
 
+def _resolve_current_sender_id(session: Session, metadata: dict[str, Any]) -> str:
+    """Resolve sender attribution for persistence and routing policy checks."""
+    if session.channel != "matrix":
+        return session.sender_id
+    sender_from_metadata = metadata.get("matrix_sender_id")
+    if isinstance(sender_from_metadata, str) and sender_from_metadata:
+        return sender_from_metadata
+    return session.sender_id
+
+
 async def _channel_loop_with_state(
     channel: ChannelPort,
     loop: Any,
@@ -181,11 +191,13 @@ async def _channel_loop_with_state(
             )
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
+        current_sender_id = _resolve_current_sender_id(inbound.session, inbound.metadata)
         extra = [
             memory_write_tool,
             MessageTool(
                 channel_registry=registry,
                 current_session=inbound.session,
+                current_sender_id=current_sender_id,
                 inbound_text=inbound.text,
                 owner_aliases=owner_aliases or [],
                 outbound_metadata=inbound.metadata,
@@ -211,6 +223,7 @@ async def _channel_loop_with_state(
             channel,
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
+            user_sender_id=current_sender_id,
         )
 
 
@@ -248,11 +261,13 @@ async def _channel_loop(
             tracker.update(channel, inbound.session, inbound.metadata)
         tool_workspace = workspace if workspace is not None else Path(".")
         registry = channel_registry or {inbound.session.channel: channel}
+        current_sender_id = _resolve_current_sender_id(inbound.session, inbound.metadata)
         extra = [
             memory_write_tool,
             MessageTool(
                 channel_registry=registry,
                 current_session=inbound.session,
+                current_sender_id=current_sender_id,
                 inbound_text=inbound.text,
                 owner_aliases=owner_aliases or [],
                 outbound_metadata=inbound.metadata,
@@ -278,6 +293,7 @@ async def _channel_loop(
             channel,
             extra_tools=extra,
             outbound_metadata=inbound.metadata,
+            user_sender_id=current_sender_id,
         )
 
 

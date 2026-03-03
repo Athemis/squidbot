@@ -121,6 +121,7 @@ class MessageTool:
         *,
         channel_registry: dict[str, ChannelPort],
         current_session: Session,
+        current_sender_id: str | None,
         inbound_text: str,
         owner_aliases: list[OwnerAliasEntry],
         outbound_metadata: dict[str, Any],
@@ -132,6 +133,7 @@ class MessageTool:
         Args:
             channel_registry: Active channel adapters keyed by channel name.
             current_session: Session for the current inbound turn.
+            current_sender_id: Sender attribution for authorization checks.
             inbound_text: Raw inbound user text used for explicitness checks.
             owner_aliases: Owner aliases used for routing authorization.
             outbound_metadata: Metadata forwarded to outbound channel sends.
@@ -143,6 +145,7 @@ class MessageTool:
         """
         self._channel_registry = channel_registry
         self._current_session = current_session
+        self._current_sender_id = current_sender_id or current_session.sender_id
         self._inbound_text = inbound_text
         self._owner_aliases = owner_aliases
         self._outbound_metadata = outbound_metadata
@@ -202,7 +205,7 @@ class MessageTool:
 
         if routed:
             is_owner = _is_owner_sender(
-                self._current_session.sender_id,
+                self._current_sender_id,
                 self._current_session.channel,
                 self._owner_aliases,
             )
