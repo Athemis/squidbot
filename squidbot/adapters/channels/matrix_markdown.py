@@ -1,12 +1,8 @@
 """Matrix-specific mistune plugins and HTML sanitizer for squidbot.
 
 Provides:
-- plugin_mx_math: mistune plugin that converts LaTeX math syntax to the Matrix
-  spec v1.11+ data-mx-maths format.  Supported syntaxes:
-    · $...$          standard inline math
-    · $`...`$        GFM backtick inline math
-    · $$...$$        block math (delimiter on own line, single-line, or inline-open)
-    · ```math        GFM fenced block math (backtick or tilde fence)
+- plugin_mx_math: mistune plugin that converts $$...$$ and $...$ LaTeX syntax
+  to the Matrix spec v1.11+ data-mx-maths format.
 - plugin_mx_spoiler: mistune plugin that converts ||text|| to Matrix
   data-mx-spoiler format.
 - plugin_mx_block_spoiler: mistune plugin that converts >!-prefixed lines to
@@ -34,49 +30,14 @@ __all__ = ["plugin_mx_math", "plugin_mx_spoiler", "plugin_mx_block_spoiler", "sa
 # Math plugin
 # ---------------------------------------------------------------------------
 
-# Block math — three supported forms:
-#
-#  Form A: $$ on its own line, content on next lines, $$ on its own line
-#    $$
-#    content
-#    $$
-#
-#  Form B: everything on one line  $$content$$
-#
-#  Form C: $$ opens with content on same line, closes at end of last line
-#    $$\begin{align}
-#    ...
-#    \end{align}$$
-#
-# Python regex requires distinct named groups across alternatives.
+# Block math: multi-line form  $$\ncontent\n$$  or single-line form  $$content$$
+# The single-line alternative uses a separate named group (math_text_s) because
+# Python regex does not allow the same group name in two alternatives.
 _BLOCK_MATH_PATTERN = (
     r"^ {0,3}\$\$[ \t]*\n(?P<math_text>[\s\S]+?)\n\$\$[ \t]*$"
     r"|^ {0,3}\$\$[ \t]*(?P<math_text_s>[^\n$][^\n]*?)[ \t]*\$\$[ \t]*$"
-    r"|^ {0,3}\$\$(?P<math_text_m>[^\n$][^\n]*\n[\s\S]+?)\$\$[ \t]*$"
 )
-# Fenced block math: ```math or ~~~math code fence.
-# Registered before mistune's fenced_code rule so we intercept first.
-# The named group `fence` captures the opening delimiter (3+ backticks or tildes);
-# (?P=fence) is a back-reference that enforces the closing fence uses the exact same
-# character and length as the opening fence. This is stricter than GFM spec §4.5,
-# which only requires the closing fence to be the same type and at least as long as
-# the opening; mismatched lengths are rare enough in practice that this is acceptable.
-_BLOCK_MATH_FENCE_PATTERN = (
-    r"^ {0,3}(?P<fence>`{3,}|~{3,})[ \t]*math[ \t]*\n"
-    r"(?P<math_text_f>[\s\S]+?)"
-    r"\n {0,3}(?P=fence)[ \t]*$"
-)
-# Inline math — two supported forms:
-#
-#  Backtick form (GFM):  $`expr`$   — preferred when expr contains | or _
-#  Standard dollar form: $expr$
-#
-# Backtick form is listed first so the alternation prefers it over the dollar
-# form when input starts with $`.  Content must not contain backticks.
-_INLINE_MATH_PATTERN = (
-    r"\$`(?P<math_text_bt>[^`]+)`\$"
-    r"|\$(?!\s)(?P<math_text>.+?)(?<!\s)\$"
-)
+_INLINE_MATH_PATTERN = r"\$(?!\s)(?P<math_text>.+?)(?!\s)\$"
 
 
 def plugin_mx_math(md: Markdown) -> None:
@@ -95,21 +56,12 @@ def plugin_mx_math(md: Markdown) -> None:
     """
 
     def _parse_block_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        math_text: str = (
-            m.group("math_text") or m.group("math_text_s") or m.group("math_text_m") or ""
-        )
-        state.append_token({"type": "mx_block_math", "raw": math_text})
-        return int(m.end()) + 1
-
-    def _parse_fenced_math(block: BlockParser, m: Any, state: BlockState) -> int:
-        math_text: str = m.group("math_text_f") or ""
-        # Emit mx_block_math tokens so the existing renderer is reused.
+        math_text: str = m.group("math_text") or m.group("math_text_s") or ""
         state.append_token({"type": "mx_block_math", "raw": math_text})
         return int(m.end()) + 1
 
     def _parse_inline_math(inline: InlineParser, m: Any, state: InlineState) -> int:
-        math_text: str = m.group("math_text_bt") or m.group("math_text") or ""
-        state.append_token({"type": "mx_inline_math", "raw": math_text})
+        state.append_token({"type": "mx_inline_math", "raw": m.group("math_text")})
         return int(m.end())
 
     def _render_block_math(renderer: BaseRenderer, text: str) -> str:
@@ -123,13 +75,7 @@ def plugin_mx_math(md: Markdown) -> None:
         return f'<span data-mx-maths="{attr}"><code>{body}</code></span>'
 
     md.block.register("mx_block_math", _BLOCK_MATH_PATTERN, _parse_block_math, before="list")
-    md.block.register(
-        "mx_fenced_math", _BLOCK_MATH_FENCE_PATTERN, _parse_fenced_math, before="fenced_code"
-    )
-    # before="codespan" so $`...`$ is matched before mistune consumes the backtick as a code span
-    md.inline.register(
-        "mx_inline_math", _INLINE_MATH_PATTERN, _parse_inline_math, before="codespan"
-    )
+    md.inline.register("mx_inline_math", _INLINE_MATH_PATTERN, _parse_inline_math, before="link")
     if md.renderer and md.renderer.NAME == "html":
         md.renderer.register("mx_block_math", _render_block_math)
         md.renderer.register("mx_inline_math", _render_inline_math)
