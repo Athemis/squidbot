@@ -9,6 +9,7 @@ interactions happen through the injected port implementations.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
@@ -32,6 +33,17 @@ from squidbot.core.slash_commands import handle_slash_command
 # Prevents infinite loops in case of buggy tool chains.
 MAX_TOOL_ROUNDS = 20
 MAX_TRACKED_SESSION_GENERATIONS = 10_000
+
+
+def _sanitize_log_value(value: str) -> str:
+    """Return a single-token value safe for key=value log lines."""
+    sanitized_chars = [
+        char
+        if char.isascii() and char.isprintable() and not char.isspace() and char != "="
+        else "_"
+        for char in value
+    ]
+    return "".join(sanitized_chars)
 
 
 def _format_llm_error(exc: Exception) -> str:
@@ -183,12 +195,15 @@ class AgentLoop:
         messages: list[Message],
         tool_calls: list[ToolCall],
         extra_tools: dict[str, ToolPort],
+        *,
+        session_id: str,
+        round_number: int,
     ) -> None:
         """Execute tool calls and append results to messages.
 
         When every tool in the batch has ``concurrent = True`` (the default),
-        all calls are executed in parallel via asyncio.gather with
-        return_exceptions=True — a failing tool does not cancel sibling tasks.
+        all calls are executed in parallel via asyncio.gather.
+        Per-call exceptions are converted to tool error messages.
 
         When any tool declares ``concurrent = False`` the entire batch is executed
         sequentially in call order to avoid unintended side-effect interleaving.
@@ -197,56 +212,104 @@ class AgentLoop:
             messages: Message list to append tool result messages to.
             tool_calls: Tool calls from the LLM to execute.
             extra_tools: Per-run extra tools keyed by name.
+            session_id: Session identifier used for lifecycle logs.
+            round_number: 1-based tool-call round number used for lifecycle logs.
         """
+        safe_session_id = _sanitize_log_value(session_id)
 
-        async def _execute_one(tool_call: ToolCall) -> Message:
-            extra_tool = extra_tools.get(tool_call.name)
-            if extra_tool is not None:
-                raw = await extra_tool.execute(**tool_call.arguments)
-                result = ToolResult(
-                    tool_call_id=tool_call.id,
-                    content=raw.content,
-                    is_error=raw.is_error,
+        async def _execute_one(tool_call: ToolCall) -> tuple[Message, bool]:
+            call_started = time.monotonic()
+            safe_tool_name = _sanitize_log_value(tool_call.name)
+            safe_call_id = _sanitize_log_value(tool_call.id)
+            try:
+                extra_tool = extra_tools.get(tool_call.name)
+                if extra_tool is not None:
+                    raw = await extra_tool.execute(**tool_call.arguments)
+                    result = ToolResult(
+                        tool_call_id=tool_call.id,
+                        content=raw.content,
+                        is_error=raw.is_error,
+                    )
+                else:
+                    result = await self._registry.execute(
+                        tool_call.name,
+                        tool_call_id=tool_call.id,
+                        **tool_call.arguments,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                duration_ms = int((time.monotonic() - call_started) * 1000)
+                logger.info(
+                    "agent.tool.call.done session_id={} round={} tool={} "
+                    "call_id={} duration_ms={} status=error",
+                    safe_session_id,
+                    round_number,
+                    safe_tool_name,
+                    safe_call_id,
+                    duration_ms,
                 )
-            else:
-                result = await self._registry.execute(
-                    tool_call.name,
-                    tool_call_id=tool_call.id,
-                    **tool_call.arguments,
+                return (
+                    Message(
+                        role="tool",
+                        content=f"Error: {exc}",
+                        tool_call_id=tool_call.id,
+                    ),
+                    True,
                 )
-            return Message(
-                role="tool",
-                content=result.content,
-                tool_call_id=tool_call.id,
+
+            duration_ms = int((time.monotonic() - call_started) * 1000)
+            status = "error" if result.is_error else "ok"
+            logger.info(
+                "agent.tool.call.done session_id={} round={} tool={} "
+                "call_id={} duration_ms={} status={}",
+                safe_session_id,
+                round_number,
+                safe_tool_name,
+                safe_call_id,
+                duration_ms,
+                status,
+            )
+            return (
+                Message(
+                    role="tool",
+                    content=result.content,
+                    tool_call_id=tool_call.id,
+                ),
+                result.is_error,
             )
 
         run_parallel = all(self._is_concurrent(tc, extra_tools) for tc in tool_calls)
+        logger.info(
+            "agent.tool.round.start session_id={} round={} count={} parallel={}",
+            safe_session_id,
+            round_number,
+            len(tool_calls),
+            run_parallel,
+        )
+        round_started = time.monotonic()
 
+        results: list[tuple[Message, bool]]
         if run_parallel:
-            raw_results: list[Message | BaseException] = list(
-                await asyncio.gather(
-                    *[_execute_one(tc) for tc in tool_calls], return_exceptions=True
-                )
-            )
+            results = list(await asyncio.gather(*[_execute_one(tc) for tc in tool_calls]))
         else:
-            raw_results = []
+            results = []
             for tc in tool_calls:
-                try:
-                    raw_results.append(await _execute_one(tc))
-                except Exception as exc:
-                    raw_results.append(exc)
+                results.append(await _execute_one(tc))
 
-        for tool_call, result_or_exc in zip(tool_calls, raw_results, strict=True):
-            if isinstance(result_or_exc, BaseException):
-                messages.append(
-                    Message(
-                        role="tool",
-                        content=f"Error: {result_or_exc}",
-                        tool_call_id=tool_call.id,
-                    )
-                )
-            else:
-                messages.append(result_or_exc)
+        ok_count = sum(1 for _, is_error in results if not is_error)
+        error_count = len(results) - ok_count
+        round_duration_ms = int((time.monotonic() - round_started) * 1000)
+        logger.info(
+            "agent.tool.round.done session_id={} round={} duration_ms={} "
+            "ok_count={} error_count={}",
+            safe_session_id,
+            round_number,
+            round_duration_ms,
+            ok_count,
+            error_count,
+        )
+
+        for message, _ in results:
+            messages.append(message)
 
     async def _deliver_final_text(
         self,
@@ -419,9 +482,15 @@ class AgentLoop:
                 )
             )
 
-            await self._append_tool_results(messages, tool_calls, extra_tool_map)
-
             tool_round += 1
+
+            await self._append_tool_results(
+                messages,
+                tool_calls,
+                extra_tool_map,
+                session_id=session.id,
+                round_number=tool_round,
+            )
         else:
             final_text = final_text or "Error: maximum tool call rounds exceeded."
 

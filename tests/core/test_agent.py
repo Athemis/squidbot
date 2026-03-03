@@ -7,10 +7,12 @@ in-memory test doubles. No network calls, no filesystem I/O.
 
 from __future__ import annotations
 
+import io
 from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from squidbot.core.agent import AgentLoop
 from squidbot.core.memory import MemoryManager
@@ -108,6 +110,53 @@ class EchoTool:
         return ToolResult(tool_call_id="", content=f"echoed: {text}")
 
 
+class RaisingTool:
+    name = "raising_tool"
+    description = "Always raises"
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, **_: Any) -> ToolResult:
+        raise RuntimeError("boom")
+
+
+class ErrorResultTool:
+    name = "error_result_tool"
+    description = "Returns an error ToolResult"
+    parameters = {"type": "object", "properties": {}}
+
+    async def execute(self, **_: Any) -> ToolResult:
+        return ToolResult(tool_call_id="", content="Error: tool reported failure", is_error=True)
+
+
+class SensitiveEchoTool:
+    name = "sensitive_echo"
+    description = "Echoes sensitive values"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string"},
+            "password": {"type": "string"},
+        },
+        "required": ["api_key", "password"],
+    }
+
+    async def execute(self, api_key: str, password: str, **_: Any) -> ToolResult:
+        return ToolResult(
+            tool_call_id="",
+            content=f"api_key={api_key} password={password}",
+        )
+
+
+def _log_contains_with_fields(log_output: str, event_name: str, required_fields: list[str]) -> bool:
+    """Return True if any log line contains an event and all fields."""
+    for line in log_output.splitlines():
+        if event_name not in line:
+            continue
+        if all(field in line for field in required_fields):
+            return True
+    return False
+
+
 class BuildMessagesFailingMemory(MemoryManager):
     async def build_messages(
         self,
@@ -179,6 +228,222 @@ async def test_tool_call_then_text(storage, memory):
     loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="You are a bot.")
     await loop.run(SESSION, "Please echo world", channel)
     assert any("Result received!" in message.text for message in channel.sent)
+
+
+async def test_tool_call_logs_info_lifecycle_success(storage, memory) -> None:
+    tool_call = ToolCall(id="tc_info_ok", name="echo", arguments={"text": "world"})
+    llm = ScriptedLLM([[tool_call], "done"])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(SESSION, "run tool", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.start",
+        [f"session_id={SESSION.id}", "round=1", "count=1", "parallel=True"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.call.done",
+        ["tool=echo", "call_id=tc_info_ok", "duration_ms=", "status=ok"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.done",
+        ["duration_ms=", "ok_count=1", "error_count=0"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_name", "call_id"),
+    [
+        (RaisingTool(), "raising_tool", "tc_info_raise"),
+        (ErrorResultTool(), "error_result_tool", "tc_info_error_result"),
+    ],
+)
+async def test_tool_call_logs_info_lifecycle_error(
+    storage,
+    memory,
+    tool: Any,
+    tool_name: str,
+    call_id: str,
+) -> None:
+    tool_call = ToolCall(id=call_id, name=tool_name, arguments={})
+    llm = ScriptedLLM([[tool_call], "done"])
+    registry = ToolRegistry()
+    registry.register(tool)
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(SESSION, "run error tool", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.call.done",
+        [f"tool={tool_name}", f"call_id={call_id}", "duration_ms=", "status=error"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.done",
+        ["duration_ms=", "ok_count=0", "error_count=1"],
+    )
+
+
+async def test_tool_call_logs_info_lifecycle_mixed_outcomes(storage, memory) -> None:
+    tool_calls = [
+        ToolCall(id="tc_info_mixed_ok", name="echo", arguments={"text": "world"}),
+        ToolCall(id="tc_info_mixed_error", name="error_result_tool", arguments={}),
+    ]
+    llm = ScriptedLLM([tool_calls, "done"])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    registry.register(ErrorResultTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(SESSION, "run mixed tool outcomes", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.done",
+        ["duration_ms=", "ok_count=1", "error_count=1"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.call.done",
+        ["tool=echo", "call_id=tc_info_mixed_ok", "status=ok"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.call.done",
+        ["tool=error_result_tool", "call_id=tc_info_mixed_error", "status=error"],
+    )
+
+
+async def test_tool_call_logs_info_payload_safe(storage, memory) -> None:
+    arg_secret = "sk-live-arg-secret-token"
+    output_secret = "password=output-secret-value"
+    tool_call = ToolCall(
+        id="tc_info_sensitive",
+        name="sensitive_echo",
+        arguments={"api_key": arg_secret, "password": "output-secret-value"},
+    )
+    llm = ScriptedLLM([[tool_call], "done"])
+    registry = ToolRegistry()
+    registry.register(SensitiveEchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(SESSION, "run sensitive tool", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.start",
+        [f"session_id={SESSION.id}", "round=1", "count=1", "parallel=True"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.call.done",
+        ["tool=sensitive_echo", "call_id=tc_info_sensitive", "duration_ms=", "status=ok"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.done",
+        ["duration_ms=", "ok_count=1", "error_count=0"],
+    )
+    assert arg_secret not in logs
+    assert output_secret not in logs
+
+
+async def test_tool_call_logs_info_rejects_log_injection_tokens(storage, memory) -> None:
+    malicious_tool_name = "evil\nstatus=forged"
+    malicious_call_id = "tc_bad\nround=999"
+    tool_call = ToolCall(id=malicious_call_id, name=malicious_tool_name, arguments={})
+    llm = ScriptedLLM([[tool_call], "done"])
+    registry = ToolRegistry()
+    registry.register(ErrorResultTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(SESSION, "run malicious tool", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    call_done_lines = [line for line in logs.splitlines() if "agent.tool.call.done" in line]
+    assert len(call_done_lines) == 1
+    call_done = call_done_lines[0]
+    assert "tool=evil_status_forged" in call_done
+    assert "call_id=tc_bad_round_999" in call_done
+    assert "status=forged" not in call_done
+    assert "round=999" not in call_done
+
+
+async def test_tool_call_logs_info_sanitizes_malicious_session_id(storage, memory) -> None:
+    malicious_session = Session(channel="cli", sender_id="mallory\nstatus=forged=1")
+    expected_safe_session_id = "cli:mallory_status_forged_1"
+    tool_call = ToolCall(id="tc_info_ok", name="echo", arguments={"text": "world"})
+    llm = ScriptedLLM([[tool_call], "done"])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    channel = CollectingChannel()
+    loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt="sys")
+
+    output = io.StringIO()
+    sink_id = logger.add(output, level="INFO", format="{message}")
+    try:
+        await loop.run(malicious_session, "run tool", channel)
+    finally:
+        logger.remove(sink_id)
+
+    logs = output.getvalue()
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.start",
+        [f"session_id={expected_safe_session_id}", "round=1", "count=1", "parallel=True"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.call.done",
+        [f"session_id={expected_safe_session_id}", "tool=echo", "status=ok"],
+    )
+    assert _log_contains_with_fields(
+        logs,
+        "agent.tool.round.done",
+        [f"session_id={expected_safe_session_id}", "ok_count=1", "error_count=0"],
+    )
+    assert f"session_id={malicious_session.id}" not in logs
+    assert "status=forged=1" not in logs
 
 
 async def test_tool_call_round_preserves_reasoning_content(storage, memory):
