@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from squidbot.config.schema import OwnerAliasEntry, Settings
     from squidbot.core.agent import AgentLoop
     from squidbot.core.heartbeat import LastChannelTracker
-    from squidbot.core.models import ChannelStatus, CronJob, SessionInfo
+    from squidbot.core.models import ChannelStatus, CronJob, Session, SessionInfo
     from squidbot.core.ports import ChannelPort, LLMPort
     from squidbot.core.skills import SkillMetadata
 
@@ -130,7 +130,7 @@ def _owner_matrix_ids(settings: Settings) -> set[str]:
     return owner_ids
 
 
-def _resolve_current_sender_id(session: Any, metadata: dict[str, Any]) -> str:
+def _resolve_current_sender_id(session: Session, metadata: dict[str, Any]) -> str:
     """Resolve sender attribution for persistence and routing policy checks."""
     if session.channel != "matrix":
         return session.sender_id
