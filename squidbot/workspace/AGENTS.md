@@ -13,7 +13,7 @@ Before acting, orient yourself:
 1. Read `IDENTITY.md` — who you are
 2. Read `SOUL.md` — your values
 3. Read `USER.md` — who you're helping
-4. Check `memory.md` for relevant context
+4. Check `MEMORY.md` for relevant context
 
 ## Action Philosophy
 
@@ -29,7 +29,7 @@ Ask only before:
 
 ## Memory
 
-Your long-term memory is in `memory.md` (injected at session start).
+Your long-term memory is in `MEMORY.md` (injected at session start).
 Use `memory_write` to update it when you learn something important.
 Be selective — only record what will be useful across sessions.
 

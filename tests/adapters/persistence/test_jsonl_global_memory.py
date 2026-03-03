@@ -10,6 +10,11 @@ async def test_global_memory_default_empty(tmp_path):
     assert await storage.load_global_memory() == ""
 
 
+async def test_global_memory_file_created_on_init(tmp_path):
+    JsonlMemory(base_dir=tmp_path)
+    assert (tmp_path / "workspace" / "MEMORY.md").exists()
+
+
 async def test_global_memory_roundtrip(tmp_path):
     storage = JsonlMemory(base_dir=tmp_path)
     await storage.save_global_memory("User likes Python.")

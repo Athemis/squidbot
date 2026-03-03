@@ -193,6 +193,7 @@ class JsonlMemory:
         self._base.mkdir(parents=True, exist_ok=True)
         (self._base / "workspace").mkdir(parents=True, exist_ok=True)
         (self._base / "cron").mkdir(parents=True, exist_ok=True)
+        _global_memory_file(self._base).touch(exist_ok=True)
         # In-memory cache of recent history entries.
         # Populated on first load_history call; maintained on append.
         self._history_cache: collections.deque[Message] = collections.deque()
