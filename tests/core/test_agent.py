@@ -114,6 +114,9 @@ class BuildMessagesFailingMemory(MemoryManager):
         user_message: str,
         system_prompt: str,
         session: Session | None = None,
+        *,
+        session_id: str | None = None,
+        load_history: bool = True,
     ) -> list[Message]:
         raise RuntimeError("build failed")
 
@@ -545,3 +548,69 @@ async def test_unknown_slash_command_returns_help_hint_without_llm_call(storage,
     assert "unknown command" in channel.sent[0].text.lower()
     assert "/help" in channel.sent[0].text
     assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_new_starts_fresh_logical_session_without_history_backfill(storage, memory):
+    token = "TEST_TOKEN"
+
+    class ProbeLLM:
+        def __init__(self) -> None:
+            self.calls: list[list[Message]] = []
+
+        async def chat(self, messages, tools, *, stream=True) -> AsyncIterator:
+            call_messages = list(messages)
+            self.calls.append(call_messages)
+
+            async def _gen() -> AsyncIterator[str]:
+                prompt_text = "\n".join(str(m.content) for m in call_messages)
+                if token in prompt_text:
+                    yield token
+                    return
+                yield "I do not know."
+
+            return _gen()
+
+    llm = ProbeLLM()
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, f"Merke dir: {token}", channel)
+    await loop.run(SESSION, "/new", channel)
+    await loop.run(SESSION, "Welches Token habe ich vorhin gegeben?", channel)
+
+    assert len(llm.calls) == 2
+    second_prompt = "\n".join(str(m.content) for m in llm.calls[1])
+    assert token not in second_prompt
+    assert channel.sent[-1].text == "I do not know."
+    assert SESSION.id not in loop._session_backfill_next_turn
+
+
+async def test_slash_new_evicts_old_session_generations(storage, memory):
+    """Session generation tracking evicts oldest entries when capacity is exceeded."""
+    llm = ScriptedLLM([])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+    loop._max_tracked_session_generations = 2
+
+    session_one = Session(channel="cli", sender_id="one")
+    session_two = Session(channel="cli", sender_id="two")
+    session_three = Session(channel="cli", sender_id="three")
+
+    await loop.run(session_one, "/new", channel)
+    await loop.run(session_two, "/new", channel)
+    await loop.run(session_three, "/new", channel)
+
+    assert len(loop._session_generation) == 2
+    assert session_one.id not in loop._session_generation
+    assert session_two.id in loop._session_generation
+    assert session_three.id in loop._session_generation

@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a minimal cross-channel slash command layer with `/help` and `/new`, where `/new` resets context for the active session without LLM involvement.
+**Goal:** Add a minimal cross-channel slash command layer with `/help` and `/new`, where `/new` starts a fresh logical session without automatic history backfill.
 
-**Architecture:** `AgentLoop` handles slash commands centrally via a new core router. `MemoryManager` tracks per-session reset boundaries and applies them when building prompt context. Message persistence adds optional `session_id` for robust session-scoped filtering.
+**Architecture:** `AgentLoop` handles slash commands centrally via a new core router and maintains logical session generations per physical session. `MemoryManager` accepts a logical `session_id` and `load_history` flag to control implicit history injection. Message persistence includes optional `session_id` for robust session-scoped filtering.
 
 **Tech Stack:** Python 3.14, pytest, ruff, mypy --strict.
 
@@ -20,7 +20,7 @@
 **Step 1: Write failing tests**
 - Add test that `/help` returns command list and does not consume an LLM response.
 - Add test that `/new` returns confirmation and does not consume an LLM response.
-- Add memory test for reset boundary filtering by session.
+- Add memory tests for logical-session filtering and `load_history=False` behavior.
 - Add jsonl test ensuring `session_id` serializes/deserializes.
 
 **Step 2: Run targeted tests to verify RED**
@@ -48,12 +48,12 @@ Expected:
 **Step 2: Wire `AgentLoop` command fast path**
 - Detect slash commands for string input only.
 - Send direct response via channel and return before typing/LLM.
-- On `/new`, call `MemoryManager.reset_session_context(session)`.
+- On `/new`, increment logical session generation and set one-shot `load_history=False` for the next turn.
 
-**Step 3: Add session-aware reset filtering in memory**
-- Add optional `session` arg to `build_messages(...)`.
-- Track reset timestamp by `session.id`.
-- Filter only the matching session history up to reset boundary.
+**Step 3: Add session-aware history selection in memory**
+- Add optional `session_id` and `load_history` args to `build_messages(...)`.
+- Filter history to rows matching the logical `session_id`.
+- Keep legacy fallback matching limited to the base physical session ID.
 
 **Step 4: Add optional `session_id` persistence field**
 - Add `session_id: str | None` to `Message`.

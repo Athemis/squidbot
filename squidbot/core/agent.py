@@ -9,6 +9,7 @@ interactions happen through the injected port implementations.
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
 
@@ -30,6 +31,7 @@ from squidbot.core.slash_commands import handle_slash_command
 # Maximum number of tool-call rounds per user message.
 # Prevents infinite loops in case of buggy tool chains.
 MAX_TOOL_ROUNDS = 20
+MAX_TRACKED_SESSION_GENERATIONS = 10_000
 
 
 def _format_llm_error(exc: Exception) -> str:
@@ -86,6 +88,35 @@ class AgentLoop:
         self._memory = memory
         self._registry = registry
         self._system_prompt = system_prompt
+        self._session_generation: OrderedDict[str, int] = OrderedDict()
+        self._session_backfill_next_turn: dict[str, bool] = {}
+        self._max_tracked_session_generations = MAX_TRACKED_SESSION_GENERATIONS
+
+    def _get_session_generation(self, session_id: str) -> int:
+        """Return session generation while refreshing recency order."""
+        generation = self._session_generation.get(session_id)
+        if generation is None:
+            return 0
+        self._session_generation.move_to_end(session_id)
+        return generation
+
+    def _set_session_generation(self, session_id: str, generation: int) -> None:
+        """Persist session generation and evict oldest entries when over capacity."""
+        self._session_generation[session_id] = generation
+        self._session_generation.move_to_end(session_id)
+        while len(self._session_generation) > self._max_tracked_session_generations:
+            self._session_generation.popitem(last=False)
+
+    def _effective_session_id(self, session: Session) -> str:
+        """Return the logical session ID used for prompt history and persistence."""
+        generation = self._get_session_generation(session.id)
+        if generation == 0:
+            return session.id
+        return f"{session.id}#g{generation}"
+
+    def _consume_backfill_flag(self, session: Session) -> bool:
+        """Return whether to backfill history for this turn, consuming one-shot overrides."""
+        return self._session_backfill_next_turn.pop(session.id, True)
 
     def _build_tool_definitions(
         self, extra_tools: Sequence[ToolPort] | None
@@ -287,7 +318,10 @@ class AgentLoop:
             slash_result = handle_slash_command(user_message)
             if slash_result.handled:
                 if slash_result.reset_requested:
-                    self._memory.reset_session_context(session)
+                    next_generation = self._get_session_generation(session.id) + 1
+                    self._set_session_generation(session.id, next_generation)
+                    # /new starts a fresh logical session without automatic history backfill.
+                    self._session_backfill_next_turn[session.id] = False
                 await channel.send(
                     OutboundMessage(
                         session=session,
@@ -299,11 +333,16 @@ class AgentLoop:
 
         await channel.send_typing(session.id)
 
+        effective_session_id = self._effective_session_id(session)
+        load_history = self._consume_backfill_flag(session)
+
         try:
             messages = await self._memory.build_messages(
                 user_message=text_fallback,
                 system_prompt=self._system_prompt,
                 session=session,
+                session_id=effective_session_id,
+                load_history=load_history,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: build_messages failed, fallback to minimal context: {}", exc)
@@ -396,7 +435,7 @@ class AgentLoop:
                 sender_id=user_sender_id or session.sender_id,
                 user_message=text_fallback,
                 assistant_reply=final_text,
-                session_id=session.id,
+                session_id=effective_session_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent.run: persist_exchange failed for session={}: {}", session.id, exc)

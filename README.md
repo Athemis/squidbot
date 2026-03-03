@@ -291,7 +291,7 @@ squidbot skills list          List all discovered skills and their availability
 Interactive slash commands (available across CLI, Matrix, and Email):
 
 - `/help` — list available slash commands
-- `/new` — start a new conversation context for the current session
+- `/new` — start a new logical conversation session for the current channel/session
 
 ## Architecture
 
@@ -344,8 +344,9 @@ Manual-only persistence, global across all channels:
 - **Global history** (`~/.squidbot/history.jsonl`) — append-only history across all channels,
   with entries labelled by channel/sender. Recent messages are included in prompt context,
   and older details are recalled explicitly with the `search_history` tool.
-- **Session context reset** (`/new`) — starts a new prompt-context window for the current
-  session while keeping global history append-only.
+- **Session context reset** (`/new`) — starts a new logical session and disables automatic
+  history backfill for the next turn. Global history remains append-only, and older details
+  can still be pulled explicitly with `search_history`.
 
 **Persistence layout:**
 
