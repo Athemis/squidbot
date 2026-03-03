@@ -108,7 +108,7 @@ def test_resolve_llm_forwards_inference_defaults() -> None:
         _resolve_llm(settings, "default")
 
     call_kwargs = openai_adapter.call_args.kwargs
-    assert call_kwargs["max_tokens"] == 8192
+    assert call_kwargs["max_tokens"] is None
     assert call_kwargs["temperature"] is None
     assert call_kwargs["top_p"] is None
     assert call_kwargs["presence_penalty"] is None
