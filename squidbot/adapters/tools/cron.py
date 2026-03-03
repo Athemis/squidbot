@@ -13,7 +13,10 @@ class CronListTool:
     """List all configured cron jobs."""
 
     name = "cron_list"
-    description = "List all configured cron jobs."
+    description = (
+        "List all configured cron jobs. Output marks one-time jobs with [once], "
+        "which fire once and are then removed."
+    )
     parameters = {"type": "object", "properties": {}, "required": []}
 
     def __init__(self, storage: MemoryPort) -> None:
@@ -33,7 +36,10 @@ class CronAddTool:
 
     name = "cron_add"
     concurrent = False
-    description = "Create a cron job with schedule, target channel, and message."
+    description = (
+        "Create a cron job with schedule, target channel, and message. Set once=true "
+        "for one-time cron-expression jobs that self-delete after successful firing."
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -45,7 +51,9 @@ class CronAddTool:
             "schedule": {
                 "type": "string",
                 "description": (
-                    "Cron expression (e.g. '0 9 * * *') or interval form ('every 3600')."
+                    "Schedule format. Use cron expressions like '0 9 * * *' or "
+                    "'30 15 15 3 *'. Interval form 'every N' is recurring and cannot "
+                    "be combined with once=true."
                 ),
             },
             "timezone": {
@@ -57,6 +65,14 @@ class CronAddTool:
                 "description": "Target session ID for delivery, e.g. 'matrix:@user:matrix.org'.",
             },
             "enabled": {"type": "boolean", "description": "Whether the job is enabled."},
+            "once": {
+                "type": "boolean",
+                "description": (
+                    "If true, fire exactly once and delete the job after successful "
+                    "delivery. Use only with cron expressions (for example, a specific "
+                    "date/time), not with 'every N' intervals."
+                ),
+            },
         },
         "required": ["name", "message", "schedule"],
     }
@@ -107,6 +123,12 @@ class CronAddTool:
                 tool_call_id="", content="Error: enabled must be a boolean", is_error=True
             )
 
+        once_raw = kwargs.get("once", False)
+        if not isinstance(once_raw, bool):
+            return ToolResult(
+                tool_call_id="", content="Error: once must be a boolean", is_error=True
+            )
+
         metadata, metadata_error = _build_cron_metadata(
             target_channel=target_channel,
             default_metadata=self._default_metadata,
@@ -122,6 +144,7 @@ class CronAddTool:
             schedule=schedule_raw,
             channel=target_channel,
             enabled=enabled_raw,
+            once=once_raw,
             timezone=timezone,
             metadata=metadata,
         )
@@ -176,7 +199,9 @@ class CronSetEnabledTool:
 
     name = "cron_set_enabled"
     concurrent = False
-    description = "Enable or disable a cron job by its ID."
+    description = (
+        "Enable or disable a cron job by its ID. This does not change schedule or once mode."
+    )
     parameters = {
         "type": "object",
         "properties": {
