@@ -234,7 +234,7 @@ class MemoryManager:
         if msg.channel != session.channel:
             return False
         if msg.role == "assistant":
-            return False
+            return True
         return msg.sender_id == session.sender_id
 
     async def persist_exchange(

@@ -508,7 +508,7 @@ async def test_build_messages_applies_session_reset_boundary(storage: InMemorySt
 async def test_build_messages_reset_boundary_handles_legacy_entries(
     storage: InMemoryStorage,
 ) -> None:
-    """Legacy messages without session_id are matched by channel+sender only."""
+    """Legacy messages without session_id are matched with channel fallback rules."""
     manager = MemoryManager(storage=storage)
     session = Session(channel="cli", sender_id="local")
     manager.reset_session_context(session)
@@ -524,7 +524,14 @@ async def test_build_messages_reset_boundary_handles_legacy_entries(
         ),
         Message(
             role="assistant",
-            content="legacy assistant same channel",
+            content="legacy assistant old",
+            channel="cli",
+            sender_id="assistant",
+            timestamp=reset_at - timedelta(microseconds=1),
+        ),
+        Message(
+            role="assistant",
+            content="legacy assistant new",
             channel="cli",
             sender_id="assistant",
             timestamp=reset_at,
@@ -553,6 +560,7 @@ async def test_build_messages_reset_boundary_handles_legacy_entries(
 
     rendered = "\n".join(str(m.content) for m in messages[1:-1])
     assert "legacy other channel" in rendered
-    assert "legacy assistant same channel" in rendered
+    assert "legacy assistant old" not in rendered
+    assert "legacy assistant new" in rendered
     assert "legacy matching old" not in rendered
     assert "legacy matching new" in rendered
