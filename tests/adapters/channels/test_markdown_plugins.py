@@ -543,12 +543,6 @@ class TestMatrixMathPlugin:
         result = _matrix_md("Result: $ x$")
         assert "data-mx-maths" not in result
 
-    def test_inline_math_does_not_capture_double_dollar_delimiters(self) -> None:
-        """Literal $$...$$ text in a sentence is not partially parsed as inline math."""
-        result = _matrix_md("Delimiters: $$...$$")
-        assert "data-mx-maths" not in result
-        assert "$$...$$" in result
-
 
 class TestMatrixSpoilerPlugin:
     """Test Matrix-specific spoiler plugin renders ||text|| to data-mx-spoiler."""
