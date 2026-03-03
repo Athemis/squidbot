@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from squidbot.core import cron_ops
 from squidbot.core.models import CronJob, ToolResult
 from squidbot.core.ports import MemoryPort, ToolPort
+
+
+async def _run_with_optional_lock(
+    mutation_lock: asyncio.Lock | None,
+    operation: Callable[[], Awaitable[ToolResult]],
+) -> ToolResult:
+    if mutation_lock is None:
+        return await operation()
+
+    async with mutation_lock:
+        return await operation()
 
 
 class CronListTool:
@@ -61,10 +74,12 @@ class CronAddTool:
         storage: MemoryPort,
         default_channel: str,
         default_metadata: dict[str, Any],
+        mutation_lock: asyncio.Lock | None = None,
     ) -> None:
         self._storage = storage
         self._default_channel = default_channel
         self._default_metadata = dict(default_metadata)
+        self._mutation_lock = mutation_lock
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         name_raw = kwargs.get("name")
@@ -120,13 +135,17 @@ class CronAddTool:
             timezone=timezone,
             metadata=metadata,
         )
-        jobs = await self._storage.load_cron_jobs()
-        try:
-            updated = cron_ops.add_job(jobs, job)
-        except ValueError as exc:
-            return ToolResult(tool_call_id="", content=f"Error: {exc}", is_error=True)
-        await self._storage.save_cron_jobs(updated)
-        return ToolResult(tool_call_id="", content=f"OK: created cron job id={job.id}")
+
+        async def _create_job() -> ToolResult:
+            jobs = await self._storage.load_cron_jobs()
+            try:
+                updated = cron_ops.add_job(jobs, job)
+            except ValueError as exc:
+                return ToolResult(tool_call_id="", content=f"Error: {exc}", is_error=True)
+            await self._storage.save_cron_jobs(updated)
+            return ToolResult(tool_call_id="", content=f"OK: created cron job id={job.id}")
+
+        return await _run_with_optional_lock(self._mutation_lock, _create_job)
 
 
 class CronRemoveTool:
@@ -142,21 +161,26 @@ class CronRemoveTool:
         "required": ["job_id"],
     }
 
-    def __init__(self, storage: MemoryPort) -> None:
+    def __init__(self, storage: MemoryPort, mutation_lock: asyncio.Lock | None = None) -> None:
         self._storage = storage
+        self._mutation_lock = mutation_lock
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         job_id_raw = kwargs.get("job_id")
         if not isinstance(job_id_raw, str) or not job_id_raw:
             return ToolResult(tool_call_id="", content="Error: job_id is required", is_error=True)
-        jobs = await self._storage.load_cron_jobs()
-        updated, removed = cron_ops.remove_job(jobs, job_id_raw)
-        if not removed:
-            return ToolResult(
-                tool_call_id="", content=f"Error: job '{job_id_raw}' not found", is_error=True
-            )
-        await self._storage.save_cron_jobs(updated)
-        return ToolResult(tool_call_id="", content=f"OK: removed cron job id={job_id_raw}")
+
+        async def _remove_job() -> ToolResult:
+            jobs = await self._storage.load_cron_jobs()
+            updated, removed = cron_ops.remove_job(jobs, job_id_raw)
+            if not removed:
+                return ToolResult(
+                    tool_call_id="", content=f"Error: job '{job_id_raw}' not found", is_error=True
+                )
+            await self._storage.save_cron_jobs(updated)
+            return ToolResult(tool_call_id="", content=f"OK: removed cron job id={job_id_raw}")
+
+        return await _run_with_optional_lock(self._mutation_lock, _remove_job)
 
 
 class CronSetEnabledTool:
@@ -173,8 +197,9 @@ class CronSetEnabledTool:
         "required": ["job_id", "enabled"],
     }
 
-    def __init__(self, storage: MemoryPort) -> None:
+    def __init__(self, storage: MemoryPort, mutation_lock: asyncio.Lock | None = None) -> None:
         self._storage = storage
+        self._mutation_lock = mutation_lock
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         job_id_raw = kwargs.get("job_id")
@@ -183,15 +208,19 @@ class CronSetEnabledTool:
             return ToolResult(tool_call_id="", content="Error: job_id is required", is_error=True)
         if not isinstance(enabled_raw, bool):
             return ToolResult(tool_call_id="", content="Error: enabled is required", is_error=True)
-        jobs = await self._storage.load_cron_jobs()
-        updated, found = cron_ops.set_enabled(jobs, job_id_raw, enabled_raw)
-        if not found:
-            return ToolResult(
-                tool_call_id="", content=f"Error: job '{job_id_raw}' not found", is_error=True
-            )
-        await self._storage.save_cron_jobs(updated)
-        state = "enabled" if enabled_raw else "disabled"
-        return ToolResult(tool_call_id="", content=f"OK: {state} cron job id={job_id_raw}")
+
+        async def _set_enabled() -> ToolResult:
+            jobs = await self._storage.load_cron_jobs()
+            updated, found = cron_ops.set_enabled(jobs, job_id_raw, enabled_raw)
+            if not found:
+                return ToolResult(
+                    tool_call_id="", content=f"Error: job '{job_id_raw}' not found", is_error=True
+                )
+            await self._storage.save_cron_jobs(updated)
+            state = "enabled" if enabled_raw else "disabled"
+            return ToolResult(tool_call_id="", content=f"OK: {state} cron job id={job_id_raw}")
+
+        return await _run_with_optional_lock(self._mutation_lock, _set_enabled)
 
 
 def _build_cron_metadata(
@@ -225,11 +254,12 @@ def _build_cron_metadata(
 def build_global_cron_tools(
     *,
     storage: MemoryPort,
+    mutation_lock: asyncio.Lock | None = None,
 ) -> list[ToolPort]:
     return [
         CronListTool(storage=storage),
-        CronRemoveTool(storage=storage),
-        CronSetEnabledTool(storage=storage),
+        CronRemoveTool(storage=storage, mutation_lock=mutation_lock),
+        CronSetEnabledTool(storage=storage, mutation_lock=mutation_lock),
     ]
 
 
@@ -238,11 +268,13 @@ def build_context_cron_tools(
     storage: MemoryPort,
     default_channel: str,
     default_metadata: dict[str, Any],
+    mutation_lock: asyncio.Lock | None = None,
 ) -> list[ToolPort]:
     return [
         CronAddTool(
             storage=storage,
             default_channel=default_channel,
             default_metadata=default_metadata,
+            mutation_lock=mutation_lock,
         ),
     ]

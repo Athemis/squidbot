@@ -136,8 +136,9 @@ class CronScheduler:
     via the provided callback, and updates last_run.
     """
 
-    def __init__(self, storage: MemoryPort) -> None:
+    def __init__(self, storage: MemoryPort, mutation_lock: asyncio.Lock | None = None) -> None:
         self._storage = storage
+        self._mutation_lock = mutation_lock
         self._running = False
 
     async def run(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
@@ -153,19 +154,31 @@ class CronScheduler:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def _tick(self, on_due: Callable[[CronJob], Coroutine[Any, Any, None]]) -> None:
+        if self._mutation_lock is None:
+            due_jobs = await self._tick_storage_phase()
+        else:
+            async with self._mutation_lock:
+                due_jobs = await self._tick_storage_phase()
+
+        for job in due_jobs:
+            try:  # noqa: SIM105 — contextlib.suppress doesn't support async
+                await on_due(job)
+            except Exception:
+                pass
+
+    async def _tick_storage_phase(self) -> list[CronJob]:
         jobs = await self._storage.load_cron_jobs()
         now = datetime.now(UTC)
-        updated = False
+        due_jobs: list[CronJob] = []
         for job in jobs:
             if is_due(job, now=now):
                 job.last_run = now
-                updated = True
-                try:  # noqa: SIM105 — contextlib.suppress doesn't support async
-                    await on_due(job)
-                except Exception:
-                    pass
-        if updated:
+                due_jobs.append(job)
+
+        if due_jobs:
             await self._storage.save_cron_jobs(jobs)
+
+        return due_jobs
 
     def stop(self) -> None:
         self._running = False
