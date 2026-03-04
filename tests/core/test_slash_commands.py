@@ -1,4 +1,9 @@
-"""Tests for core slash command parsing and dispatch metadata."""
+"""Unit tests for slash command parsing and parser metadata.
+
+These tests verify how raw slash input maps to `SlashCommandResult` fields such
+as `handled`, `action`, `argument`, and `is_error`. They lock down parser
+behavior so AgentLoop dispatch remains stable when command routing evolves.
+"""
 
 from __future__ import annotations
 

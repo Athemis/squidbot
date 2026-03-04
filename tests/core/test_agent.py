@@ -149,6 +149,12 @@ class SensitiveEchoTool:
 
 
 class MemoryWriteToolDouble:
+    """Simple memory_write test double persisting text into InMemoryStorage.
+
+    The double mirrors the runtime tool contract used by slash `/remember`.
+    Tests inspect `last_content` to verify merge behavior and return text.
+    """
+
     name = "memory_write"
     description = "Writes memory content"
     parameters = {
@@ -159,16 +165,50 @@ class MemoryWriteToolDouble:
     concurrent = False
 
     def __init__(self, storage: InMemoryStorage) -> None:
+        """Initialize the test double.
+
+        Args:
+            storage: In-memory storage receiving memory updates.
+        """
         self._storage = storage
         self.last_content: str | None = None
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        """Write provided content into storage.
+
+        Args:
+            **kwargs: Tool arguments expected to include `content` as string.
+
+        Returns:
+            ToolResult with error when `content` is missing, otherwise success.
+        """
         content = kwargs.get("content")
         if not isinstance(content, str):
             return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
         self.last_content = content
         await self._storage.save_global_memory(content)
         return ToolResult(tool_call_id="", content="Memory updated successfully.")
+
+
+class RaisingMemoryWriteToolDouble(MemoryWriteToolDouble):
+    """memory_write double that raises to exercise error handling."""
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        raise RuntimeError("memory write failed")
+
+
+class ErrorMemoryWriteToolDouble(MemoryWriteToolDouble):
+    """memory_write double returning ToolResult with is_error=True."""
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        return ToolResult(tool_call_id="", content="Error: write rejected", is_error=True)
+
+
+class InvalidResultMemoryWriteToolDouble(MemoryWriteToolDouble):
+    """memory_write double returning invalid result shape."""
+
+    async def execute(self, **kwargs: Any) -> Any:
+        return "not-a-tool-result"
 
 
 def _log_contains_with_fields(log_output: str, event_name: str, required_fields: list[str]) -> bool:
@@ -204,6 +244,11 @@ class PersistExchangeFailingMemory(MemoryManager):
         session_id: str,
     ) -> None:
         raise RuntimeError("persist failed")
+
+
+class CountSessionHistoryFailingMemory(MemoryManager):
+    async def count_session_history(self, *, session: Session, session_id: str) -> int:
+        raise RuntimeError("count failed")
 
 
 SESSION = Session(channel="cli", sender_id="local")
@@ -917,6 +962,24 @@ async def test_slash_status_includes_current_logical_history_size(storage, memor
     assert list(llm._responses) == []
 
 
+async def test_slash_status_returns_deterministic_error_when_history_count_fails(storage):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    failing_memory = CountSessionHistoryFailingMemory(storage=storage)
+    loop = AgentLoop(
+        llm=llm,
+        memory=failing_memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/status", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Error: unable to build session status right now."
+    assert list(llm._responses) == ["from llm"]
+
+
 async def test_slash_history_is_unknown_without_llm_call(storage, memory):
     llm = ScriptedLLM(["from llm"])
     channel = CollectingChannel()
@@ -973,6 +1036,80 @@ async def test_slash_remember_requires_text_without_llm_call(storage, memory):
 
     assert len(channel.sent) == 1
     assert channel.sent[0].text == "Usage: /remember <text>"
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_remember_missing_tool_returns_error_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/remember buy milk", channel)
+
+    assert len(channel.sent) == 1
+    assert "memory_write tool not configured" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_remember_tool_exception_returns_error_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    registry = ToolRegistry()
+    registry.register(RaisingMemoryWriteToolDouble(storage))
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=registry,
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/remember buy milk", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Error: memory write failed"
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_remember_tool_error_result_surfaces_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    registry = ToolRegistry()
+    registry.register(ErrorMemoryWriteToolDouble(storage))
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=registry,
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/remember buy milk", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Error: write rejected"
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_remember_invalid_result_shape_returns_error_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    registry = ToolRegistry()
+    registry.register(InvalidResultMemoryWriteToolDouble(storage))
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=registry,
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/remember buy milk", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Error: memory_write returned an invalid result."
     assert list(llm._responses) == ["from llm"]
 
 

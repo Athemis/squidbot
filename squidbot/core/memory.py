@@ -112,7 +112,11 @@ class MemoryManager:
         return self._is_owner(sender_id, channel)
 
     async def load_global_memory_text(self) -> str:
-        """Return current global memory document text."""
+        """Load the current global memory document text.
+
+        Returns:
+            Current content of the global memory document.
+        """
         return await self._storage.load_global_memory()
 
     async def count_session_history(self, *, session: Session, session_id: str) -> int:

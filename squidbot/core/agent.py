@@ -204,12 +204,11 @@ class AgentLoop:
                 existing = await self._memory.load_global_memory_text()
                 merged = self._append_memory_note(existing, note)
                 result = await memory_tool.execute(content=merged)
+                if not isinstance(result, ToolResult):
+                    return "Error: memory_write returned an invalid result."
+                return result.content
         except Exception as exc:  # noqa: BLE001
             return f"Error: {exc}"
-
-        if result.is_error:
-            return result.content
-        return result.content
 
     async def _run_llm_stream(
         self,
@@ -470,7 +469,15 @@ class AgentLoop:
 
                 slash_text = slash_result.response_text
                 if slash_result.action == "status":
-                    slash_text = await self._build_status_text(session)
+                    try:
+                        slash_text = await self._build_status_text(session)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "agent.run: /status failed while building status for session={}: {}",
+                            session.id,
+                            exc,
+                        )
+                        slash_text = "Error: unable to build session status right now."
                 if slash_result.action == "remember":
                     remember_note = slash_result.argument or ""
                     if not remember_note:

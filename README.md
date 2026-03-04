@@ -10,7 +10,7 @@ A lightweight personal AI assistant. Hexagonal architecture, multi-channel, mult
 - **Multi-model LLM pools** — named pools with ordered fallback; define providers, models, and pools independently
 - **Skills system** — on-demand skill loading, agent-created skills, hot-reload without restart
 - **Tools** — shell commands, file read/write/edit, web search, memory write, MCP servers, sub-agents (spawn)
-- **Slash commands** — cross-channel `/help` and `/new`, handled in core without an LLM roundtrip
+- **Slash commands** — cross-channel `/help`, `/new`, `/status`, and `/remember <text>`, handled in core without an LLM roundtrip (owner-only on non-CLI channels; always allowed on CLI)
 - **Heartbeat** — proactive background checks on a configurable schedule and time window
 - **Cron scheduler** — recurring tasks with cron expressions or interval syntax
 - **Long-term memory** — manual-only: global `MEMORY.md` (agent-curated, cross-channel) plus global `history.jsonl`; use `search_history` for explicit recall of older details
