@@ -1,5 +1,9 @@
 # Cross-Channel Slash Command Pack v1 - Design
 
+> Update (2026-03-04): `/history` was dropped per YAGNI. The shipped pack keeps
+> `/help`, `/new`, `/status`, and `/remember`, and `/status` now includes
+> `history_messages` count for the current logical session.
+
 ## Problem
 
 The current slash-command surface in core is intentionally minimal (`/help`, `/new`).

@@ -146,24 +146,22 @@ class AgentLoop:
         ]
         return tool_definitions, extra_tool_map
 
-    def _build_status_text(self, session: Session) -> str:
+    async def _build_status_text(self, session: Session) -> str:
         """Return the deterministic slash status payload."""
         logical_session = self._effective_session_id(session)
         next_turn_backfill = self._session_backfill_next_turn.get(session.id, True)
         backfill_text = "true" if next_turn_backfill else "false"
+        history_count = await self._memory.count_session_history(
+            session=session,
+            session_id=logical_session,
+        )
         return (
             "Current session status:\n"
             f"- channel: {session.channel}\n"
             f"- physical_session: {session.id}\n"
             f"- logical_session: {logical_session}\n"
-            f"- next_turn_history_backfill: {backfill_text}"
-        )
-
-    def _build_history_info_text(self) -> str:
-        """Return informational text for /history without retrieval."""
-        return (
-            "History command is informational only. "
-            "To recall past details, ask me to run search_history with your query."
+            f"- next_turn_history_backfill: {backfill_text}\n"
+            f"- history_messages: {history_count}"
         )
 
     def _resolve_slash_actor_sender(
@@ -472,9 +470,7 @@ class AgentLoop:
 
                 slash_text = slash_result.response_text
                 if slash_result.action == "status":
-                    slash_text = self._build_status_text(session)
-                if slash_result.action == "history":
-                    slash_text = self._build_history_info_text()
+                    slash_text = await self._build_status_text(session)
                 if slash_result.action == "remember":
                     remember_note = slash_result.argument or ""
                     if not remember_note:

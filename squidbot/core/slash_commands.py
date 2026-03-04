@@ -27,7 +27,6 @@ HELP_TEXT = (
     "- /help: show this help\n"
     "- /new: start a new conversation context\n"
     "- /status: show current session status\n"
-    "- /history: show history recall guidance\n"
     "- /remember <text>: append a memory note"
 )
 
@@ -64,8 +63,6 @@ def handle_slash_command(text: str) -> SlashCommandResult:
         )
     if cmd == "/status":
         return SlashCommandResult(handled=True, action="status")
-    if cmd == "/history":
-        return SlashCommandResult(handled=True, action="history")
     if cmd == "/remember":
         if not argument:
             return SlashCommandResult(

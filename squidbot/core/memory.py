@@ -115,6 +115,24 @@ class MemoryManager:
         """Return current global memory document text."""
         return await self._storage.load_global_memory()
 
+    async def count_session_history(self, *, session: Session, session_id: str) -> int:
+        """Return number of persisted messages for a logical session.
+
+        Args:
+            session: Physical session used for legacy matching fallback.
+            session_id: Logical session identifier.
+
+        Returns:
+            Count of history rows that belong to the logical session.
+        """
+        history = await self._storage.load_history(last_n=None)
+        filtered = self._filter_history_for_session(
+            history,
+            target_session_id=session_id,
+            fallback_session=session,
+        )
+        return len(filtered)
+
     def _label_message(self, msg: Message) -> Message:
         """
         Return a copy of msg with a channel/sender label prepended to content.

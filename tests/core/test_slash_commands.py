@@ -12,12 +12,13 @@ def test_slash_status_sets_status_action() -> None:
     assert result.action == "status"
 
 
-def test_slash_history_is_informational_action() -> None:
+def test_slash_history_is_unknown_command() -> None:
     result = handle_slash_command("/history")
 
     assert result.handled is True
-    assert result.action == "history"
-    assert result.is_error is False
+    assert result.action is None
+    assert result.is_error is True
+    assert "Unknown command: /history" in result.response_text
 
 
 def test_slash_remember_requires_text_argument() -> None:

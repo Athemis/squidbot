@@ -894,10 +894,30 @@ async def test_slash_status_returns_contract_without_llm_call(storage, memory):
     assert "- physical_session:" in channel.sent[0].text
     assert "- logical_session:" in channel.sent[0].text
     assert "- next_turn_history_backfill: true" in channel.sent[0].text
+    assert "- history_messages: 0" in channel.sent[0].text
     assert list(llm._responses) == ["from llm"]
 
 
-async def test_slash_history_returns_informational_text_without_llm_call(storage, memory):
+async def test_slash_status_includes_current_logical_history_size(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "hello", channel)
+    await loop.run(SESSION, "/status", channel)
+
+    assert len(channel.sent) == 2
+    assert channel.sent[0].text == "from llm"
+    assert "- history_messages: 2" in channel.sent[1].text
+    assert list(llm._responses) == []
+
+
+async def test_slash_history_is_unknown_without_llm_call(storage, memory):
     llm = ScriptedLLM(["from llm"])
     channel = CollectingChannel()
     loop = AgentLoop(
@@ -910,8 +930,8 @@ async def test_slash_history_returns_informational_text_without_llm_call(storage
     await loop.run(SESSION, "/history anything", channel)
 
     assert len(channel.sent) == 1
-    assert "informational only" in channel.sent[0].text.lower()
-    assert "search_history" in channel.sent[0].text
+    assert "unknown command" in channel.sent[0].text.lower()
+    assert "/help" in channel.sent[0].text
     assert list(llm._responses) == ["from llm"]
 
 

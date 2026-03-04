@@ -295,7 +295,6 @@ Note: Slash commands are owner-only on non-CLI channels. CLI slash commands are 
 - `/help` — list available slash commands
 - `/new` — start a new logical conversation session for the current channel/session
 - `/status` — show current channel/logical session status
-- `/history` — informational guidance for explicit history recall
 - `/remember <text>` — append a memory note to global MEMORY.md
 
 ## Architecture

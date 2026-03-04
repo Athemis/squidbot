@@ -1,5 +1,8 @@
 # Slash Command Pack v1 Implementation Plan
 
+> Update (2026-03-04): `/history` was removed (YAGNI). Status now reports
+> logical-session history size via `history_messages`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add deterministic cross-channel `/status`, `/history`, and `/remember <text>` slash commands that bypass LLM roundtrips while enforcing owner-only access for all slash commands.
