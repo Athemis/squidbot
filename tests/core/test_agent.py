@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from loguru import logger
 
+from squidbot.config.schema import OwnerAliasEntry
 from squidbot.core.agent import AgentLoop
 from squidbot.core.memory import MemoryManager
 from squidbot.core.models import (
@@ -145,6 +146,29 @@ class SensitiveEchoTool:
             tool_call_id="",
             content=f"api_key={api_key} password={password}",
         )
+
+
+class MemoryWriteToolDouble:
+    name = "memory_write"
+    description = "Writes memory content"
+    parameters = {
+        "type": "object",
+        "properties": {"content": {"type": "string"}},
+        "required": ["content"],
+    }
+    concurrent = False
+
+    def __init__(self, storage: InMemoryStorage) -> None:
+        self._storage = storage
+        self.last_content: str | None = None
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        content = kwargs.get("content")
+        if not isinstance(content, str):
+            return ToolResult(tool_call_id="", content="Error: content is required", is_error=True)
+        self.last_content = content
+        await self._storage.save_global_memory(content)
+        return ToolResult(tool_call_id="", content="Memory updated successfully.")
 
 
 def _log_contains_with_fields(log_output: str, event_name: str, required_fields: list[str]) -> bool:
@@ -849,6 +873,180 @@ async def test_unknown_slash_command_returns_help_hint_without_llm_call(storage,
     assert len(channel.sent) == 1
     assert "unknown command" in channel.sent[0].text.lower()
     assert "/help" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_status_returns_contract_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/status", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text.startswith("Current session status:\n")
+    assert "- channel: cli" in channel.sent[0].text
+    assert "- physical_session:" in channel.sent[0].text
+    assert "- logical_session:" in channel.sent[0].text
+    assert "- next_turn_history_backfill: true" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_history_returns_informational_text_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/history anything", channel)
+
+    assert len(channel.sent) == 1
+    assert "informational only" in channel.sent[0].text.lower()
+    assert "search_history" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_remember_updates_memory_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    registry = ToolRegistry()
+    tool = MemoryWriteToolDouble(storage)
+    registry.register(tool)
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=registry,
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/remember buy milk", channel)
+
+    assert len(channel.sent) == 1
+    assert "memory updated" in channel.sent[0].text.lower()
+    assert tool.last_content is not None
+    assert "buy milk" in tool.last_content
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_remember_requires_text_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    registry = ToolRegistry()
+    registry.register(MemoryWriteToolDouble(storage))
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=registry,
+        system_prompt="You are a bot.",
+    )
+
+    await loop.run(SESSION, "/remember  ", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Usage: /remember <text>"
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_commands_denied_for_non_cli_non_owner(storage):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    memory = MemoryManager(
+        storage=storage,
+        owner_aliases=[OwnerAliasEntry(address="owner@example.com", channel="email")],
+    )
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+    email_session = Session(channel="email", sender_id="guest@example.com")
+
+    await loop.run(email_session, "/help", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Access denied: slash commands are only available to the owner."
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_commands_always_allowed_on_cli(storage):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    memory = MemoryManager(
+        storage=storage,
+        owner_aliases=[OwnerAliasEntry(address="owner@example.com", channel="email")],
+    )
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+    cli_session = Session(channel="cli", sender_id="random-cli-user")
+
+    await loop.run(cli_session, "/help", channel)
+
+    assert len(channel.sent) == 1
+    assert "Available commands" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_matrix_auth_uses_metadata_sender(storage):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    memory = MemoryManager(
+        storage=storage,
+        owner_aliases=[OwnerAliasEntry(address="@owner:example.org", channel="matrix")],
+    )
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+    matrix_session = Session(channel="matrix", sender_id="!room:example.org")
+
+    await loop.run(
+        matrix_session,
+        "/help",
+        channel,
+        user_sender_id="@owner:example.org",
+        outbound_metadata={"matrix_sender_id": "@owner:example.org"},
+    )
+
+    assert len(channel.sent) == 1
+    assert "Available commands" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_matrix_missing_metadata_sender_is_denied(storage):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    memory = MemoryManager(
+        storage=storage,
+        owner_aliases=[OwnerAliasEntry(address="@owner:example.org", channel="matrix")],
+    )
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+    )
+    matrix_session = Session(channel="matrix", sender_id="!room:example.org")
+
+    await loop.run(matrix_session, "/help", channel, user_sender_id="@owner:example.org")
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Access denied: slash commands are only available to the owner."
     assert list(llm._responses) == ["from llm"]
 
 

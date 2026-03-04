@@ -17,9 +17,27 @@ class SlashCommandResult:
     handled: bool
     response_text: str = ""
     reset_requested: bool = False
+    action: str | None = None
+    argument: str | None = None
+    is_error: bool = False
 
 
-HELP_TEXT = "Available commands:\n- /help: show this help\n- /new: start a new conversation context"
+HELP_TEXT = (
+    "Available commands:\n"
+    "- /help: show this help\n"
+    "- /new: start a new conversation context\n"
+    "- /status: show current session status\n"
+    "- /history: show history recall guidance\n"
+    "- /remember <text>: append a memory note"
+)
+
+
+def _split_command_and_argument(stripped: str) -> tuple[str, str]:
+    """Return lower-cased command and optional argument string."""
+    parts = stripped.split(maxsplit=1)
+    cmd = parts[0].lower()
+    argument = parts[1].strip() if len(parts) > 1 else ""
+    return cmd, argument
 
 
 def handle_slash_command(text: str) -> SlashCommandResult:
@@ -35,7 +53,7 @@ def handle_slash_command(text: str) -> SlashCommandResult:
     if not stripped.startswith("/"):
         return SlashCommandResult(handled=False)
 
-    cmd = stripped.split(maxsplit=1)[0].lower()
+    cmd, argument = _split_command_and_argument(stripped)
     if cmd == "/help":
         return SlashCommandResult(handled=True, response_text=HELP_TEXT)
     if cmd == "/new":
@@ -44,8 +62,21 @@ def handle_slash_command(text: str) -> SlashCommandResult:
             response_text="Started a new conversation context for this session.",
             reset_requested=True,
         )
+    if cmd == "/status":
+        return SlashCommandResult(handled=True, action="status")
+    if cmd == "/history":
+        return SlashCommandResult(handled=True, action="history")
+    if cmd == "/remember":
+        if not argument:
+            return SlashCommandResult(
+                handled=True,
+                response_text="Usage: /remember <text>",
+                is_error=True,
+            )
+        return SlashCommandResult(handled=True, action="remember", argument=argument)
 
     return SlashCommandResult(
         handled=True,
         response_text=f"Unknown command: {cmd}. Use /help for available commands.",
+        is_error=True,
     )

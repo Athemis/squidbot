@@ -104,6 +104,7 @@ class AgentLoop:
         self._session_generation: OrderedDict[str, int] = OrderedDict()
         self._session_backfill_next_turn: dict[str, bool] = {}
         self._max_tracked_session_generations = MAX_TRACKED_SESSION_GENERATIONS
+        self._remember_lock = asyncio.Lock()
 
     def _get_session_generation(self, session_id: str) -> int:
         """Return session generation while refreshing recency order."""
@@ -144,6 +145,73 @@ class AgentLoop:
             for tool in extra_tool_map.values()
         ]
         return tool_definitions, extra_tool_map
+
+    def _build_status_text(self, session: Session) -> str:
+        """Return the deterministic slash status payload."""
+        logical_session = self._effective_session_id(session)
+        next_turn_backfill = self._session_backfill_next_turn.get(session.id, True)
+        backfill_text = "true" if next_turn_backfill else "false"
+        return (
+            "Current session status:\n"
+            f"- channel: {session.channel}\n"
+            f"- physical_session: {session.id}\n"
+            f"- logical_session: {logical_session}\n"
+            f"- next_turn_history_backfill: {backfill_text}"
+        )
+
+    def _build_history_info_text(self) -> str:
+        """Return informational text for /history without retrieval."""
+        return (
+            "History command is informational only. "
+            "To recall past details, ask me to run search_history with your query."
+        )
+
+    def _resolve_slash_actor_sender(
+        self,
+        session: Session,
+        user_sender_id: str | None,
+        outbound_metadata: dict[str, Any] | None,
+    ) -> str | None:
+        """Return sender identity used for slash authorization checks."""
+        if session.channel == "matrix":
+            sender = (outbound_metadata or {}).get("matrix_sender_id")
+            if isinstance(sender, str) and sender:
+                return sender
+            return None
+        if user_sender_id is not None:
+            return user_sender_id
+        return session.sender_id
+
+    @staticmethod
+    def _append_memory_note(existing: str, note: str) -> str:
+        """Append a single markdown bullet line to memory content."""
+        note_line = f"- {note.strip()}"
+        if not existing.strip():
+            return note_line
+        return f"{existing.rstrip()}\n{note_line}"
+
+    async def _run_slash_remember(
+        self,
+        note: str,
+        extra_tools: Sequence[ToolPort] | None,
+    ) -> str:
+        """Execute /remember by merging and writing global memory."""
+        extra_tool_map = {tool.name: tool for tool in (extra_tools or [])}
+        memory_tool = extra_tool_map.get("memory_write") or self._registry.get("memory_write")
+        if memory_tool is None:
+            return "Error: /remember unavailable (memory_write tool not configured)."
+
+        try:
+            async with self._remember_lock:
+                existing = await self._memory.load_global_memory_text()
+                merged = self._append_memory_note(existing, note)
+                result = await memory_tool.execute(content=merged)
+        except Exception as exc:  # noqa: BLE001
+            return f"Error: {exc}"
+
+        if result.is_error:
+            return result.content
+        return result.content
 
     async def _run_llm_stream(
         self,
@@ -381,15 +449,43 @@ class AgentLoop:
         if isinstance(user_message, str):
             slash_result = handle_slash_command(user_message)
             if slash_result.handled:
+                actor_sender = self._resolve_slash_actor_sender(
+                    session,
+                    user_sender_id,
+                    outbound_metadata,
+                )
+                if not self._memory.is_owner_sender(actor_sender, session.channel):
+                    await channel.send(
+                        OutboundMessage(
+                            session=session,
+                            text="Access denied: slash commands are only available to the owner.",
+                            metadata=outbound_metadata or {},
+                        )
+                    )
+                    return
+
                 if slash_result.reset_requested:
                     next_generation = self._get_session_generation(session.id) + 1
                     self._set_session_generation(session.id, next_generation)
                     # /new starts a fresh logical session without automatic history backfill.
                     self._session_backfill_next_turn[session.id] = False
+
+                slash_text = slash_result.response_text
+                if slash_result.action == "status":
+                    slash_text = self._build_status_text(session)
+                if slash_result.action == "history":
+                    slash_text = self._build_history_info_text()
+                if slash_result.action == "remember":
+                    remember_note = slash_result.argument or ""
+                    if not remember_note:
+                        slash_text = "Usage: /remember <text>"
+                    else:
+                        slash_text = await self._run_slash_remember(remember_note, extra_tools)
+
                 await channel.send(
                     OutboundMessage(
                         session=session,
-                        text=slash_result.response_text,
+                        text=slash_text,
                         metadata=outbound_metadata or {},
                     )
                 )
