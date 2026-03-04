@@ -27,6 +27,11 @@ HELP_TEXT = (
     "- /help: show this help\n"
     "- /new: start a new conversation context\n"
     "- /status: show current session status\n"
+    "- /model: show last used model for this session\n"
+    "- /pool: show active pool\n"
+    "- /pool list: list available pools\n"
+    "- /pool use <name>: set pool for this session\n"
+    "- /pool reset: reset to default pool\n"
     "- /remember <text>: append a memory note"
 )
 
@@ -63,6 +68,10 @@ def handle_slash_command(text: str) -> SlashCommandResult:
         )
     if cmd == "/status":
         return SlashCommandResult(handled=True, action="status")
+    if cmd == "/model":
+        return SlashCommandResult(handled=True, action="model")
+    if cmd == "/pool":
+        return SlashCommandResult(handled=True, action="pool", argument=argument)
     if cmd == "/remember":
         if not argument:
             return SlashCommandResult(

@@ -10,7 +10,7 @@ from squidbot.adapters.llm.pool import PooledLLMAdapter, _is_auth_error
 from squidbot.core.models import Message
 
 
-def _make_streaming_adapter(chunks: list[str]):
+def _make_streaming_adapter(chunks: list[str], *, model_id: str | None = None):
     """Build a mock LLMPort that yields the given chunks."""
 
     class StreamingAdapter:
@@ -20,6 +20,9 @@ def _make_streaming_adapter(chunks: list[str]):
                     yield chunk
 
             return _gen()
+
+        def get_last_used_model_id(self) -> str | None:
+            return model_id
 
     return StreamingAdapter()
 
@@ -73,10 +76,11 @@ async def test_first_succeeds_second_never_called():
 
 async def test_first_fails_second_called():
     a1 = _make_failing_adapter(RuntimeError("timeout"))
-    a2 = _make_streaming_adapter(["fallback"])
+    a2 = _make_streaming_adapter(["fallback"], model_id="claude-haiku")
     pool = PooledLLMAdapter([a1, a2])
     result = await _collect(pool)
     assert result == ["fallback"]
+    assert pool.get_last_used_model_id() == "claude-haiku"
 
 
 async def test_auth_error_logs_warning():
@@ -110,6 +114,17 @@ async def test_all_fail_raises_last():
     pool = PooledLLMAdapter([a1, a2])
     with pytest.raises(RuntimeError, match="second"):
         await _collect(pool)
+
+
+async def test_pool_tracks_first_adapter_model_when_no_fallback() -> None:
+    a1 = _make_streaming_adapter(["ok"], model_id="claude-opus")
+    a2 = _make_streaming_adapter(["unused"], model_id="claude-haiku")
+    pool = PooledLLMAdapter([a1, a2])
+
+    result = await _collect(pool)
+
+    assert result == ["ok"]
+    assert pool.get_last_used_model_id() == "claude-opus"
 
 
 def test_auth_error_detected_by_name():

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from loguru import logger
@@ -40,6 +40,9 @@ SLASH_REMEMBER_USAGE_TEXT = "Usage: /remember <text>"
 SLASH_REMEMBER_UNAVAILABLE_TEXT = "Error: /remember unavailable (memory_write tool not configured)."
 SLASH_REMEMBER_INVALID_RESULT_TEXT = "Error: memory_write returned an invalid result."
 SLASH_ERROR_PREFIX = "Error: "
+SLASH_POOL_USE_USAGE_TEXT = "Usage: /pool use <name>"
+SLASH_POOL_UNAVAILABLE_TEXT = "Error: /pool unavailable (pool configuration is not wired)."
+SLASH_MODEL_NO_USAGE_TEXT = "No model used yet in this logical session."
 
 
 def _sanitize_log_value(value: str) -> str:
@@ -95,6 +98,10 @@ class AgentLoop:
         memory: MemoryManager,
         registry: ToolRegistry,
         system_prompt: str,
+        *,
+        default_pool_name: str | None = None,
+        resolve_llm: Callable[[str], LLMPort] | None = None,
+        list_pool_names: Callable[[], list[str]] | None = None,
     ) -> None:
         """
         Args:
@@ -102,6 +109,9 @@ class AgentLoop:
             memory: The memory manager for history and memory.md.
             registry: The tool registry with all available tools.
             system_prompt: The base system prompt (AGENTS.md content).
+            default_pool_name: Default pool name for dynamic session pool selection.
+            resolve_llm: Optional resolver mapping pool names to LLM adapters.
+            list_pool_names: Optional callback returning configured pool names.
         """
         self._llm = llm
         self._memory = memory
@@ -111,6 +121,11 @@ class AgentLoop:
         self._session_backfill_next_turn: dict[str, bool] = {}
         self._max_tracked_session_generations = MAX_TRACKED_SESSION_GENERATIONS
         self._remember_lock = asyncio.Lock()
+        self._default_pool_name = default_pool_name
+        self._resolve_llm = resolve_llm
+        self._list_pool_names = list_pool_names
+        self._session_pool_overrides: dict[str, str] = {}
+        self._session_last_model: dict[str, str] = {}
 
     def _get_session_generation(self, session_id: str) -> int:
         """Return session generation while refreshing recency order."""
@@ -169,6 +184,117 @@ class AgentLoop:
             f"- next_turn_history_backfill: {backfill_text}\n"
             f"- history_messages: {history_count}"
         )
+
+    def _available_pools(self) -> list[str]:
+        """Return sorted list of configured pool names."""
+        if self._list_pool_names is None:
+            return []
+        return sorted(set(self._list_pool_names()))
+
+    def _effective_pool_name(self, logical_session_id: str) -> str | None:
+        """Return active pool name for a logical session."""
+        override = self._session_pool_overrides.get(logical_session_id)
+        if override is not None:
+            return override
+        return self._default_pool_name
+
+    def _pool_source(self, logical_session_id: str) -> str:
+        """Return whether active pool comes from default or override."""
+        if logical_session_id in self._session_pool_overrides:
+            return "override"
+        return "default"
+
+    def _build_model_text(self, logical_session_id: str) -> str:
+        """Render deterministic `/model` output for a logical session."""
+        pool = self._effective_pool_name(logical_session_id)
+        pool_text = "(unavailable)" if pool is None else pool
+        model = self._session_last_model.get(logical_session_id)
+        if model is None:
+            return (
+                "Current model status:\n"
+                f"- active_pool: {pool_text}\n"
+                f"- pool_source: {self._pool_source(logical_session_id)}\n"
+                f"- last_used_model: {SLASH_MODEL_NO_USAGE_TEXT}"
+            )
+        return (
+            "Current model status:\n"
+            f"- active_pool: {pool_text}\n"
+            f"- pool_source: {self._pool_source(logical_session_id)}\n"
+            f"- last_used_model: {model}"
+        )
+
+    def _build_pool_text(self, logical_session_id: str) -> str:
+        """Render deterministic `/pool` output for a logical session."""
+        pool = self._effective_pool_name(logical_session_id)
+        if pool is None:
+            return "Current pool:\n- active_pool: (unavailable)\n- source: default"
+        return (
+            "Current pool:\n"
+            f"- active_pool: {pool}\n"
+            f"- source: {self._pool_source(logical_session_id)}"
+        )
+
+    def _build_pool_list_text(self) -> str:
+        """Render deterministic `/pool list` output."""
+        pools = self._available_pools()
+        if not pools:
+            return "Available pools:\n- (none configured)"
+        lines = "\n".join(f"- {name}" for name in pools)
+        return f"Available pools:\n{lines}"
+
+    def _handle_pool_command(self, logical_session_id: str, argument: str | None) -> str:
+        """Execute `/pool` subcommands and return deterministic output text."""
+        raw = (argument or "").strip()
+        if not raw:
+            return self._build_pool_text(logical_session_id)
+        if raw == "list":
+            return self._build_pool_list_text()
+        if raw == "reset":
+            self._session_pool_overrides.pop(logical_session_id, None)
+            return self._build_pool_text(logical_session_id)
+        if raw == "use":
+            return SLASH_POOL_USE_USAGE_TEXT
+        if raw.startswith("use "):
+            pool_name = raw[4:].strip()
+            if not pool_name:
+                return SLASH_POOL_USE_USAGE_TEXT
+            pools = self._available_pools()
+            if not pools:
+                return SLASH_POOL_UNAVAILABLE_TEXT
+            if pool_name not in pools:
+                return f"Error: pool '{pool_name}' not found."
+            self._session_pool_overrides[logical_session_id] = pool_name
+            return self._build_pool_text(logical_session_id)
+        return "Usage: /pool [list|use <name>|reset]"
+
+    @staticmethod
+    def _extract_last_used_model_id(llm: LLMPort) -> str | None:
+        """Return model id from adapter introspection when available."""
+        getter = getattr(llm, "get_last_used_model_id", None)
+        if callable(getter):
+            value = getter()
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _select_llm_for_session(
+        self,
+        logical_session_id: str,
+        llm_override: LLMPort | None,
+    ) -> LLMPort:
+        """Return run-scoped LLM based on override and session pool state."""
+        if llm_override is not None:
+            return llm_override
+        if self._resolve_llm is None:
+            return self._llm
+        pool_name = self._effective_pool_name(logical_session_id)
+        if pool_name is None:
+            return self._llm
+        try:
+            return self._resolve_llm(pool_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent.run: failed to resolve pool '{}': {}", pool_name, exc)
+            return self._llm
 
     def _resolve_slash_actor_sender(
         self,
@@ -436,8 +562,6 @@ class AgentLoop:
             user_sender_id: Optional sender attribution used for persistence.
                 Defaults to session.sender_id.
         """
-        selected_llm = llm if llm is not None else self._llm
-
         # Derive a plain-text fallback for memory operations when input is multimodal.
         if isinstance(user_message, list):
             text_blocks = [
@@ -448,6 +572,8 @@ class AgentLoop:
             text_fallback: str = " ".join(text_blocks) if text_blocks else "[multimodal message]"
         else:
             text_fallback = user_message
+
+        effective_session_id = self._effective_session_id(session)
 
         if isinstance(user_message, str):
             slash_result = handle_slash_command(user_message)
@@ -472,6 +598,8 @@ class AgentLoop:
                     self._set_session_generation(session.id, next_generation)
                     # /new starts a fresh logical session without automatic history backfill.
                     self._session_backfill_next_turn[session.id] = False
+                    self._session_pool_overrides.pop(effective_session_id, None)
+                    self._session_last_model.pop(effective_session_id, None)
 
                 slash_text = slash_result.response_text
                 if slash_result.action == "status":
@@ -484,6 +612,13 @@ class AgentLoop:
                             exc,
                         )
                         slash_text = SLASH_STATUS_BUILD_ERROR_TEXT
+                if slash_result.action == "model":
+                    slash_text = self._build_model_text(effective_session_id)
+                if slash_result.action == "pool":
+                    slash_text = self._handle_pool_command(
+                        effective_session_id,
+                        slash_result.argument,
+                    )
                 if slash_result.action == "remember":
                     remember_note = slash_result.argument or ""
                     if not remember_note:
@@ -501,9 +636,8 @@ class AgentLoop:
                 return
 
         await channel.send_typing(session.id)
-
-        effective_session_id = self._effective_session_id(session)
         load_history = self._consume_backfill_flag(session)
+        selected_llm = self._select_llm_for_session(effective_session_id, llm)
 
         try:
             messages = await self._memory.build_messages(
@@ -602,6 +736,10 @@ class AgentLoop:
 
         await channel.send_typing(session.id, typing=False)
         await self._deliver_final_text(channel, session, final_text, outbound_metadata)
+
+        used_model = self._extract_last_used_model_id(selected_llm)
+        if used_model is not None:
+            self._session_last_model[effective_session_id] = used_model
 
         # Persist the exchange — use text_fallback to avoid storing base64 payloads.
         try:

@@ -8,7 +8,7 @@ WARNING level so the user sees credential failures even when a fallback succeeds
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from loguru import logger
@@ -26,6 +26,8 @@ async def _pool_gen(
     messages: list[Message],
     tools: list[ToolDefinition],
     stream: bool,
+    *,
+    on_adapter_success: Callable[[Any], None] | None = None,
 ) -> AsyncIterator[str | list[ToolCall] | tuple[list[ToolCall], str | None]]:
     """
     Async generator that tries each adapter in order, falling back on error.
@@ -47,6 +49,8 @@ async def _pool_gen(
         try:
             async for chunk in await adapter.chat(messages, tools, stream=stream):
                 yield chunk
+            if on_adapter_success is not None:
+                on_adapter_success(adapter)
             return
         except Exception as exc:
             if _is_auth_error(exc):
@@ -85,6 +89,21 @@ class PooledLLMAdapter:
         if not adapters:
             raise ValueError("PooledLLMAdapter requires at least one adapter")
         self._adapters = adapters
+        self._last_used_model_id: str | None = None
+
+    @staticmethod
+    def _extract_model_id(adapter: Any) -> str | None:
+        """Return model id from adapter introspection when available."""
+        getter = getattr(adapter, "get_last_used_model_id", None)
+        if callable(getter):
+            value = getter()
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def get_last_used_model_id(self) -> str | None:
+        """Return the model id used by the most recent successful fallback call."""
+        return self._last_used_model_id
 
     async def chat(
         self,
@@ -111,4 +130,14 @@ class PooledLLMAdapter:
         Raises:
             Exception: The last exception if all adapters fail.
         """
-        return _pool_gen(self._adapters, messages, tools, stream)
+        return _pool_gen(
+            self._adapters,
+            messages,
+            tools,
+            stream,
+            on_adapter_success=self._on_adapter_success,
+        )
+
+    def _on_adapter_success(self, adapter: Any) -> None:
+        """Store model id from the successful adapter, if introspection exists."""
+        self._last_used_model_id = self._extract_model_id(adapter)

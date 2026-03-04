@@ -90,7 +90,7 @@ async def test_make_agent_loop_wires_memory_with_history_context_messages(tmp_pa
     ):
         from squidbot.cli.gateway import _make_agent_loop
 
-        await _make_agent_loop(s, storage_dir=tmp_path)
+        loop, _, _ = await _make_agent_loop(s, storage_dir=tmp_path)
 
     call_kwargs = memory_manager_cls.call_args.kwargs
     assert call_kwargs["history_context_messages"] == 13
@@ -99,3 +99,6 @@ async def test_make_agent_loop_wires_memory_with_history_context_messages(tmp_pa
     assert "llm" not in call_kwargs
     assert "consolidation_threshold" not in call_kwargs
     assert "keep_recent_ratio" not in call_kwargs
+    assert loop._default_pool_name == s.llm.default_pool
+    assert callable(loop._resolve_llm)
+    assert callable(loop._list_pool_names)
