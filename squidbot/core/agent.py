@@ -34,6 +34,12 @@ from squidbot.core.slash_commands import handle_slash_command
 MAX_TOOL_ROUNDS = 20
 MAX_TRACKED_SESSION_GENERATIONS = 10_000
 MAX_LOG_TOKEN_LEN = 128
+SLASH_ACCESS_DENIED_TEXT = "Access denied: slash commands are only available to the owner."
+SLASH_STATUS_BUILD_ERROR_TEXT = "Error: unable to build session status right now."
+SLASH_REMEMBER_USAGE_TEXT = "Usage: /remember <text>"
+SLASH_REMEMBER_UNAVAILABLE_TEXT = "Error: /remember unavailable (memory_write tool not configured)."
+SLASH_REMEMBER_INVALID_RESULT_TEXT = "Error: memory_write returned an invalid result."
+SLASH_ERROR_PREFIX = "Error: "
 
 
 def _sanitize_log_value(value: str) -> str:
@@ -104,6 +110,7 @@ class AgentLoop:
         self._session_generation: OrderedDict[str, int] = OrderedDict()
         self._session_backfill_next_turn: dict[str, bool] = {}
         self._max_tracked_session_generations = MAX_TRACKED_SESSION_GENERATIONS
+        self._remember_lock = asyncio.Lock()
 
     def _get_session_generation(self, session_id: str) -> int:
         """Return session generation while refreshing recency order."""
@@ -144,6 +151,70 @@ class AgentLoop:
             for tool in extra_tool_map.values()
         ]
         return tool_definitions, extra_tool_map
+
+    async def _build_status_text(self, session: Session) -> str:
+        """Return the deterministic slash status payload."""
+        logical_session = self._effective_session_id(session)
+        next_turn_backfill = self._session_backfill_next_turn.get(session.id, True)
+        backfill_text = "true" if next_turn_backfill else "false"
+        history_count = await self._memory.count_session_history(
+            session=session,
+            session_id=logical_session,
+        )
+        return (
+            "Current session status:\n"
+            f"- channel: {session.channel}\n"
+            f"- physical_session: {session.id}\n"
+            f"- logical_session: {logical_session}\n"
+            f"- next_turn_history_backfill: {backfill_text}\n"
+            f"- history_messages: {history_count}"
+        )
+
+    def _resolve_slash_actor_sender(
+        self,
+        session: Session,
+        user_sender_id: str | None,
+        outbound_metadata: dict[str, Any] | None,
+    ) -> str | None:
+        """Return sender identity used for slash authorization checks."""
+        if session.channel == "matrix":
+            sender = (outbound_metadata or {}).get("matrix_sender_id")
+            if isinstance(sender, str) and sender:
+                return sender
+            return None
+        if user_sender_id is not None:
+            return user_sender_id
+        return session.sender_id
+
+    @staticmethod
+    def _append_memory_note(existing: str, note: str) -> str:
+        """Append a single markdown bullet line to memory content."""
+        note_line = f"- {note.strip()}"
+        if not existing.strip():
+            return note_line
+        return f"{existing.rstrip()}\n{note_line}"
+
+    async def _run_slash_remember(
+        self,
+        note: str,
+        extra_tools: Sequence[ToolPort] | None,
+    ) -> str:
+        """Execute /remember by merging and writing global memory."""
+        extra_tool_map = {tool.name: tool for tool in (extra_tools or [])}
+        memory_tool = extra_tool_map.get("memory_write") or self._registry.get("memory_write")
+        if memory_tool is None:
+            return SLASH_REMEMBER_UNAVAILABLE_TEXT
+
+        try:
+            async with self._remember_lock:
+                existing = await self._memory.load_global_memory_text()
+                merged = self._append_memory_note(existing, note)
+                result = await memory_tool.execute(content=merged)
+                if not isinstance(result, ToolResult):
+                    return SLASH_REMEMBER_INVALID_RESULT_TEXT
+                return result.content
+        except Exception as exc:  # noqa: BLE001
+            return f"{SLASH_ERROR_PREFIX}{exc}"
 
     async def _run_llm_stream(
         self,
@@ -381,15 +452,49 @@ class AgentLoop:
         if isinstance(user_message, str):
             slash_result = handle_slash_command(user_message)
             if slash_result.handled:
+                actor_sender = self._resolve_slash_actor_sender(
+                    session,
+                    user_sender_id,
+                    outbound_metadata,
+                )
+                if not self._memory.is_owner_sender(actor_sender, session.channel):
+                    await channel.send(
+                        OutboundMessage(
+                            session=session,
+                            text=SLASH_ACCESS_DENIED_TEXT,
+                            metadata=outbound_metadata or {},
+                        )
+                    )
+                    return
+
                 if slash_result.reset_requested:
                     next_generation = self._get_session_generation(session.id) + 1
                     self._set_session_generation(session.id, next_generation)
                     # /new starts a fresh logical session without automatic history backfill.
                     self._session_backfill_next_turn[session.id] = False
+
+                slash_text = slash_result.response_text
+                if slash_result.action == "status":
+                    try:
+                        slash_text = await self._build_status_text(session)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "agent.run: /status failed while building status for session={}: {}",
+                            session.id,
+                            exc,
+                        )
+                        slash_text = SLASH_STATUS_BUILD_ERROR_TEXT
+                if slash_result.action == "remember":
+                    remember_note = slash_result.argument or ""
+                    if not remember_note:
+                        slash_text = SLASH_REMEMBER_USAGE_TEXT
+                    else:
+                        slash_text = await self._run_slash_remember(remember_note, extra_tools)
+
                 await channel.send(
                     OutboundMessage(
                         session=session,
-                        text=slash_result.response_text,
+                        text=slash_text,
                         metadata=outbound_metadata or {},
                     )
                 )

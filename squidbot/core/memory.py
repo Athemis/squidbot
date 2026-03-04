@@ -92,6 +92,51 @@ class MemoryManager:
             return True
         return sender_id in self._unscoped_aliases
 
+    def is_owner_sender(self, sender_id: str | None, channel: str) -> bool:
+        """Return True when sender is authorized as owner for a channel.
+
+        CLI is always authorized because physical host access implies owner control.
+        For non-CLI channels, owner aliases are required.
+
+        Args:
+            sender_id: Sender identifier resolved by the channel loop.
+            channel: Channel name for scoped alias matching.
+
+        Returns:
+            True when the sender is treated as owner for policy checks.
+        """
+        if channel == "cli":
+            return True
+        if sender_id is None:
+            return False
+        return self._is_owner(sender_id, channel)
+
+    async def load_global_memory_text(self) -> str:
+        """Load the current global memory document text.
+
+        Returns:
+            Current content of the global memory document.
+        """
+        return await self._storage.load_global_memory()
+
+    async def count_session_history(self, *, session: Session, session_id: str) -> int:
+        """Return number of persisted messages for a logical session.
+
+        Args:
+            session: Physical session used for legacy matching fallback.
+            session_id: Logical session identifier.
+
+        Returns:
+            Count of history rows that belong to the logical session.
+        """
+        history = await self._storage.load_history(last_n=None)
+        filtered = self._filter_history_for_session(
+            history,
+            target_session_id=session_id,
+            fallback_session=session,
+        )
+        return len(filtered)
+
     def _label_message(self, msg: Message) -> Message:
         """
         Return a copy of msg with a channel/sender label prepended to content.
