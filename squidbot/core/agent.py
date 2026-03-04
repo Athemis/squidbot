@@ -34,6 +34,12 @@ from squidbot.core.slash_commands import handle_slash_command
 MAX_TOOL_ROUNDS = 20
 MAX_TRACKED_SESSION_GENERATIONS = 10_000
 MAX_LOG_TOKEN_LEN = 128
+SLASH_ACCESS_DENIED_TEXT = "Access denied: slash commands are only available to the owner."
+SLASH_STATUS_BUILD_ERROR_TEXT = "Error: unable to build session status right now."
+SLASH_REMEMBER_USAGE_TEXT = "Usage: /remember <text>"
+SLASH_REMEMBER_UNAVAILABLE_TEXT = "Error: /remember unavailable (memory_write tool not configured)."
+SLASH_REMEMBER_INVALID_RESULT_TEXT = "Error: memory_write returned an invalid result."
+SLASH_ERROR_PREFIX = "Error: "
 
 
 def _sanitize_log_value(value: str) -> str:
@@ -197,7 +203,7 @@ class AgentLoop:
         extra_tool_map = {tool.name: tool for tool in (extra_tools or [])}
         memory_tool = extra_tool_map.get("memory_write") or self._registry.get("memory_write")
         if memory_tool is None:
-            return "Error: /remember unavailable (memory_write tool not configured)."
+            return SLASH_REMEMBER_UNAVAILABLE_TEXT
 
         try:
             async with self._remember_lock:
@@ -205,10 +211,10 @@ class AgentLoop:
                 merged = self._append_memory_note(existing, note)
                 result = await memory_tool.execute(content=merged)
                 if not isinstance(result, ToolResult):
-                    return "Error: memory_write returned an invalid result."
+                    return SLASH_REMEMBER_INVALID_RESULT_TEXT
                 return result.content
         except Exception as exc:  # noqa: BLE001
-            return f"Error: {exc}"
+            return f"{SLASH_ERROR_PREFIX}{exc}"
 
     async def _run_llm_stream(
         self,
@@ -455,7 +461,7 @@ class AgentLoop:
                     await channel.send(
                         OutboundMessage(
                             session=session,
-                            text="Access denied: slash commands are only available to the owner.",
+                            text=SLASH_ACCESS_DENIED_TEXT,
                             metadata=outbound_metadata or {},
                         )
                     )
@@ -477,11 +483,11 @@ class AgentLoop:
                             session.id,
                             exc,
                         )
-                        slash_text = "Error: unable to build session status right now."
+                        slash_text = SLASH_STATUS_BUILD_ERROR_TEXT
                 if slash_result.action == "remember":
                     remember_note = slash_result.argument or ""
                     if not remember_note:
-                        slash_text = "Usage: /remember <text>"
+                        slash_text = SLASH_REMEMBER_USAGE_TEXT
                     else:
                         slash_text = await self._run_slash_remember(remember_note, extra_tools)
 
