@@ -43,6 +43,18 @@ class ScriptedLLM:
         return _gen()
 
 
+class ModelReportingLLM(ScriptedLLM):
+    """LLM test double that reports a stable model id for introspection."""
+
+    def __init__(self, model_id: str, responses: list[Any]) -> None:
+        super().__init__(responses)
+        self._model_id = model_id
+
+    def get_last_used_model_id(self) -> str:
+        """Return model id used by this fake adapter."""
+        return self._model_id
+
+
 class InMemoryStorage:
     def __init__(self) -> None:
         self._history: list[Message] = []
@@ -977,6 +989,145 @@ async def test_slash_status_returns_deterministic_error_when_history_count_fails
 
     assert len(channel.sent) == 1
     assert channel.sent[0].text == "Error: unable to build session status right now."
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_model_reports_no_usage_before_llm_turn(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+        default_pool_name="default",
+        list_pool_names=lambda: ["default", "smart"],
+    )
+
+    await loop.run(SESSION, "/model", channel)
+
+    assert len(channel.sent) == 1
+    assert "last_used_model" in channel.sent[0].text
+    assert "No model used yet in this logical session." in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_pool_list_returns_configured_pools_without_llm_call(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+        default_pool_name="default",
+        list_pool_names=lambda: ["default", "smart"],
+    )
+
+    await loop.run(SESSION, "/pool list", channel)
+
+    assert len(channel.sent) == 1
+    assert "Available pools:" in channel.sent[0].text
+    assert "- default" in channel.sent[0].text
+    assert "- smart" in channel.sent[0].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_pool_use_switches_model_for_logical_session(storage, memory):
+    resolve_calls: list[str] = []
+
+    def resolve_llm(pool_name: str) -> ModelReportingLLM:
+        resolve_calls.append(pool_name)
+        return ModelReportingLLM(model_id=f"model-{pool_name}", responses=[f"reply-{pool_name}"])
+
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+        default_pool_name="default",
+        resolve_llm=resolve_llm,
+        list_pool_names=lambda: ["default", "smart"],
+    )
+
+    await loop.run(SESSION, "/pool use smart", channel)
+    await loop.run(SESSION, "hello", channel)
+    await loop.run(SESSION, "/model", channel)
+
+    assert resolve_calls == ["smart"]
+    assert channel.sent[1].text == "reply-smart"
+    assert "- last_used_model: model-smart" in channel.sent[2].text
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_pool_reset_restores_default_pool(storage, memory):
+    resolve_calls: list[str] = []
+
+    def resolve_llm(pool_name: str) -> ModelReportingLLM:
+        resolve_calls.append(pool_name)
+        return ModelReportingLLM(model_id=f"model-{pool_name}", responses=[f"reply-{pool_name}"])
+
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+        default_pool_name="default",
+        resolve_llm=resolve_llm,
+        list_pool_names=lambda: ["default", "smart"],
+    )
+
+    await loop.run(SESSION, "/pool use smart", channel)
+    await loop.run(SESSION, "/pool reset", channel)
+    await loop.run(SESSION, "hello", channel)
+
+    assert resolve_calls == ["default"]
+    assert channel.sent[-1].text == "reply-default"
+
+
+async def test_slash_pool_use_unknown_pool_returns_error(storage, memory):
+    def resolve_llm(pool_name: str) -> ScriptedLLM:
+        return ScriptedLLM([f"reply-{pool_name}"])
+
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+        default_pool_name="default",
+        resolve_llm=resolve_llm,
+        list_pool_names=lambda: ["default", "smart"],
+    )
+
+    await loop.run(SESSION, "/pool use unknown", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Error: pool 'unknown' not found."
+    assert list(llm._responses) == ["from llm"]
+
+
+async def test_slash_pool_use_missing_name_returns_usage(storage, memory):
+    llm = ScriptedLLM(["from llm"])
+    channel = CollectingChannel()
+    loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=ToolRegistry(),
+        system_prompt="You are a bot.",
+        default_pool_name="default",
+        list_pool_names=lambda: ["default", "smart"],
+    )
+
+    await loop.run(SESSION, "/pool use", channel)
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0].text == "Usage: /pool use <name>"
     assert list(llm._responses) == ["from llm"]
 
 

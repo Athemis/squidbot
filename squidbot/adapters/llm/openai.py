@@ -127,6 +127,17 @@ class OpenAIAdapter:
 
         return kwargs
 
+    def get_last_used_model_id(self) -> str:
+        """Return the model identifier used by this adapter.
+
+        Args:
+            None.
+
+        Returns:
+            Configured model identifier passed to this adapter.
+        """
+        return self._model
+
     async def chat(
         self,
         messages: list[Message],

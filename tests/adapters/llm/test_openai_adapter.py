@@ -144,3 +144,9 @@ def test_build_kwargs_all_params_set() -> None:
         "reasoning_effort": "high",
         "extra_body": {"provider": {"allow_fallbacks": False}},
     }
+
+
+def test_get_last_used_model_id_returns_configured_model() -> None:
+    adapter = _make_adapter()
+
+    assert adapter.get_last_used_model_id() == "gpt-4"

@@ -17,6 +17,21 @@ def test_slash_status_sets_status_action() -> None:
     assert result.action == "status"
 
 
+def test_slash_model_sets_model_action() -> None:
+    result = handle_slash_command("/model")
+
+    assert result.handled is True
+    assert result.action == "model"
+
+
+def test_slash_pool_sets_pool_action_with_argument() -> None:
+    result = handle_slash_command("/pool use smart")
+
+    assert result.handled is True
+    assert result.action == "pool"
+    assert result.argument == "use smart"
+
+
 def test_slash_history_is_unknown_command() -> None:
     result = handle_slash_command("/history")
 

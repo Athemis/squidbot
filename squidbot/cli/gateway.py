@@ -534,7 +534,15 @@ async def _make_agent_loop(
         )
         system_prompt = system_prompt + "\n\n" + profiles_xml
 
-    agent_loop = AgentLoop(llm=llm, memory=memory, registry=registry, system_prompt=system_prompt)
+    agent_loop = AgentLoop(
+        llm=llm,
+        memory=memory,
+        registry=registry,
+        system_prompt=system_prompt,
+        default_pool_name=settings.llm.default_pool,
+        resolve_llm=functools.partial(_resolve_llm, settings),
+        list_pool_names=lambda: sorted(settings.llm.pools.keys()),
+    )
 
     if settings.tools.spawn.enabled:
         # SubAgentFactory holds a live reference to `registry`. SpawnTool and
