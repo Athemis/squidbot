@@ -47,9 +47,14 @@ async def _pool_gen(
     last_exc: Exception | None = None
     for i, adapter in enumerate(adapters):
         try:
+            emitted = False
             async for chunk in await adapter.chat(messages, tools, stream=stream):
+                if not emitted:
+                    emitted = True
+                    if on_adapter_success is not None:
+                        on_adapter_success(adapter)
                 yield chunk
-            if on_adapter_success is not None:
+            if not emitted and on_adapter_success is not None:
                 on_adapter_success(adapter)
             return
         except Exception as exc:

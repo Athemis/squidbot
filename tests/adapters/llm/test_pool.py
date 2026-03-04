@@ -10,7 +10,7 @@ from squidbot.adapters.llm.pool import PooledLLMAdapter, _is_auth_error
 from squidbot.core.models import Message
 
 
-def _make_streaming_adapter(chunks: list[str], *, model_id: str | None = None):
+def _make_streaming_adapter(chunks: list[str], *, model_id: str | None = None) -> object:
     """Build a mock LLMPort that yields the given chunks."""
 
     class StreamingAdapter:

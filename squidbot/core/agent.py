@@ -189,7 +189,11 @@ class AgentLoop:
         """Return sorted list of configured pool names."""
         if self._list_pool_names is None:
             return []
-        return sorted(set(self._list_pool_names()))
+        try:
+            return sorted(set(self._list_pool_names()))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent.pool: failed to list pools: {}", exc)
+            return []
 
     def _effective_pool_name(self, logical_session_id: str) -> str | None:
         """Return active pool name for a logical session."""
@@ -255,6 +259,8 @@ class AgentLoop:
         if raw == "use":
             return SLASH_POOL_USE_USAGE_TEXT
         if raw.startswith("use "):
+            if self._resolve_llm is None or self._list_pool_names is None:
+                return SLASH_POOL_UNAVAILABLE_TEXT
             pool_name = raw[4:].strip()
             if not pool_name:
                 return SLASH_POOL_USE_USAGE_TEXT
@@ -740,6 +746,8 @@ class AgentLoop:
         used_model = self._extract_last_used_model_id(selected_llm)
         if used_model is not None:
             self._session_last_model[effective_session_id] = used_model
+        else:
+            self._session_last_model.pop(effective_session_id, None)
 
         # Persist the exchange — use text_fallback to avoid storing base64 payloads.
         try:

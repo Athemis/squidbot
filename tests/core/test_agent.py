@@ -1090,6 +1090,9 @@ async def test_slash_pool_reset_restores_default_pool(storage, memory):
 
 
 async def test_slash_pool_use_unknown_pool_returns_error(storage, memory):
+    def resolve_llm(pool_name: str) -> ScriptedLLM:
+        return ScriptedLLM([f"reply-{pool_name}"])
+
     llm = ScriptedLLM(["from llm"])
     channel = CollectingChannel()
     loop = AgentLoop(
@@ -1098,6 +1101,7 @@ async def test_slash_pool_use_unknown_pool_returns_error(storage, memory):
         registry=ToolRegistry(),
         system_prompt="You are a bot.",
         default_pool_name="default",
+        resolve_llm=resolve_llm,
         list_pool_names=lambda: ["default", "smart"],
     )
 
