@@ -19,6 +19,11 @@ env/
 dist/
 build/
 
+# Node / frontend
+node_modules/
+web/dashboard/dist/
+web/dashboard/.vite/
+
 # Type checkers / linters / test tools
 .mypy_cache/
 .ruff_cache/
