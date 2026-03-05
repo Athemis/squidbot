@@ -1186,7 +1186,7 @@ async def test_slash_remember_requires_text_without_llm_call(storage, memory):
     await loop.run(SESSION, "/remember  ", channel)
 
     assert len(channel.sent) == 1
-    assert channel.sent[0].text == "Usage: /remember <text>"
+    assert channel.sent[0].text == "Usage: /remember `text`"
     assert list(llm._responses) == ["from llm"]
 
 

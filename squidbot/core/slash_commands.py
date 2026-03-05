@@ -30,9 +30,9 @@ HELP_TEXT = (
     "- /model: show last used model for this session\n"
     "- /pool: show active pool\n"
     "- /pool list: list available pools\n"
-    "- /pool use <name>: set pool for this session\n"
+    "- /pool use `name`: set pool for this session\n"
     "- /pool reset: reset to default pool\n"
-    "- /remember <text>: append a memory note"
+    "- /remember `text`: append a memory note"
 )
 
 
@@ -76,7 +76,7 @@ def handle_slash_command(text: str) -> SlashCommandResult:
         if not argument:
             return SlashCommandResult(
                 handled=True,
-                response_text="Usage: /remember <text>",
+                response_text="Usage: /remember `text`",
                 is_error=True,
             )
         return SlashCommandResult(handled=True, action="remember", argument=argument)
