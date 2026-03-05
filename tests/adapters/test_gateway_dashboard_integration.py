@@ -29,7 +29,7 @@ def _build_settings() -> SimpleNamespace:
         ),
         llm=SimpleNamespace(default_pool="default"),
         owner=SimpleNamespace(aliases=[]),
-        dashboard=SimpleNamespace(host="127.0.0.1", port=8765),
+        dashboard=SimpleNamespace(enabled=True, host="127.0.0.1", port=8765),
     )
 
 
@@ -40,6 +40,7 @@ def test_dashboard_settings_falls_back_to_defaults_when_missing() -> None:
 
     dashboard = _dashboard_settings(settings)
 
+    assert dashboard.enabled is False
     assert dashboard.host == "127.0.0.1"
     assert dashboard.port == 8765
 
@@ -47,10 +48,13 @@ def test_dashboard_settings_falls_back_to_defaults_when_missing() -> None:
 def test_dashboard_settings_uses_configured_values() -> None:
     from squidbot.cli.gateway import _dashboard_settings
 
-    settings: Any = SimpleNamespace(dashboard=SimpleNamespace(host="localhost", port=9000))
+    settings: Any = SimpleNamespace(
+        dashboard=SimpleNamespace(enabled=True, host="localhost", port=9000)
+    )
 
     dashboard = _dashboard_settings(settings)
 
+    assert dashboard.enabled is True
     assert dashboard.host == "localhost"
     assert dashboard.port == 9000
 
@@ -126,11 +130,7 @@ async def test_run_gateway_starts_dashboard_server_and_stops_on_shutdown() -> No
         await asyncio.gather(
             _trigger_shutdown(),
             asyncio.wait_for(
-                _run_gateway(
-                    Path("/tmp/squidbot.yaml"),
-                    dashboard_enabled=True,
-                    shutdown_event=shutdown_event,
-                ),
+                _run_gateway(Path("/tmp/squidbot.yaml"), shutdown_event=shutdown_event),
                 timeout=2.0,
             ),
         )
@@ -138,4 +138,41 @@ async def test_run_gateway_starts_dashboard_server_and_stops_on_shutdown() -> No
     dashboard_server.assert_awaited_once()
     logger_add.assert_called_once()
     logger_remove.assert_called_once_with(42)
+    fake_conn.close.assert_awaited_once_with()
+
+
+async def test_run_gateway_does_not_start_dashboard_server_when_disabled() -> None:
+    from squidbot.cli.gateway import _run_gateway
+
+    settings = _build_settings()
+    settings.dashboard.enabled = False
+    fake_loop = MagicMock()
+    fake_loop.run = AsyncMock()
+    fake_conn = MagicMock()
+    fake_conn.close = AsyncMock()
+    fake_storage = MagicMock()
+    fake_storage.load_cron_jobs = AsyncMock(return_value=[])
+
+    scheduler = MagicMock()
+    scheduler.run = AsyncMock(return_value=None)
+    heartbeat = MagicMock()
+    heartbeat.run = AsyncMock(return_value=None)
+    dashboard_server = AsyncMock(return_value=None)
+
+    with (
+        patch("squidbot.config.schema.Settings.load", return_value=settings),
+        patch("squidbot.cli.gateway._print_banner"),
+        patch(
+            "squidbot.cli.gateway._make_agent_loop",
+            new=AsyncMock(return_value=(fake_loop, [fake_conn], fake_storage)),
+        ),
+        patch("squidbot.core.scheduler.CronScheduler", return_value=scheduler),
+        patch("squidbot.core.heartbeat.HeartbeatService", return_value=heartbeat),
+        patch("squidbot.cli.gateway._run_dashboard_server", new=dashboard_server),
+        patch("squidbot.cli.gateway.logger.add") as logger_add,
+    ):
+        await _run_gateway(Path("/tmp/squidbot.yaml"))
+
+    dashboard_server.assert_not_awaited()
+    logger_add.assert_not_called()
     fake_conn.close.assert_awaited_once_with()

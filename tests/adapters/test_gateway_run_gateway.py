@@ -36,6 +36,7 @@ def _build_settings(
         ),
         llm=SimpleNamespace(default_pool="default"),
         owner=SimpleNamespace(aliases=owner_aliases or []),
+        dashboard=SimpleNamespace(enabled=False, host="127.0.0.1", port=8765),
     )
 
 

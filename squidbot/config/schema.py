@@ -216,6 +216,7 @@ class SkillsConfig(BaseModel):
 class DashboardConfig(BaseModel):
     """Configuration for the local dashboard HTTP server."""
 
+    enabled: bool = False
     host: str = "127.0.0.1"
     port: int = 8765
 
