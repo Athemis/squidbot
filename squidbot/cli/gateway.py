@@ -74,10 +74,11 @@ def _dashboard_settings(settings: Settings) -> SimpleNamespace:
     """Return dashboard settings, with defaults for test doubles."""
     dashboard = getattr(settings, "dashboard", None)
     if dashboard is None:
-        return SimpleNamespace(host="127.0.0.1", port=8765)
+        return SimpleNamespace(enabled=False, host="127.0.0.1", port=8765)
+    enabled = bool(getattr(dashboard, "enabled", False))
     host = getattr(dashboard, "host", "127.0.0.1")
     port = getattr(dashboard, "port", 8765)
-    return SimpleNamespace(host=host, port=port)
+    return SimpleNamespace(enabled=enabled, host=host, port=port)
 
 
 async def _run_dashboard_server(runtime: Any, settings: Settings) -> None:
@@ -661,7 +662,6 @@ def _setup_logging(level: str) -> None:
 
 async def _run_gateway(
     config_path: Path,
-    dashboard_enabled: bool = False,
     shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """Start all enabled channels concurrently.
@@ -676,6 +676,8 @@ async def _run_gateway(
     from squidbot.core.scheduler import CronScheduler  # noqa: PLC0415
 
     settings = Settings.load(config_path)
+    dashboard_cfg = _dashboard_settings(settings)
+    dashboard_enabled = dashboard_cfg.enabled
     _print_banner(settings)
 
     # Startup summary

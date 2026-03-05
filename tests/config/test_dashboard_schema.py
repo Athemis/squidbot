@@ -17,6 +17,7 @@ def test_dashboard_settings_defaults_to_loopback() -> None:
     """Dashboard defaults should be local-only with a deterministic port."""
     settings = Settings()
 
+    assert settings.dashboard.enabled is False
     assert settings.dashboard.host == "127.0.0.1"
     assert settings.dashboard.port == 8765
 
