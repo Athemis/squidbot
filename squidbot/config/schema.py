@@ -213,6 +213,20 @@ class SkillsConfig(BaseModel):
     )
 
 
+class DashboardConfig(BaseModel):
+    """Configuration for the local dashboard HTTP server."""
+
+    host: str = "127.0.0.1"
+    port: int = 8765
+
+    @model_validator(mode="after")
+    def _validate_loopback_host(self) -> DashboardConfig:
+        """Restrict dashboard host binding to loopback values."""
+        if self.host not in {"127.0.0.1", "localhost"}:
+            raise ValueError("dashboard.host must be loopback-only (127.0.0.1 or localhost)")
+        return self
+
+
 class OwnerAliasEntry(BaseModel):
     """A single owner alias, optionally scoped to a specific channel."""
 
@@ -249,6 +263,7 @@ class Settings(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     owner: OwnerConfig = Field(default_factory=OwnerConfig)
 
     @model_validator(mode="after")

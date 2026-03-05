@@ -160,3 +160,13 @@ class ChannelStatus:
     enabled: bool
     connected: bool
     error: str | None = None
+
+
+@dataclass
+class GatewayState:
+    """Live runtime state snapshot for gateway status consumers."""
+
+    active_sessions: dict[str, SessionInfo]
+    channel_status: list[ChannelStatus]
+    cron_jobs_cache: list[CronJob]
+    started_at: datetime = field(default_factory=datetime.now)
