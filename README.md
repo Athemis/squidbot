@@ -279,6 +279,7 @@ squidbot onboard              Interactive setup wizard (idempotent — re-run to
 squidbot agent                Start interactive CLI chat (Rich UI)
 squidbot agent -m "..."       Single message, then exit
 squidbot gateway              Start gateway (all enabled channels)
+squidbot dashboard            Start gateway with local web dashboard
 squidbot status               Show configuration summary and pool info
 
 squidbot cron list            List scheduled jobs
@@ -385,6 +386,25 @@ uv run pytest                # Run all tests
 uv run ruff check .          # Lint
 uv run ruff format .         # Format
 uv run mypy squidbot/        # Type-check
+```
+
+### Dashboard frontend build
+
+The web dashboard ships as packaged static assets under `squidbot/adapters/dashboard/static/`.
+When frontend code changes, rebuild and copy assets before packaging or install smoke tests:
+
+```bash
+npm --prefix web/dashboard install
+npm --prefix web/dashboard run test
+npm --prefix web/dashboard run build
+python scripts/build_dashboard_assets.py
+```
+
+Installed-wheel smoke test (verifies packaged dashboard assets are actually served):
+
+```bash
+uv build
+python scripts/smoke_dashboard_install.py --wheel "dist/*.whl"
 ```
 
 ## License
