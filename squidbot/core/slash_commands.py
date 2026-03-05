@@ -30,9 +30,9 @@ HELP_TEXT = (
     "- /model: show last used model for this session\n"
     "- /pool: show active pool\n"
     "- /pool list: list available pools\n"
-    "- /pool use <name>: set pool for this session\n"
+    "- /pool use `name`: set pool for this session\n"
     "- /pool reset: reset to default pool\n"
-    "- /remember <text>: append a memory note"
+    "- /remember `text`: append a memory note"
 )
 
 
@@ -45,13 +45,14 @@ def _split_command_and_argument(stripped: str) -> tuple[str, str]:
 
 
 def handle_slash_command(text: str) -> SlashCommandResult:
-    """Parse and handle a slash command from raw user text.
-
-    Args:
-        text: Raw user input text.
-
+    """
+    Parse a leading slash command from user input and dispatch it into a SlashCommandResult.
+    
+    Parameters:
+        text (str): Raw user input; only inputs starting with "/" are interpreted as slash commands.
+    
     Returns:
-        SlashCommandResult indicating whether input was handled directly.
+        SlashCommandResult: Outcome indicating whether the input was handled and, if so, any response text, requested reset, action name, argument, or error state.
     """
     stripped = text.strip()
     if not stripped.startswith("/"):
@@ -76,7 +77,7 @@ def handle_slash_command(text: str) -> SlashCommandResult:
         if not argument:
             return SlashCommandResult(
                 handled=True,
-                response_text="Usage: /remember <text>",
+                response_text="Usage: /remember `text`",
                 is_error=True,
             )
         return SlashCommandResult(handled=True, action="remember", argument=argument)
