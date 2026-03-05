@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -26,7 +27,7 @@ def _runtime() -> DashboardRuntime:
     )
 
 
-def test_dashboard_root_serves_packaged_index_html(tmp_path) -> None:
+def test_dashboard_root_serves_packaged_index_html(tmp_path: Path) -> None:
     """Root should serve packaged index.html when static assets exist."""
     static_dir = tmp_path / "static"
     static_dir.mkdir(parents=True)
@@ -40,7 +41,7 @@ def test_dashboard_root_serves_packaged_index_html(tmp_path) -> None:
     assert '<div id="app"></div>' in response.text
 
 
-def test_dashboard_assets_route_serves_static_files(tmp_path) -> None:
+def test_dashboard_assets_route_serves_static_files(tmp_path: Path) -> None:
     """Mounted /assets route should serve packaged static files."""
     static_dir = tmp_path / "static"
     static_dir.mkdir(parents=True)
@@ -57,7 +58,7 @@ def test_dashboard_assets_route_serves_static_files(tmp_path) -> None:
     assert "console.log('ok')" in response.text
 
 
-def test_dashboard_uses_default_package_static_dir_when_not_overridden(tmp_path) -> None:
+def test_dashboard_uses_default_package_static_dir_when_not_overridden(tmp_path: Path) -> None:
     """App should resolve static assets from package path by default."""
     static_dir = tmp_path / "pkg-static"
     static_dir.mkdir(parents=True)
@@ -71,7 +72,7 @@ def test_dashboard_uses_default_package_static_dir_when_not_overridden(tmp_path)
     assert "pkg" in response.text
 
 
-def test_missing_packaged_assets_returns_clear_error(tmp_path) -> None:
+def test_missing_packaged_assets_returns_clear_error(tmp_path: Path) -> None:
     """Root should return deterministic error when packaged assets are missing."""
     missing_dir = tmp_path / "missing"
     client = TestClient(build_dashboard_app(_runtime(), static_dir=missing_dir))

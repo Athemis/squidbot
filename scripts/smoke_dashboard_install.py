@@ -1,10 +1,17 @@
-"""Smoke-test installed squidbot wheel for packaged dashboard assets."""
+"""Run install-time smoke checks for dashboard assets in a built wheel.
+
+This script creates an isolated virtual environment, installs a selected
+`squidbot` wheel, and verifies that packaged dashboard assets are present.
+It serves as the final packaging gate used by CI to validate installed-artifact
+behavior instead of repository-checkout behavior.
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -27,7 +34,8 @@ def main() -> int:
     args = _parse_args()
     matches = sorted(Path().glob(args.wheel))
     if not matches:
-        raise FileNotFoundError(f"No wheel found for pattern: {args.wheel}")
+        print(f"No wheel found for pattern: {args.wheel}", file=sys.stderr)
+        return 2
     wheel = matches[0].resolve()
 
     with tempfile.TemporaryDirectory(prefix="squidbot-smoke-") as tmp_dir:

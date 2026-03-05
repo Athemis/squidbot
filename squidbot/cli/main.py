@@ -74,7 +74,15 @@ def gateway(config: Path = DEFAULT_CONFIG_PATH, log_level: str = "INFO") -> None
 
 @app.command
 def dashboard(config: Path = DEFAULT_CONFIG_PATH, log_level: str = "INFO") -> None:
-    """Start the gateway with the local dashboard web server enabled."""
+    """Start the gateway with the local dashboard web server enabled.
+
+    Args:
+        config: Path to the squidbot configuration file.
+        log_level: Logging level used during startup.
+
+    Returns:
+        None.
+    """
     _setup_logging(log_level)
     asyncio.run(_run_gateway(config_path=config, dashboard_enabled=True))
 

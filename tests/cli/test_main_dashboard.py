@@ -1,4 +1,9 @@
-"""Tests for the dashboard CLI command wiring."""
+"""Validate dashboard CLI command wiring in squidbot.
+
+This module verifies that the command configures logging and invokes gateway
+startup with dashboard mode enabled. It protects the CLI-to-runtime contract
+for the local web dashboard entrypoint.
+"""
 
 from __future__ import annotations
 

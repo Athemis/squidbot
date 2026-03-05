@@ -1,4 +1,9 @@
-"""Smoke checks for packaged dashboard assets in installed environments."""
+"""Smoke checks for packaged dashboard assets in installed environments.
+
+This module verifies that installed artifacts can serve bundled dashboard static
+assets through the default app factory. It runs in dedicated packaging CI to
+catch wheel-distribution regressions early.
+"""
 
 from __future__ import annotations
 

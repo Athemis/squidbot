@@ -10,7 +10,7 @@
 
 ---
 
-### Task 0: Add required dashboard dependencies and import gate
+## Task 0: Add required dashboard dependencies and import gate
 
 **Files:**
 - Modify: `pyproject.toml`
@@ -56,7 +56,7 @@ git commit -m "deps(dashboard): add fastapi and uvicorn runtime dependencies"
 
 ---
 
-### Task 1: Add dashboard command and dashboard server config
+## Task 1: Add dashboard command and dashboard server config
 
 **Files:**
 - Modify: `squidbot/config/schema.py`
@@ -114,7 +114,7 @@ git commit -m "feat(dashboard): add CLI command and dashboard config"
 
 ---
 
-### Task 2: Add bounded dashboard log buffer with cursor paging
+## Task 2: Add bounded dashboard log buffer with cursor paging
 
 **Files:**
 - Create: `squidbot/adapters/dashboard/logs.py`
@@ -157,7 +157,7 @@ git commit -m "feat(dashboard): add bounded log buffer"
 
 ---
 
-### Task 3: Add dashboard runtime and bootstrap endpoint (nonce + local safety)
+## Task 3: Add dashboard runtime and bootstrap endpoint (nonce + local safety)
 
 **Files:**
 - Create: `squidbot/adapters/dashboard/runtime.py`
@@ -210,7 +210,7 @@ git commit -m "feat(dashboard): add runtime bootstrap and local write-safety gua
 
 ---
 
-### Task 4: Implement overview/logs/config/restart-intent APIs
+## Task 4: Implement overview/logs/config/restart-intent APIs
 
 **Files:**
 - Modify: `squidbot/adapters/dashboard/api.py`
@@ -260,7 +260,7 @@ git commit -m "feat(dashboard): add overview logs config and restart-intent APIs
 
 ---
 
-### Task 5: Add streamed operator chat endpoint with disconnect safety
+## Task 5: Add streamed operator chat endpoint with disconnect safety
 
 **Files:**
 - Create: `squidbot/adapters/dashboard/chat.py`
@@ -304,7 +304,7 @@ git commit -m "feat(dashboard): add streamed operator chat with disconnect clean
 
 ---
 
-### Task 6: Add gateway lifecycle seam and dashboard runtime wiring
+## Task 6: Add gateway lifecycle seam and dashboard runtime wiring
 
 **Files:**
 - Modify: `squidbot/cli/gateway.py`
@@ -344,7 +344,7 @@ git commit -m "feat(dashboard): wire gateway runtime and testable dashboard life
 
 ---
 
-### Task 7: Build Svelte frontend and adaptive polling stores
+## Task 7: Build Svelte frontend and adaptive polling stores
 
 **Files:**
 - Create: `web/dashboard/package.json`
@@ -416,7 +416,7 @@ git commit -m "feat(dashboard-ui): add Svelte frontend for overview logs config 
 
 ---
 
-### Task 8: Package frontend assets into squidbot and serve from package path
+## Task 8: Package frontend assets into squidbot and serve from package path
 
 **Files:**
 - Modify: `pyproject.toml`
@@ -467,7 +467,7 @@ git commit -m "feat(dashboard-ui): package and serve frontend assets from squidb
 
 ---
 
-### Task 9: Add CI dashboard gates
+## Task 9: Add CI dashboard gates
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`
@@ -529,7 +529,7 @@ git commit -m "ci(dashboard): enforce frontend and installed-artifact dashboard 
 
 ---
 
-### Task 10: Documentation and operator usage updates
+## Task 10: Documentation and operator usage updates
 
 **Files:**
 - Modify: `README.md`
@@ -563,7 +563,7 @@ git commit -m "docs(dashboard): document local build run and write-safety model"
 
 ---
 
-### Task 11: Final verification
+## Task 11: Final verification
 
 **Step 1: Run lint**
 

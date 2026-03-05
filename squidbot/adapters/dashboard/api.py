@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -96,7 +96,15 @@ def require_local_write(request: Request, runtime: DashboardRuntime) -> JSONResp
 
 
 def require_local_context(request: Request) -> JSONResponse | None:
-    """Validate loopback host/origin context for local dashboard requests."""
+    """Validate loopback host/origin context for local dashboard requests.
+
+    Args:
+        request: Incoming HTTP request to validate.
+
+    Returns:
+        None when host and origin are loopback-valid, otherwise a JSONResponse
+        describing why the request was rejected.
+    """
     host = _extract_host_name(request.headers.get("host"))
     if not _is_loopback_host(host):
         return _error_response("INVALID_HOST", "Host must be loopback-only", status_code=403)
@@ -114,7 +122,7 @@ def _default_runtime() -> DashboardRuntime:
             active_sessions={},
             channel_status=[],
             cron_jobs_cache=[],
-            started_at=datetime.now(),
+            started_at=datetime.now(UTC),
         ),
         log_buffer=DashboardLogBuffer(),
         config_path=None,

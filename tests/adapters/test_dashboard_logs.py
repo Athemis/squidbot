@@ -1,4 +1,9 @@
-"""Tests for dashboard log buffering and pagination."""
+"""Tests for dashboard log buffering and pagination behavior.
+
+This module validates bounded retention, cursor pagination, and eviction
+semantics of `DashboardLogBuffer`. It protects dashboard log-tail reliability
+without unbounded memory growth.
+"""
 
 from __future__ import annotations
 

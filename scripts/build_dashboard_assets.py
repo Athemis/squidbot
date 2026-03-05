@@ -1,4 +1,9 @@
-"""Copy built dashboard frontend assets into package static directory."""
+"""Copy built dashboard assets into squidbot's packaged static directory.
+
+This helper moves the frontend build output into
+`squidbot.adapters.dashboard.static` so installed wheels can serve the UI.
+It is used in local packaging workflows and CI gates before wheel creation.
+"""
 
 from __future__ import annotations
 
