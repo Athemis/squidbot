@@ -10,7 +10,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from squidbot.adapters.dashboard.api import build_dashboard_app
-from squidbot.adapters.dashboard.chat import start_ndjson_stream
+from squidbot.adapters.dashboard.chat import StreamingDashboardChannel, start_ndjson_stream
 from squidbot.adapters.dashboard.logs import DashboardLogBuffer
 from squidbot.adapters.dashboard.runtime import DashboardRuntime
 from squidbot.config.schema import Settings
@@ -116,3 +116,26 @@ async def test_start_ndjson_stream_cancels_producer_on_close() -> None:
 
     await stream.aclose()
     await asyncio.wait_for(cancelled.wait(), timeout=2.0)
+
+
+async def test_streaming_dashboard_channel_send_typing_noop() -> None:
+    """send_typing should be a harmless no-op for dashboard streams."""
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    channel = StreamingDashboardChannel(queue)
+
+    await channel.send_typing(session_id="dashboard:local", typing=True)
+
+    assert queue.empty()
+
+
+def test_streaming_dashboard_channel_receive_not_supported() -> None:
+    """Dashboard stream channel is send-only and rejects receive()."""
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    channel = StreamingDashboardChannel(queue)
+
+    try:
+        channel.receive()
+    except NotImplementedError as exc:
+        assert "does not support receive" in str(exc)
+    else:
+        raise AssertionError("receive() should raise NotImplementedError")

@@ -279,7 +279,17 @@ def build_dashboard_app(
         try:
             page = active_runtime.log_buffer.page(limit=limit, before_cursor=before)
         except ValueError as exc:
-            return _error_response("VALIDATION_ERROR", str(exc), status_code=400)
+            logger.warning(
+                "Invalid log pagination parameters (limit={}, before={}): {}",
+                limit,
+                before,
+                exc,
+            )
+            return _error_response(
+                "VALIDATION_ERROR",
+                "Invalid log pagination parameters.",
+                status_code=400,
+            )
 
         entries = [
             {

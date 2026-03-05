@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -30,6 +31,56 @@ def _build_settings() -> SimpleNamespace:
         owner=SimpleNamespace(aliases=[]),
         dashboard=SimpleNamespace(host="127.0.0.1", port=8765),
     )
+
+
+def test_dashboard_settings_falls_back_to_defaults_when_missing() -> None:
+    from squidbot.cli.gateway import _dashboard_settings
+
+    settings: Any = SimpleNamespace()
+
+    dashboard = _dashboard_settings(settings)
+
+    assert dashboard.host == "127.0.0.1"
+    assert dashboard.port == 8765
+
+
+def test_dashboard_settings_uses_configured_values() -> None:
+    from squidbot.cli.gateway import _dashboard_settings
+
+    settings: Any = SimpleNamespace(dashboard=SimpleNamespace(host="localhost", port=9000))
+
+    dashboard = _dashboard_settings(settings)
+
+    assert dashboard.host == "localhost"
+    assert dashboard.port == 9000
+
+
+async def test_run_dashboard_server_uses_uvicorn_config_and_serves() -> None:
+    from squidbot.cli.gateway import _run_dashboard_server
+
+    runtime = object()
+    settings: Any = _build_settings()
+    fake_server = MagicMock()
+    fake_server.serve = AsyncMock(return_value=None)
+
+    with (
+        patch(
+            "squidbot.adapters.dashboard.api.build_dashboard_app", return_value="app"
+        ) as build_app,
+        patch("uvicorn.Config", return_value="config") as uvicorn_config,
+        patch("uvicorn.Server", return_value=fake_server) as uvicorn_server,
+    ):
+        await _run_dashboard_server(runtime, settings)
+
+    build_app.assert_called_once_with(runtime)
+    uvicorn_config.assert_called_once_with(
+        app="app",
+        host="127.0.0.1",
+        port=8765,
+        log_level="warning",
+    )
+    uvicorn_server.assert_called_once_with("config")
+    fake_server.serve.assert_awaited_once_with()
 
 
 async def _block_forever(*args: object, **kwargs: object) -> None:

@@ -74,6 +74,22 @@ def test_get_logs_returns_paginated_entries(tmp_path) -> None:
     assert payload["next_before_cursor"] is not None
 
 
+def test_get_logs_invalid_limit_returns_generic_validation_message(tmp_path) -> None:
+    """Logs endpoint should not expose raw exception messages to clients."""
+    runtime = _runtime(tmp_path)
+    client = TestClient(build_dashboard_app(runtime))
+
+    response = client.get("/api/logs?limit=0", headers={"host": "localhost"})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "Invalid log pagination parameters.",
+        }
+    }
+
+
 def test_get_config_returns_editable_projection(tmp_path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
