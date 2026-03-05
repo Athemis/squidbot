@@ -9,12 +9,14 @@ from __future__ import annotations
 import asyncio
 import functools
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+from squidbot.core.models import GatewayState
 
 if TYPE_CHECKING:
     from squidbot.adapters.persistence.jsonl import JsonlMemory
@@ -25,21 +27,6 @@ if TYPE_CHECKING:
     from squidbot.core.models import ChannelStatus, CronJob, Session, SessionInfo
     from squidbot.core.ports import ChannelPort, LLMPort
     from squidbot.core.skills import SkillMetadata
-
-
-@dataclass
-class GatewayState:
-    """
-    Live runtime state of the gateway process.
-
-    Updated by _channel_loop_with_state() and channel setup code.
-    Consumed by GatewayStatusAdapter for dashboards and status reporting.
-    """
-
-    active_sessions: dict[str, SessionInfo]
-    channel_status: list[ChannelStatus]
-    cron_jobs_cache: list[CronJob]
-    started_at: datetime = field(default_factory=datetime.now)
 
 
 class GatewayStatusAdapter:
@@ -71,6 +58,44 @@ class GatewayStatusAdapter:
     def get_skills(self) -> list[SkillMetadata]:
         """Return all discovered skills via the skills loader."""
         return self._skills_loader.list_skills()  # type: ignore[no-any-return]
+
+
+class _GatewayShutdownRequested(Exception):
+    """Internal signal to stop long-running gateway tasks in tests."""
+
+
+async def _await_shutdown_signal(shutdown_event: asyncio.Event) -> None:
+    """Block until shutdown_event is set, then raise cancellation signal."""
+    await shutdown_event.wait()
+    raise _GatewayShutdownRequested()
+
+
+def _dashboard_settings(settings: Settings) -> SimpleNamespace:
+    """Return dashboard settings, with defaults for test doubles."""
+    dashboard = getattr(settings, "dashboard", None)
+    if dashboard is None:
+        return SimpleNamespace(host="127.0.0.1", port=8765)
+    host = getattr(dashboard, "host", "127.0.0.1")
+    port = getattr(dashboard, "port", 8765)
+    return SimpleNamespace(host=host, port=port)
+
+
+async def _run_dashboard_server(runtime: Any, settings: Settings) -> None:
+    """Start the dashboard FastAPI server for the current gateway runtime."""
+    import uvicorn  # noqa: PLC0415
+
+    from squidbot.adapters.dashboard.api import build_dashboard_app  # noqa: PLC0415
+
+    dashboard_cfg = _dashboard_settings(settings)
+    app = build_dashboard_app(runtime)
+    config = uvicorn.Config(
+        app=app,
+        host=dashboard_cfg.host,
+        port=dashboard_cfg.port,
+        log_level="warning",
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 async def _connect_mcp_servers(
@@ -634,7 +659,11 @@ def _setup_logging(level: str) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-async def _run_gateway(config_path: Path) -> None:
+async def _run_gateway(
+    config_path: Path,
+    dashboard_enabled: bool = False,
+    shutdown_event: asyncio.Event | None = None,
+) -> None:
     """Start all enabled channels concurrently.
 
     The gateway does not start a CLI channel — use `squidbot agent` for
@@ -691,15 +720,41 @@ async def _run_gateway(config_path: Path) -> None:
     # Map of channel prefix → channel instance for cron job routing
     channel_registry: dict[str, ChannelPort] = {}
 
+    dashboard_runtime: Any | None = None
+    dashboard_sink_id: int | None = None
+    if dashboard_enabled:
+        from squidbot.adapters.dashboard.logs import DashboardLogBuffer  # noqa: PLC0415
+        from squidbot.adapters.dashboard.runtime import DashboardRuntime  # noqa: PLC0415
+
+        dashboard_runtime = DashboardRuntime(
+            state=state,
+            log_buffer=DashboardLogBuffer(),
+            config_path=config_path,
+            agent_loop=agent_loop,
+        )
+
+        def _dashboard_log_sink(message: Any) -> None:
+            record = message.record
+            level_name = record["level"].name
+            text = record["message"]
+            dashboard_runtime.log_buffer.append(level=level_name, message=text)
+
+        dashboard_sink_id = logger.add(_dashboard_log_sink, level="DEBUG", format="{message}")
+
     async def on_cron_due(job: CronJob) -> None:
         """Deliver a scheduled message to the job's target channel."""
-        channel_prefix = job.channel.split(":")[0]
+        channel_prefix, separator, target = job.channel.partition(":")
+        if separator != ":" or not target:
+            logger.warning(
+                "cron: skipping job with invalid channel target '{}': {}", job.id, job.channel
+            )
+            return
         ch = channel_registry.get(channel_prefix)
         if ch is None:
             return  # target channel not active
         session = Session(
             channel=channel_prefix,
-            sender_id=job.channel.split(":", 1)[1],
+            sender_id=target,
         )
         from squidbot.adapters.tools.memory_write import MemoryWriteTool  # noqa: PLC0415
 
@@ -730,68 +785,77 @@ async def _run_gateway(config_path: Path) -> None:
     )
 
     try:
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(scheduler.run(on_due=on_cron_due))
-            tg.create_task(heartbeat.run())
-            if settings.channels.matrix.enabled:
-                from squidbot.adapters.channels.matrix import MatrixChannel  # noqa: PLC0415
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(scheduler.run(on_due=on_cron_due))
+                tg.create_task(heartbeat.run())
+                if dashboard_enabled and dashboard_runtime is not None:
+                    tg.create_task(_run_dashboard_server(dashboard_runtime, settings))
+                if shutdown_event is not None:
+                    tg.create_task(_await_shutdown_signal(shutdown_event))
+                if settings.channels.matrix.enabled:
+                    from squidbot.adapters.channels.matrix import MatrixChannel  # noqa: PLC0415
 
-                matrix_ch = MatrixChannel(
-                    config=settings.channels.matrix,
-                    owner_matrix_ids=_owner_matrix_ids(settings),
-                )
-                channel_registry["matrix"] = matrix_ch
-                state.channel_status.append(
-                    ChannelStatus(name="matrix", enabled=True, connected=True)
-                )
-                logger.info("matrix channel: starting")
-                tg.create_task(
-                    _channel_loop_with_state(
-                        matrix_ch,
-                        agent_loop,
-                        state,
-                        storage,
-                        channel_registry=channel_registry,
-                        owner_aliases=list(settings.owner.aliases),
-                        workspace=workspace,
-                        restrict_to_workspace=restrict_to_workspace,
-                        cron_mutation_lock=cron_mutation_lock,
-                        tracker=tracker,
+                    matrix_ch = MatrixChannel(
+                        config=settings.channels.matrix,
+                        owner_matrix_ids=_owner_matrix_ids(settings),
                     )
-                )
-            else:
-                state.channel_status.append(
-                    ChannelStatus(name="matrix", enabled=False, connected=False)
-                )
-                logger.info("matrix channel: disabled")
-            if settings.channels.email.enabled:
-                from squidbot.adapters.channels.email import EmailChannel  # noqa: PLC0415
+                    channel_registry["matrix"] = matrix_ch
+                    state.channel_status.append(
+                        ChannelStatus(name="matrix", enabled=True, connected=True)
+                    )
+                    logger.info("matrix channel: starting")
+                    tg.create_task(
+                        _channel_loop_with_state(
+                            matrix_ch,
+                            agent_loop,
+                            state,
+                            storage,
+                            channel_registry=channel_registry,
+                            owner_aliases=list(settings.owner.aliases),
+                            workspace=workspace,
+                            restrict_to_workspace=restrict_to_workspace,
+                            cron_mutation_lock=cron_mutation_lock,
+                            tracker=tracker,
+                        )
+                    )
+                else:
+                    state.channel_status.append(
+                        ChannelStatus(name="matrix", enabled=False, connected=False)
+                    )
+                    logger.info("matrix channel: disabled")
+                if settings.channels.email.enabled:
+                    from squidbot.adapters.channels.email import EmailChannel  # noqa: PLC0415
 
-                email_ch = EmailChannel(config=settings.channels.email)
-                channel_registry["email"] = email_ch
-                state.channel_status.append(
-                    ChannelStatus(name="email", enabled=True, connected=True)
-                )
-                logger.info("email channel: starting")
-                tg.create_task(
-                    _channel_loop_with_state(
-                        email_ch,
-                        agent_loop,
-                        state,
-                        storage,
-                        channel_registry=channel_registry,
-                        owner_aliases=list(settings.owner.aliases),
-                        workspace=workspace,
-                        restrict_to_workspace=restrict_to_workspace,
-                        cron_mutation_lock=cron_mutation_lock,
-                        tracker=tracker,
+                    email_ch = EmailChannel(config=settings.channels.email)
+                    channel_registry["email"] = email_ch
+                    state.channel_status.append(
+                        ChannelStatus(name="email", enabled=True, connected=True)
                     )
-                )
-            else:
-                state.channel_status.append(
-                    ChannelStatus(name="email", enabled=False, connected=False)
-                )
-                logger.info("email channel: disabled")
+                    logger.info("email channel: starting")
+                    tg.create_task(
+                        _channel_loop_with_state(
+                            email_ch,
+                            agent_loop,
+                            state,
+                            storage,
+                            channel_registry=channel_registry,
+                            owner_aliases=list(settings.owner.aliases),
+                            workspace=workspace,
+                            restrict_to_workspace=restrict_to_workspace,
+                            cron_mutation_lock=cron_mutation_lock,
+                            tracker=tracker,
+                        )
+                    )
+                else:
+                    state.channel_status.append(
+                        ChannelStatus(name="email", enabled=False, connected=False)
+                    )
+                    logger.info("email channel: disabled")
+        except* _GatewayShutdownRequested:
+            logger.info("gateway: shutdown signal received")
     finally:
+        if dashboard_sink_id is not None:
+            logger.remove(dashboard_sink_id)
         for conn in mcp_connections:
             await conn.close()
