@@ -1,4 +1,9 @@
-"""Streaming channel adapter used by dashboard operator chat endpoint."""
+"""Streaming primitives for dashboard operator chat transport.
+
+This module bridges agent output chunks into NDJSON frames consumed by the
+dashboard API response stream. It provides a queue-backed channel sink and a
+stream wrapper that expose incremental assistant responses safely.
+"""
 
 from __future__ import annotations
 

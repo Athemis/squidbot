@@ -115,10 +115,10 @@
       while (true) {
         const { done, value } = await reader.read()
         if (done) {
-          break
+          buffer += decoder.decode()
+        } else {
+          buffer += decoder.decode(value, { stream: true })
         }
-
-        buffer += decoder.decode(value, { stream: true })
         let newlineIndex = buffer.indexOf("\n")
         while (newlineIndex !== -1) {
           const line = buffer.slice(0, newlineIndex).trim()
@@ -132,6 +132,15 @@
             }
           }
           newlineIndex = buffer.indexOf("\n")
+        }
+
+        if (done) {
+          const trailing = buffer.trim()
+          if (trailing.length > 0) {
+            const frame = JSON.parse(trailing) as ChatStreamFrame
+            applyFrame(frame)
+          }
+          break
         }
       }
     } catch (err) {

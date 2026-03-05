@@ -1,4 +1,9 @@
-"""Security and bootstrap tests for dashboard API guards."""
+"""Security and bootstrap tests for dashboard API guard behavior.
+
+This module validates localhost/write-safety checks for dashboard endpoints,
+including host, origin, and nonce requirements. It also verifies bootstrap
+nonce exposure needed by frontend mutating requests.
+"""
 
 from __future__ import annotations
 

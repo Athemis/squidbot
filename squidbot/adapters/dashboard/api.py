@@ -205,6 +205,7 @@ def build_dashboard_app(
 
     Args:
         runtime: Optional runtime dependency container.
+        static_dir: Optional override path for packaged dashboard static assets.
 
     Returns:
         A FastAPI application configured for the squidbot dashboard API.

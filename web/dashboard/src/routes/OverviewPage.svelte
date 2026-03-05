@@ -86,10 +86,8 @@
     </p>
   {/if}
 
-  {#if isLoading}
+  {#if isLoading && overview === null}
     <p>Loading runtime status...</p>
-  {:else if error}
-    <p>Failed to load overview: {error}</p>
   {:else if overview}
     <p>Gateway started: {formatIso(overview.startedAt)}</p>
     <p>Uptime: {formatUptime(overview.startedAt)}</p>
@@ -148,5 +146,7 @@
         </tbody>
       </table>
     {/if}
+  {:else if error}
+    <p>Failed to load overview: {error}</p>
   {/if}
 </section>
