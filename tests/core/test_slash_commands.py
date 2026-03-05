@@ -46,7 +46,7 @@ def test_slash_remember_requires_text_argument() -> None:
 
     assert result.handled is True
     assert result.is_error is True
-    assert result.response_text == "Usage: /remember <text>"
+    assert result.response_text == "Usage: /remember `text`"
 
 
 def test_slash_remember_sets_argument_when_present() -> None:
