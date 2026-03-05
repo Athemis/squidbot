@@ -279,7 +279,6 @@ squidbot onboard              Interactive setup wizard (idempotent — re-run to
 squidbot agent                Start interactive CLI chat (Rich UI)
 squidbot agent -m "..."       Single message, then exit
 squidbot gateway              Start gateway (all enabled channels)
-squidbot dashboard            Start gateway with local web dashboard
 squidbot status               Show configuration summary and pool info
 
 squidbot cron list            List scheduled jobs
@@ -288,6 +287,20 @@ squidbot cron remove <id>     Remove a cron job
 
 squidbot skills list          List all discovered skills and their availability
 ```
+
+Dashboard activation is config-driven. To enable the local dashboard API/UI, set:
+
+```yaml
+dashboard:
+  enabled: true
+  host: "127.0.0.1"
+  port: 8765
+```
+
+Then start squidbot with `squidbot gateway`.
+
+Migration note: `squidbot dashboard` was removed. Use `dashboard.enabled: true` with
+`squidbot gateway` instead.
 
 Interactive slash commands (available across CLI, Matrix, and Email):
 
