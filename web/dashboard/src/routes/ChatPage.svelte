@@ -1,15 +1,20 @@
 <script lang="ts">
   import { onDestroy } from "svelte"
 
-  type ChatStreamFrame =
-    | { type: "chunk"; text: string }
-    | { type: "error"; message: string }
-    | { type: "done" }
+  import {
+    parseChatStreamFrame,
+    readStreamErrorCode,
+    shouldRetryWithFreshNonce,
+    type ChatStreamFrame
+  } from "../lib/chat_stream"
+  import PageShell from "../lib/ui/PageShell.svelte"
+  import SectionTitle from "../lib/ui/SectionTitle.svelte"
 
   let prompt = ""
   let transcript = ""
   let error: string | null = null
   let sending = false
+  let receivedDoneFrame = false
   let nonce: string | null = null
   let activeController: AbortController | null = null
 
@@ -40,15 +45,9 @@
       return response
     }
 
-    let errorCode: string | undefined
-    try {
-      const payload = (await response.clone().json()) as { error?: { code?: string } }
-      errorCode = payload.error?.code
-    } catch {
-      errorCode = undefined
-    }
+    const errorCode = await readStreamErrorCode(response)
 
-    if (errorCode !== "INVALID_NONCE") {
+    if (!shouldRetryWithFreshNonce(response.status, errorCode)) {
       return response
     }
 
@@ -82,6 +81,10 @@
     }
     if (frame.type === "error") {
       error = frame.message
+      return
+    }
+    if (frame.type === "done") {
+      receivedDoneFrame = true
     }
   }
 
@@ -98,6 +101,7 @@
     sending = true
     error = null
     transcript = ""
+    receivedDoneFrame = false
 
     const controller = new AbortController()
     activeController = controller
@@ -125,7 +129,7 @@
           buffer = buffer.slice(newlineIndex + 1)
 
           if (line.length > 0) {
-            const frame = JSON.parse(line) as ChatStreamFrame
+            const frame = parseChatStreamFrame(line)
             applyFrame(frame)
             if (frame.type === "done") {
               return
@@ -137,7 +141,7 @@
         if (done) {
           const trailing = buffer.trim()
           if (trailing.length > 0) {
-            const frame = JSON.parse(trailing) as ChatStreamFrame
+            const frame = parseChatStreamFrame(trailing)
             applyFrame(frame)
           }
           break
@@ -159,24 +163,103 @@
   onDestroy(() => {
     activeController?.abort()
   })
+
+  $: trimmedPrompt = prompt.trim()
+  $: canSendPrompt = !sending && trimmedPrompt.length > 0
+  $: streamState = error
+    ? "error"
+    : sending
+      ? "streaming"
+      : receivedDoneFrame
+        ? "done"
+        : "idle"
 </script>
 
-<section>
-  <h2>Chat</h2>
-  <form on:submit|preventDefault={() => void sendPrompt()}>
-    <input bind:value={prompt} placeholder="Ask squidbot..." />
-    <button type="submit" disabled={sending || prompt.trim().length === 0}>
-      {#if sending}
-        Sending...
-      {:else}
-        Send
-      {/if}
-    </button>
-  </form>
+<PageShell title="Chat">
+  <section class="space-y-3">
+    <SectionTitle
+      title="Conversation stream"
+      subtitle="Submit a prompt and watch streamed chunks render in real time."
+    />
 
-  {#if error}
-    <p>Chat error: {error}</p>
-  {/if}
+    <article class="space-y-3 rounded-xl border border-surface-200-700 bg-surface-100-900 p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <p class="font-medium text-surface-900-50">Response output</p>
+        {#if streamState === "streaming"}
+          <span class="badge variant-soft-primary">Streaming...</span>
+        {:else if streamState === "done"}
+          <span class="badge variant-soft-success">Complete</span>
+        {:else if streamState === "error"}
+          <span class="badge variant-soft-error">Stream failed</span>
+        {:else}
+          <span class="badge variant-soft-surface">Idle</span>
+        {/if}
+      </div>
 
-  <pre>{transcript}</pre>
-</section>
+      <div
+        class="min-h-56 rounded-lg border border-surface-200-700 bg-surface-50-950 p-4"
+        aria-live="polite"
+      >
+        {#if transcript.length === 0}
+          <p class="text-sm text-surface-700-300">
+            {#if sending}
+              Waiting for first stream chunk...
+            {:else}
+              No response yet. Send a prompt to start streaming output.
+            {/if}
+          </p>
+        {:else}
+          <pre class="overflow-x-auto whitespace-pre-wrap break-words text-sm text-surface-900-50">{transcript}</pre>
+        {/if}
+      </div>
+    </article>
+  </section>
+
+  <section class="space-y-3">
+    <SectionTitle
+      title="Prompt input"
+      subtitle="Input and action controls stay visible while streaming or showing errors."
+    />
+
+    <form
+      class="space-y-3 rounded-xl border border-surface-200-700 bg-surface-100-900 p-4"
+      on:submit|preventDefault={() => void sendPrompt()}
+    >
+      <label class="space-y-1 text-sm font-medium text-surface-700-300" for="chat-prompt-input">
+        Prompt
+        <textarea
+          id="chat-prompt-input"
+          class="textarea min-h-28 w-full"
+          bind:value={prompt}
+          disabled={sending}
+          placeholder="Ask squidbot..."
+        ></textarea>
+      </label>
+
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs text-surface-700-300">
+          {#if sending}
+            Sending request and parsing stream frames...
+          {:else if error}
+            Last request failed. Edit prompt and retry.
+          {:else}
+            Ready to send.
+          {/if}
+        </p>
+        <button class="btn btn-sm variant-filled-surface" type="submit" disabled={!canSendPrompt}>
+          {#if sending}
+            Sending...
+          {:else}
+            Send
+          {/if}
+        </button>
+      </div>
+    </form>
+
+    {#if error}
+      <div class="alert variant-soft-error">
+        <p>Chat error: {error}</p>
+      </div>
+    {/if}
+  </section>
+</PageShell>

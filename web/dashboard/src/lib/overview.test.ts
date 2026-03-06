@@ -24,4 +24,23 @@ describe("mapOverviewPayload", () => {
     expect(mapped.sessions[0].messageCount).toBe(12)
     expect(mapped.cronJobs).toBe(3)
   })
+
+  it("maps status labels for tokenized badges", () => {
+    const mapped = mapOverviewPayload({
+      started_at: "2026-03-05T10:00:00+00:00",
+      channels: [
+        { name: "matrix", enabled: true, connected: true, error: null },
+        { name: "email", enabled: true, connected: false, error: "timeout" },
+        { name: "cli", enabled: false, connected: false, error: null }
+      ],
+      active_sessions: [],
+      cron_jobs: 1
+    })
+
+    expect(mapped.channels.map((channel) => channel.statusLabel)).toEqual([
+      "connected",
+      "degraded",
+      "disconnected"
+    ])
+  })
 })
