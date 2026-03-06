@@ -5,11 +5,11 @@
   export let label: string
 
   const toneClass: Record<StatusTone, string> = {
-    ok: "variant-soft-success",
-    warn: "variant-soft-warning",
-    error: "variant-soft-error",
-    idle: "variant-soft-surface"
+    ok: "preset-tonal-success",
+    warn: "preset-tonal-warning",
+    error: "preset-tonal-error",
+    idle: "preset-tonal-surface"
   }
 </script>
 
-<span class={`badge ${toneClass[tone]}`}>{label}</span>
+<span class={`badge ${toneClass[tone]} border-0 font-medium capitalize`}>{label}</span>

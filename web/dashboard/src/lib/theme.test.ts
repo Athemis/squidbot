@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  ACTIVE_THEME_NAME,
+  applyThemeState,
   DEFAULT_THEME,
   createSystemThemeObserver,
   normalizeTheme,
   readSystemPrefersDark,
   readStoredTheme,
+  resolveModePreference,
+  resolveThemeName,
   resolveAppliedTheme,
   writeStoredTheme
 } from "./theme"
@@ -20,13 +24,41 @@ describe("theme", () => {
     expect(DEFAULT_THEME).toBe("system")
   })
 
+  it("uses mona as the active skeleton theme", () => {
+    expect(ACTIVE_THEME_NAME).toBe("mona")
+    expect(resolveThemeName("system")).toBe("mona")
+    expect(resolveThemeName("light")).toBe("mona")
+    expect(resolveThemeName("dark")).toBe("mona")
+  })
+
   it("normalizes invalid values to system", () => {
     expect(normalizeTheme("invalid")).toBe("system")
   })
 
-  it("resolves system using prefers dark", () => {
+  it("resolves mode preference from system preference", () => {
+    expect(resolveModePreference("system", true)).toBe("dark")
+    expect(resolveModePreference("system", false)).toBe("light")
+    expect(resolveModePreference("light", true)).toBe("light")
+    expect(resolveModePreference("dark", false)).toBe("dark")
+  })
+
+  it("keeps applied theme semantics for mode only", () => {
     expect(resolveAppliedTheme("system", true)).toBe("dark")
     expect(resolveAppliedTheme("system", false)).toBe("light")
+  })
+
+  it("applies mona theme and resolved mode to the document target", () => {
+    const target = {
+      dataset: {},
+      style: { colorScheme: "light" }
+    }
+
+    const appliedMode = applyThemeState(target, "system", true)
+
+    expect(appliedMode).toBe("dark")
+    expect(target.dataset.theme).toBe("mona")
+    expect(target.dataset.mode).toBe("dark")
+    expect(target.style.colorScheme).toBe("dark")
   })
 
   it("falls back to system for invalid stored value", () => {

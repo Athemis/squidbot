@@ -1,6 +1,8 @@
 export type Theme = "system" | "light" | "dark"
+export type Mode = "light" | "dark"
 
 export const DEFAULT_THEME: Theme = "system"
+export const ACTIVE_THEME_NAME = "mona"
 
 const THEME_STORAGE_KEY = "squidbot-dashboard-theme"
 const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)"
@@ -8,6 +10,15 @@ const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)"
 type ThemeReader = () => string | null | undefined
 type ThemeWriter = (value: Theme) => void
 type SystemThemeSubscriber = (callback: (prefersDark: boolean) => void) => () => void
+type ThemeTarget = {
+  dataset: {
+    theme?: string
+    mode?: string
+  }
+  style: {
+    colorScheme: string
+  }
+}
 
 export function normalizeTheme(value: unknown): Theme {
   if (value === "system" || value === "light" || value === "dark") {
@@ -17,12 +28,30 @@ export function normalizeTheme(value: unknown): Theme {
   return DEFAULT_THEME
 }
 
-export function resolveAppliedTheme(theme: Theme, prefersDark: boolean): "light" | "dark" {
+export function resolveModePreference(theme: Theme, prefersDark: boolean): Mode {
   if (theme === "system") {
     return prefersDark ? "dark" : "light"
   }
 
   return theme
+}
+
+export function resolveAppliedTheme(theme: Theme, prefersDark: boolean): Mode {
+  return resolveModePreference(theme, prefersDark)
+}
+
+export function resolveThemeName(_theme: Theme): typeof ACTIVE_THEME_NAME {
+  return ACTIVE_THEME_NAME
+}
+
+export function applyThemeState(target: ThemeTarget, theme: Theme, prefersDark: boolean): Mode {
+  const mode = resolveModePreference(theme, prefersDark)
+
+  target.dataset.theme = resolveThemeName(theme)
+  target.dataset.mode = mode
+  target.style.colorScheme = mode
+
+  return mode
 }
 
 export function readStoredTheme(readTheme?: ThemeReader): Theme {

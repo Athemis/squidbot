@@ -9,6 +9,7 @@
   } from "../lib/chat_stream"
   import PageShell from "../lib/ui/PageShell.svelte"
   import SectionTitle from "../lib/ui/SectionTitle.svelte"
+  import StatusChip from "../lib/ui/StatusChip.svelte"
 
   let prompt = ""
   let transcript = ""
@@ -17,6 +18,7 @@
   let receivedDoneFrame = false
   let nonce: string | null = null
   let activeController: AbortController | null = null
+  let streamTone: "ok" | "warn" | "error" | "idle" = "idle"
 
   async function postChatStreamRequest(
     promptText: string,
@@ -173,6 +175,8 @@
       : receivedDoneFrame
         ? "done"
         : "idle"
+
+  $: streamTone = error ? "error" : sending ? "warn" : receivedDoneFrame ? "ok" : "idle"
 </script>
 
 <PageShell title="Chat">
@@ -182,26 +186,27 @@
       subtitle="Submit a prompt and watch streamed chunks render in real time."
     />
 
-    <article class="space-y-3 rounded-xl border border-surface-200-700 bg-surface-100-900 p-4">
+    <article class="card preset-tonal-primary space-y-4 p-5">
       <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <p class="font-medium text-surface-900-50">Response output</p>
-        {#if streamState === "streaming"}
-          <span class="badge variant-soft-primary">Streaming...</span>
-        {:else if streamState === "done"}
-          <span class="badge variant-soft-success">Complete</span>
-        {:else if streamState === "error"}
-          <span class="badge variant-soft-error">Stream failed</span>
-        {:else}
-          <span class="badge variant-soft-surface">Idle</span>
-        {/if}
+        <div>
+          <p class="preset-typo-title font-semibold text-surface-900-50">Response output</p>
+          <p class="preset-typo-body-2 text-surface-700-300">Live streamed chunks accumulate here.</p>
+        </div>
+        <StatusChip
+          tone={streamTone}
+          label={streamState === "streaming"
+            ? "Streaming"
+            : streamState === "done"
+              ? "Complete"
+              : streamState === "error"
+                ? "Stream failed"
+                : "Idle"}
+        />
       </div>
 
-      <div
-        class="min-h-56 rounded-lg border border-surface-200-700 bg-surface-50-950 p-4"
-        aria-live="polite"
-      >
+      <div class="card preset-filled-surface-50-950 min-h-56 p-4">
         {#if transcript.length === 0}
-          <p class="text-sm text-surface-700-300">
+          <p class="preset-typo-body-2 text-surface-700-300">
             {#if sending}
               Waiting for first stream chunk...
             {:else}
@@ -209,7 +214,7 @@
             {/if}
           </p>
         {:else}
-          <pre class="overflow-x-auto whitespace-pre-wrap break-words text-sm text-surface-900-50">{transcript}</pre>
+          <pre class="overflow-x-auto whitespace-pre-wrap break-words text-sm leading-6 text-surface-900-50">{transcript}</pre>
         {/if}
       </div>
     </article>
@@ -222,7 +227,7 @@
     />
 
     <form
-      class="space-y-3 rounded-xl border border-surface-200-700 bg-surface-100-900 p-4"
+      class="card preset-tonal-surface space-y-4 p-5"
       on:submit|preventDefault={() => void sendPrompt()}
     >
       <label class="space-y-1 text-sm font-medium text-surface-700-300" for="chat-prompt-input">
@@ -237,16 +242,18 @@
       </label>
 
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <p class="text-xs text-surface-700-300">
+        <p class="preset-typo-body-2 text-surface-700-300" role="status" aria-live="polite">
           {#if sending}
             Sending request and parsing stream frames...
           {:else if error}
             Last request failed. Edit prompt and retry.
+          {:else if receivedDoneFrame}
+            Response complete. Ready to send another prompt.
           {:else}
             Ready to send.
           {/if}
         </p>
-        <button class="btn btn-sm variant-filled-surface" type="submit" disabled={!canSendPrompt}>
+        <button class="btn btn-sm preset-filled-primary-500" type="submit" disabled={!canSendPrompt}>
           {#if sending}
             Sending...
           {:else}
@@ -257,7 +264,7 @@
     </form>
 
     {#if error}
-      <div class="alert variant-soft-error">
+      <div class="alert preset-tonal-error border-0" role="alert" aria-live="assertive">
         <p>Chat error: {error}</p>
       </div>
     {/if}
