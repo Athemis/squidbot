@@ -6,29 +6,6 @@
 
 @custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
 
-:root {
-  --dashboard-shell-max-width: 80rem;
-  --dashboard-shell-gap: 0.75rem;
-  --dashboard-shell-padding-inline: 0.75rem;
-  --dashboard-shell-padding-block: 0.75rem;
-}
-
-@media (min-width: 640px) {
-  :root {
-    --dashboard-shell-gap: 1rem;
-    --dashboard-shell-padding-inline: 1.25rem;
-    --dashboard-shell-padding-block: 1.25rem;
-  }
-}
-
-@media (min-width: 1024px) {
-  :root {
-    --dashboard-shell-gap: 1.25rem;
-    --dashboard-shell-padding-inline: 1.5rem;
-    --dashboard-shell-padding-block: 1.5rem;
-  }
-}
-
 html,
 body,
 #app,
@@ -38,84 +15,4 @@ main {
 
 body {
   min-height: 100vh;
-}
-
-.dashboard-shell {
-  width: min(var(--dashboard-shell-max-width), 100%);
-  margin-inline: auto;
-  padding-block: var(--dashboard-shell-padding-block);
-  padding-inline: var(--dashboard-shell-padding-inline);
-  display: flex;
-  flex-direction: column;
-  gap: var(--dashboard-shell-gap);
-}
-
-.dashboard-shell__topbar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.dashboard-shell__heading {
-  min-width: 0;
-}
-
-.dashboard-shell__controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.dashboard-shell__tabs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.dashboard-shell__tab {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2.25rem;
-}
-
-.dashboard-shell__theme-select-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.dashboard-shell__theme-label {
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.dashboard-shell__content {
-  min-width: 0;
-}
-
-@media (min-width: 640px) {
-  .dashboard-shell__topbar {
-    flex-direction: row;
-    align-items: end;
-    justify-content: space-between;
-  }
-
-  .dashboard-shell__controls {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .dashboard-shell__content {
-    padding: 1.5rem;
-  }
-}
-
-@media (min-width: 768px) {
-  .dashboard-shell__controls {
-    justify-content: end;
-  }
 }

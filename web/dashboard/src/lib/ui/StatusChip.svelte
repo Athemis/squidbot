@@ -12,4 +12,4 @@
   }
 </script>
 
-<span class={`badge ${toneClass[tone]} border-0 font-medium capitalize`}>{label}</span>
+<span class={`badge ${toneClass[tone]} border-0 font-medium uppercase tracking-[0.16em]`}>{label}</span>

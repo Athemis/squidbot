@@ -24,13 +24,31 @@ describe("ui primitives", () => {
     expect(sectionTitleSource).toMatch(/<h2\b/)
   })
 
+  it("keeps the app shell mostly in stock Skeleton/Tailwind markup", () => {
+    expect(appSource).not.toContain("dashboard-shell__topbar")
+    expect(appSource).not.toContain("dashboard-shell__tabs")
+    expect(appSource).not.toContain("dashboard-shell__theme-select-wrap")
+    expect(appSource).toContain('role="tablist"')
+    expect(appSource).toContain('role="tab"')
+    expect(appSource).toContain('role="tabpanel"')
+    expect(appSource).toContain("ArrowRight")
+    expect(appSource).toContain("Home")
+  })
+
   it("marks visible dashboard alerts as live alert regions", () => {
     expect(configPageSource).not.toContain('role="alert"')
     expect(configPageSource).toContain("Restart required placeholder")
     expect(logsPageSource).toContain('role="alert"')
+    expect(logsPageSource).toContain('aria-pressed={placeholderState === option.value}')
     expect(logsPageSource).toContain("Could not load logs preview")
     expect(overviewPageSource).toContain('role="alert"')
     expect(chatPageSource).toContain('role="alert"')
+  })
+
+  it("gives overview data tables accessible captions", () => {
+    expect(overviewPageSource).toContain("Channel health and runtime errors")
+    expect(overviewPageSource).toContain("Recent inbound session activity")
+    expect(overviewPageSource).toMatch(/<caption[^>]*class=\"sr-only\"/)
   })
 
   it("keeps transcript content outside the live status region", () => {

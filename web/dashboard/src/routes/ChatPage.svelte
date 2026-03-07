@@ -2,7 +2,8 @@
   import { onDestroy } from "svelte"
 
   import {
-    parseChatStreamFrame,
+    collectChatStreamFrames,
+    requestChatStreamResponse,
     readStreamErrorCode,
     shouldRetryWithFreshNonce,
     type ChatStreamFrame
@@ -19,62 +20,6 @@
   let nonce: string | null = null
   let activeController: AbortController | null = null
   let streamTone: "ok" | "warn" | "error" | "idle" = "idle"
-
-  async function postChatStreamRequest(
-    promptText: string,
-    controller: AbortController,
-    localNonce: string,
-  ): Promise<Response> {
-    return fetch("/api/chat/stream", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Squidbot-Local-Nonce": localNonce
-      },
-      body: JSON.stringify({ prompt: promptText }),
-      signal: controller.signal
-    })
-  }
-
-  async function requestChatStream(
-    promptText: string,
-    controller: AbortController,
-  ): Promise<Response> {
-    const firstNonce = await ensureNonce()
-    let response = await postChatStreamRequest(promptText, controller, firstNonce)
-
-    if (response.status !== 403) {
-      return response
-    }
-
-    const errorCode = await readStreamErrorCode(response)
-
-    if (!shouldRetryWithFreshNonce(response.status, errorCode)) {
-      return response
-    }
-
-    nonce = null
-    const refreshedNonce = await ensureNonce()
-    response = await postChatStreamRequest(promptText, controller, refreshedNonce)
-    return response
-  }
-
-  async function ensureNonce(): Promise<string> {
-    if (nonce !== null) {
-      return nonce
-    }
-
-    const response = await fetch("/api/bootstrap")
-    if (!response.ok) {
-      throw new Error(`bootstrap request failed (${response.status})`)
-    }
-    const payload = (await response.json()) as { local_nonce?: string }
-    if (typeof payload.local_nonce !== "string" || payload.local_nonce.length === 0) {
-      throw new Error("bootstrap response missing local nonce")
-    }
-    nonce = payload.local_nonce
-    return nonce
-  }
 
   function applyFrame(frame: ChatStreamFrame): void {
     if (frame.type === "chunk") {
@@ -109,46 +54,25 @@
     activeController = controller
 
     try {
-      const response = await requestChatStream(trimmedPrompt, controller)
+      const result = await requestChatStreamResponse({
+        promptText: trimmedPrompt,
+        controller,
+        nonce
+      })
+      nonce = result.nonce
+
+      const response = result.response
       if (!response.ok || response.body === null) {
+        const errorCode = await readStreamErrorCode(response)
+        if (shouldRetryWithFreshNonce(response.status, errorCode)) {
+          nonce = null
+        }
         throw new Error(`chat stream request failed (${response.status})`)
       }
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) {
-          buffer += decoder.decode()
-        } else {
-          buffer += decoder.decode(value, { stream: true })
-        }
-        let newlineIndex = buffer.indexOf("\n")
-        while (newlineIndex !== -1) {
-          const line = buffer.slice(0, newlineIndex).trim()
-          buffer = buffer.slice(newlineIndex + 1)
-
-          if (line.length > 0) {
-            const frame = parseChatStreamFrame(line)
-            applyFrame(frame)
-            if (frame.type === "done") {
-              return
-            }
-          }
-          newlineIndex = buffer.indexOf("\n")
-        }
-
-        if (done) {
-          const trailing = buffer.trim()
-          if (trailing.length > 0) {
-            const frame = parseChatStreamFrame(trailing)
-            applyFrame(frame)
-          }
-          break
-        }
-      }
+      await collectChatStreamFrames(response, (frame: ChatStreamFrame) => {
+        applyFrame(frame)
+      })
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return
@@ -182,84 +106,158 @@
 <PageShell title="Chat">
   <section class="space-y-3">
     <SectionTitle
-      title="Conversation stream"
-      subtitle="Submit a prompt and watch streamed chunks render in real time."
+      title="Conversation workspace"
+      subtitle="Streaming output, request state, and compose controls now share the same operator dashboard language."
     />
 
-    <article class="card preset-tonal-primary space-y-4 p-5">
-      <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <div>
-          <p class="preset-typo-title font-semibold text-surface-900-50">Response output</p>
-          <p class="preset-typo-body-2 text-surface-700-300">Live streamed chunks accumulate here.</p>
+    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.72fr)]">
+      <article class="card preset-tonal-primary overflow-hidden">
+        <div class="flex flex-col gap-4 border-b border-primary-200-800 p-4 sm:p-5 lg:flex-row lg:items-start lg:justify-between">
+          <div class="space-y-1">
+            <p class="preset-typo-caption uppercase tracking-[0.24em] text-primary-700-300">Response output</p>
+            <p class="preset-typo-body-2 max-w-3xl text-surface-900-50">Live streamed chunks accumulate here.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusChip
+              tone={streamTone}
+              label={streamState === "streaming"
+                ? "Streaming"
+                : streamState === "done"
+                  ? "Complete"
+                  : streamState === "error"
+                    ? "Stream failed"
+                    : "Idle"}
+            />
+            <span class="badge preset-tonal-surface border-0">Chunked SSE preview</span>
+          </div>
         </div>
-        <StatusChip
-          tone={streamTone}
-          label={streamState === "streaming"
-            ? "Streaming"
-            : streamState === "done"
-              ? "Complete"
-              : streamState === "error"
-                ? "Stream failed"
-                : "Idle"}
-        />
-      </div>
 
-      <div class="card preset-filled-surface-50-950 min-h-56 p-4">
-        {#if transcript.length === 0}
-          <p class="preset-typo-body-2 text-surface-700-300">
-            {#if sending}
-              Waiting for first stream chunk...
+        <div class="space-y-4 p-4 sm:p-5">
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div class="card preset-filled-surface-50-950 space-y-1 p-3">
+              <p class="preset-typo-caption uppercase tracking-[0.16em] text-surface-700-300">Mode</p>
+              <p class="text-base font-semibold text-surface-900-50">Local chat stream</p>
+            </div>
+            <div class="card preset-filled-surface-50-950 space-y-1 p-3">
+              <p class="preset-typo-caption uppercase tracking-[0.16em] text-surface-700-300">Nonce</p>
+              <p class="text-base font-semibold text-surface-900-50">Auto-refresh</p>
+            </div>
+            <div class="card preset-filled-surface-50-950 space-y-1 p-3">
+              <p class="preset-typo-caption uppercase tracking-[0.16em] text-surface-700-300">Transport</p>
+              <p class="text-base font-semibold text-surface-900-50">Streaming POST</p>
+            </div>
+          </div>
+
+          <div class="card preset-filled-surface-50-950 min-h-64 p-4 sm:p-5">
+            {#if transcript.length === 0}
+              <div class="flex min-h-56 items-center justify-center text-center">
+                <p class="preset-typo-body-2 max-w-lg text-surface-700-300">
+                  {#if sending}
+                    Waiting for first stream chunk...
+                  {:else}
+                    No response yet. Send a prompt to start streaming output.
+                  {/if}
+                </p>
+              </div>
             {:else}
-              No response yet. Send a prompt to start streaming output.
+              <pre class="overflow-x-auto whitespace-pre-wrap break-words text-sm leading-6 text-surface-900-50">{transcript}</pre>
             {/if}
-          </p>
-        {:else}
-          <pre class="overflow-x-auto whitespace-pre-wrap break-words text-sm leading-6 text-surface-900-50">{transcript}</pre>
-        {/if}
-      </div>
-    </article>
+          </div>
+        </div>
+      </article>
+
+      <aside class="grid gap-4 content-start">
+        <article class="card preset-tonal-surface space-y-4 p-4 sm:p-5">
+          <div class="space-y-1">
+            <p class="preset-typo-caption uppercase tracking-[0.24em] text-surface-700-300">Request lifecycle</p>
+            <p class="preset-typo-body-2 text-surface-700-300">Small operator cards keep state visible without moving transcript semantics.</p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+            <div class="card preset-filled-surface-50-950 space-y-1 p-3">
+              <p class="preset-typo-caption uppercase tracking-[0.16em] text-surface-700-300">Prompt</p>
+              <p class="text-xl font-semibold text-surface-900-50">{trimmedPrompt.length}</p>
+            </div>
+            <div class="card preset-filled-surface-50-950 space-y-1 p-3">
+              <p class="preset-typo-caption uppercase tracking-[0.16em] text-surface-700-300">State</p>
+              <p class="text-xl font-semibold text-surface-900-50">{streamState}</p>
+            </div>
+            <div class="card preset-filled-surface-50-950 space-y-1 p-3">
+              <p class="preset-typo-caption uppercase tracking-[0.16em] text-surface-700-300">Done frame</p>
+              <p class="text-xl font-semibold text-surface-900-50">{receivedDoneFrame ? "yes" : "no"}</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="card preset-tonal-surface space-y-3 p-4 sm:p-5">
+          <div class="space-y-1">
+            <p class="preset-typo-caption uppercase tracking-[0.24em] text-surface-700-300">Operator notes</p>
+            <p class="preset-typo-body-2 text-surface-700-300">
+              Stream behavior, retry logic, and error handling remain unchanged in this redesign slice.
+            </p>
+          </div>
+          <div class="card preset-filled-surface-50-950 p-4">
+            <p class="preset-typo-body-2 text-surface-700-300">
+              Transcript output stays outside the live status region so screen readers only announce request state changes.
+            </p>
+          </div>
+        </article>
+      </aside>
+    </div>
   </section>
 
   <section class="space-y-3">
     <SectionTitle
-      title="Prompt input"
+      title="Prompt composer"
       subtitle="Input and action controls stay visible while streaming or showing errors."
     />
 
     <form
-      class="card preset-tonal-surface space-y-4 p-5"
+      class="card preset-tonal-surface overflow-hidden"
       on:submit|preventDefault={() => void sendPrompt()}
     >
-      <label class="space-y-1 text-sm font-medium text-surface-700-300" for="chat-prompt-input">
-        Prompt
-        <textarea
-          id="chat-prompt-input"
-          class="textarea min-h-28 w-full"
-          bind:value={prompt}
-          disabled={sending}
-          placeholder="Ask squidbot..."
-        ></textarea>
-      </label>
+      <div class="flex flex-col gap-4 border-b border-surface-200-800 p-4 sm:p-5 lg:flex-row lg:items-start lg:justify-between">
+        <div class="space-y-1">
+          <p class="preset-typo-caption uppercase tracking-[0.24em] text-surface-700-300">Compose request</p>
+          <p class="preset-typo-body-2 max-w-3xl text-surface-900-50">Send one prompt at a time and keep the stream parser state visible.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="badge preset-tonal-surface border-0">Prompt required</span>
+          <span class="badge preset-tonal-primary border-0">Single active request</span>
+        </div>
+      </div>
 
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <p class="preset-typo-body-2 text-surface-700-300" role="status" aria-live="polite">
-          {#if sending}
-            Sending request and parsing stream frames...
-          {:else if error}
-            Last request failed. Edit prompt and retry.
-          {:else if receivedDoneFrame}
-            Response complete. Ready to send another prompt.
-          {:else}
-            Ready to send.
-          {/if}
-        </p>
-        <button class="btn btn-sm preset-filled-primary-500" type="submit" disabled={!canSendPrompt}>
-          {#if sending}
-            Sending...
-          {:else}
-            Send
-          {/if}
-        </button>
+      <div class="space-y-4 p-4 sm:p-5">
+        <label class="space-y-1 text-sm font-medium text-surface-700-300" for="chat-prompt-input">
+          Prompt
+          <textarea
+            id="chat-prompt-input"
+            class="textarea min-h-32 w-full"
+            bind:value={prompt}
+            disabled={sending}
+            placeholder="Ask squidbot..."
+          ></textarea>
+        </label>
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="preset-typo-body-2 text-surface-700-300" role="status" aria-live="polite">
+            {#if sending}
+              Sending request and parsing stream frames...
+            {:else if error}
+              Last request failed. Edit prompt and retry.
+            {:else if receivedDoneFrame}
+              Response complete. Ready to send another prompt.
+            {:else}
+              Ready to send.
+            {/if}
+          </p>
+          <button class="btn btn-sm preset-filled-primary-500" type="submit" disabled={!canSendPrompt}>
+            {#if sending}
+              Sending...
+            {:else}
+              Send
+            {/if}
+          </button>
+        </div>
       </div>
     </form>
 
