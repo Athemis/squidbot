@@ -86,3 +86,61 @@ jobs:
           name: dist
           path: dist/
           retention-days: 7
+
+  dashboard-frontend:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install dashboard frontend dependencies
+        run: npm --prefix web/dashboard install
+
+      - name: Run dashboard frontend tests
+        run: npm --prefix web/dashboard run test
+
+      - name: Build dashboard frontend
+        run: npm --prefix web/dashboard run build
+
+  dashboard-package-smoke:
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, dashboard-frontend]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: 'latest'
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Build dashboard frontend assets
+        run: npm --prefix web/dashboard install && npm --prefix web/dashboard run build
+
+      - name: Copy dashboard assets into package path
+        run: python scripts/build_dashboard_assets.py
+
+      - name: Build python package
+        run: uv build
+
+      - name: Smoke test installed wheel dashboard assets
+        run: python scripts/smoke_dashboard_install.py --wheel "dist/*.whl"

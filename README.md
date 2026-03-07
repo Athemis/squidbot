@@ -288,6 +288,20 @@ squidbot cron remove <id>     Remove a cron job
 squidbot skills list          List all discovered skills and their availability
 ```
 
+Dashboard activation is config-driven. To enable the local dashboard API/UI, set:
+
+```yaml
+dashboard:
+  enabled: true
+  host: "127.0.0.1"
+  port: 8765
+```
+
+Then start squidbot with `squidbot gateway`.
+
+Migration note: `squidbot dashboard` was removed. Use `dashboard.enabled: true` with
+`squidbot gateway` instead.
+
 Interactive slash commands (available across CLI, Matrix, and Email):
 
 Note: Slash commands are owner-only on non-CLI channels. CLI slash commands are always allowed.
@@ -385,6 +399,25 @@ uv run pytest                # Run all tests
 uv run ruff check .          # Lint
 uv run ruff format .         # Format
 uv run mypy squidbot/        # Type-check
+```
+
+### Dashboard frontend build
+
+The web dashboard ships as packaged static assets under `squidbot/adapters/dashboard/static/`.
+When frontend code changes, rebuild and copy assets before packaging or install smoke tests:
+
+```bash
+npm --prefix web/dashboard install
+npm --prefix web/dashboard run test
+npm --prefix web/dashboard run build
+python scripts/build_dashboard_assets.py
+```
+
+Installed-wheel smoke test (verifies packaged dashboard assets are actually served):
+
+```bash
+uv build
+python scripts/smoke_dashboard_install.py --wheel "dist/*.whl"
 ```
 
 ## License
