@@ -8,6 +8,7 @@ SQUIDBOT_ prefix (e.g., SQUIDBOT_LLM__API_KEY).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -213,6 +214,27 @@ class SkillsConfig(BaseModel):
     )
 
 
+class DashboardConfig(BaseModel):
+    """Configuration for the local dashboard HTTP server."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8765
+
+    @model_validator(mode="after")
+    def _validate_loopback_host(self) -> DashboardConfig:
+        """Restrict dashboard host binding to loopback values."""
+        if self.host == "localhost":
+            return self
+        try:
+            is_loopback = ipaddress.ip_address(self.host).is_loopback
+        except ValueError:
+            is_loopback = False
+        if not is_loopback:
+            raise ValueError("dashboard.host must be loopback-only (127.0.0.1, localhost or ::1)")
+        return self
+
+
 class OwnerAliasEntry(BaseModel):
     """A single owner alias, optionally scoped to a specific channel."""
 
@@ -249,6 +271,7 @@ class Settings(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     owner: OwnerConfig = Field(default_factory=OwnerConfig)
 
     @model_validator(mode="after")

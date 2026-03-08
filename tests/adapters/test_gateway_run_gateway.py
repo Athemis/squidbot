@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,6 +36,7 @@ def _build_settings(
         ),
         llm=SimpleNamespace(default_pool="default"),
         owner=SimpleNamespace(aliases=owner_aliases or []),
+        dashboard=SimpleNamespace(enabled=False, host="127.0.0.1", port=8765),
     )
 
 
@@ -105,8 +107,7 @@ async def test_run_gateway_delivers_due_cron_job_to_matrix_channel() -> None:
 
     scheduler = MagicMock()
 
-    async def scheduler_run_side_effect(*, on_due: object) -> None:
-        assert callable(on_due)
+    async def scheduler_run_side_effect(*, on_due: Callable[[CronJob], Awaitable[None]]) -> None:
         await on_due(cron_job)
 
     scheduler.run = AsyncMock(side_effect=scheduler_run_side_effect)
@@ -192,3 +193,53 @@ async def test_run_gateway_passes_owner_matrix_aliases_to_channel() -> None:
     mc_ctor.assert_called_once()
     _, kwargs = mc_ctor.call_args
     assert kwargs["owner_matrix_ids"] == {"@owner1:example.org", "@owner2:example.org"}
+
+
+async def test_run_gateway_skips_cron_job_with_invalid_channel_target() -> None:
+    from squidbot.cli.gateway import _run_gateway
+
+    settings = _build_settings(matrix_enabled=True, email_enabled=False)
+    invalid_job = CronJob(
+        id="job-invalid",
+        name="Broken",
+        message="ignored",
+        schedule="every 60",
+        channel="invalid-target",
+    )
+
+    fake_loop = MagicMock()
+    fake_loop.run = AsyncMock()
+    fake_conn = MagicMock()
+    fake_conn.close = AsyncMock()
+    fake_storage = MagicMock()
+    fake_storage.load_cron_jobs = AsyncMock(return_value=[invalid_job])
+
+    scheduler = MagicMock()
+
+    async def scheduler_run_side_effect(*, on_due: Callable[[CronJob], Awaitable[None]]) -> None:
+        await on_due(invalid_job)
+
+    scheduler.run = AsyncMock(side_effect=scheduler_run_side_effect)
+    heartbeat = MagicMock()
+    heartbeat.run = AsyncMock(return_value=None)
+    matrix_channel = MagicMock()
+
+    with (
+        patch("squidbot.config.schema.Settings.load", return_value=settings),
+        patch("squidbot.cli.gateway._print_banner"),
+        patch(
+            "squidbot.cli.gateway._make_agent_loop",
+            new=AsyncMock(return_value=(fake_loop, [fake_conn], fake_storage)),
+        ),
+        patch("squidbot.core.scheduler.CronScheduler", return_value=scheduler),
+        patch("squidbot.core.heartbeat.HeartbeatService", return_value=heartbeat),
+        patch("squidbot.adapters.channels.matrix.MatrixChannel", return_value=matrix_channel),
+        patch(
+            "squidbot.cli.gateway._channel_loop_with_state",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        await _run_gateway(Path("/tmp/squidbot.yaml"))
+
+    fake_loop.run.assert_not_awaited()
+    fake_conn.close.assert_awaited_once_with()

@@ -72,7 +72,6 @@ def gateway(config: Path = DEFAULT_CONFIG_PATH, log_level: str = "INFO") -> None
     asyncio.run(_run_gateway(config_path=config))
 
 
-@app.command
 def status(config: Path = DEFAULT_CONFIG_PATH) -> None:
     """Show the current configuration and channel status."""
     settings = Settings.load(config)
