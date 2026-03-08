@@ -1,4 +1,9 @@
-"""Tests for dashboard server configuration schema."""
+"""Tests for dashboard server configuration schema.
+
+This module validates loopback-only host constraints and default dashboard
+network settings in `Settings`. It protects the local-only security posture of
+the dashboard feature during configuration loading.
+"""
 
 from __future__ import annotations
 
@@ -21,3 +26,10 @@ def test_dashboard_settings_reject_non_loopback_host() -> None:
     """Dashboard host must remain loopback-only in v1."""
     with pytest.raises(ValidationError):
         Settings.model_validate({"dashboard": {"host": "0.0.0.0"}})
+
+
+def test_dashboard_settings_accept_ipv6_loopback_host() -> None:
+    """Dashboard host accepts IPv6 loopback literals."""
+    settings = Settings.model_validate({"dashboard": {"host": "::1"}})
+
+    assert settings.dashboard.host == "::1"

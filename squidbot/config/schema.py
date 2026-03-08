@@ -8,6 +8,7 @@ SQUIDBOT_ prefix (e.g., SQUIDBOT_LLM__API_KEY).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -223,8 +224,14 @@ class DashboardConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_loopback_host(self) -> DashboardConfig:
         """Restrict dashboard host binding to loopback values."""
-        if self.host not in {"127.0.0.1", "localhost"}:
-            raise ValueError("dashboard.host must be loopback-only (127.0.0.1 or localhost)")
+        if self.host == "localhost":
+            return self
+        try:
+            is_loopback = ipaddress.ip_address(self.host).is_loopback
+        except ValueError:
+            is_loopback = False
+        if not is_loopback:
+            raise ValueError("dashboard.host must be loopback-only (127.0.0.1, localhost or ::1)")
         return self
 
 

@@ -118,6 +118,20 @@ async def test_start_ndjson_stream_cancels_producer_on_close() -> None:
     await asyncio.wait_for(cancelled.wait(), timeout=2.0)
 
 
+async def test_start_ndjson_stream_ignores_producer_exception_on_close() -> None:
+    """Closing stream should swallow producer failures during teardown."""
+
+    async def producer(frame_queue: asyncio.Queue[str | None]) -> None:
+        await frame_queue.put('{"type":"chunk","text":"primed"}\n')
+        raise RuntimeError("boom")
+
+    stream = start_ndjson_stream(producer)
+    first = await anext(stream)
+
+    assert json.loads(first) == {"type": "chunk", "text": "primed"}
+    await stream.aclose()
+
+
 async def test_streaming_dashboard_channel_send_typing_noop() -> None:
     """send_typing should be a harmless no-op for dashboard streams."""
     queue: asyncio.Queue[str | None] = asyncio.Queue()

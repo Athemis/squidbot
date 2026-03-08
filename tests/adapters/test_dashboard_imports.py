@@ -1,4 +1,9 @@
-"""Import-level tests for dashboard adapter modules."""
+"""Verify dashboard adapter import stability and app-factory defaults.
+
+This module provides lightweight import-level coverage for the dashboard API
+factory and baseline FastAPI wiring. It acts as a guardrail for adapter
+surface integrity in CI.
+"""
 
 from __future__ import annotations
 

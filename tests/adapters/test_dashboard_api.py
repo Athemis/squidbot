@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -21,7 +22,7 @@ def _headers(runtime: DashboardRuntime) -> dict[str, str]:
     }
 
 
-def _runtime(tmp_path) -> DashboardRuntime:
+def _runtime(tmp_path: Path) -> DashboardRuntime:
     config_path = tmp_path / "config.json"
     settings = Settings()
     settings.channels.matrix.enabled = True
@@ -50,7 +51,7 @@ def _runtime(tmp_path) -> DashboardRuntime:
     return DashboardRuntime(state=state, log_buffer=log_buffer, config_path=config_path)
 
 
-def test_get_overview_returns_channels_and_sessions(tmp_path) -> None:
+def test_get_overview_returns_channels_and_sessions(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
 
@@ -62,7 +63,7 @@ def test_get_overview_returns_channels_and_sessions(tmp_path) -> None:
     assert payload["active_sessions"][0]["session_id"] == "email:user@example.com"
 
 
-def test_get_logs_returns_paginated_entries(tmp_path) -> None:
+def test_get_logs_returns_paginated_entries(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
 
@@ -74,7 +75,7 @@ def test_get_logs_returns_paginated_entries(tmp_path) -> None:
     assert payload["next_before_cursor"] is not None
 
 
-def test_get_logs_invalid_limit_returns_generic_validation_message(tmp_path) -> None:
+def test_get_logs_invalid_limit_returns_generic_validation_message(tmp_path: Path) -> None:
     """Logs endpoint should not expose raw exception messages to clients."""
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -90,7 +91,7 @@ def test_get_logs_invalid_limit_returns_generic_validation_message(tmp_path) -> 
     }
 
 
-def test_get_config_returns_editable_projection(tmp_path) -> None:
+def test_get_config_returns_editable_projection(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
 
@@ -103,7 +104,7 @@ def test_get_config_returns_editable_projection(tmp_path) -> None:
     assert payload["heartbeat"]["interval_minutes"] == 30
 
 
-def test_patch_config_updates_allowed_fields_and_marks_restart_required(tmp_path) -> None:
+def test_patch_config_updates_allowed_fields_and_marks_restart_required(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
 
@@ -122,7 +123,7 @@ def test_patch_config_updates_allowed_fields_and_marks_restart_required(tmp_path
     assert saved.agents.heartbeat.interval_minutes == 45
 
 
-def test_patch_config_rejects_unknown_fields(tmp_path) -> None:
+def test_patch_config_rejects_unknown_fields(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
 
@@ -136,7 +137,7 @@ def test_patch_config_rejects_unknown_fields(tmp_path) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_patch_config_rejects_boolean_interval_minutes(tmp_path) -> None:
+def test_patch_config_rejects_boolean_interval_minutes(tmp_path: Path) -> None:
     """interval_minutes must reject bool values even though bool is int-like."""
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -151,7 +152,7 @@ def test_patch_config_rejects_boolean_interval_minutes(tmp_path) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_patch_config_rejects_malformed_json_payload(tmp_path) -> None:
+def test_patch_config_rejects_malformed_json_payload(tmp_path: Path) -> None:
     """Malformed JSON payloads should return deterministic validation errors."""
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -166,7 +167,7 @@ def test_patch_config_rejects_malformed_json_payload(tmp_path) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_patch_config_rejects_unknown_top_level_field(tmp_path) -> None:
+def test_patch_config_rejects_unknown_top_level_field(tmp_path: Path) -> None:
     """Unknown top-level payload fields should be rejected."""
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -181,7 +182,7 @@ def test_patch_config_rejects_unknown_top_level_field(tmp_path) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_patch_config_rejects_non_boolean_heartbeat_enabled(tmp_path) -> None:
+def test_patch_config_rejects_non_boolean_heartbeat_enabled(tmp_path: Path) -> None:
     """heartbeat.enabled must be boolean."""
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -196,7 +197,7 @@ def test_patch_config_rejects_non_boolean_heartbeat_enabled(tmp_path) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_post_restart_intent_acknowledges_and_records_timestamp(tmp_path) -> None:
+def test_post_restart_intent_acknowledges_and_records_timestamp(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
 

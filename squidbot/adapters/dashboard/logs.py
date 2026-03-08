@@ -14,7 +14,14 @@ from threading import Lock
 
 @dataclass(frozen=True)
 class DashboardLogEntry:
-    """Single structured log entry stored in the dashboard buffer."""
+    """Single structured log entry stored in the dashboard buffer.
+
+    Args:
+        cursor: Monotonic cursor for pagination.
+        ts: UTC timestamp for the log entry.
+        level: Log severity level.
+        message: Log text content.
+    """
 
     cursor: int
     ts: datetime
@@ -24,7 +31,12 @@ class DashboardLogEntry:
 
 @dataclass(frozen=True)
 class DashboardLogPage:
-    """Page response for dashboard log pagination."""
+    """Page response for dashboard log pagination.
+
+    Args:
+        entries: Ordered entries for the current page.
+        next_before_cursor: Cursor to request older entries, if available.
+    """
 
     entries: list[DashboardLogEntry]
     next_before_cursor: int | None
@@ -38,6 +50,9 @@ class DashboardLogBuffer:
 
         Args:
             max_entries: Maximum number of entries retained in memory.
+
+        Returns:
+            None.
         """
         if max_entries <= 0:
             raise ValueError("max_entries must be greater than zero")
@@ -52,6 +67,9 @@ class DashboardLogBuffer:
         Args:
             level: Log severity level.
             message: Log text content.
+
+        Returns:
+            None.
         """
         with self._lock:
             entry = DashboardLogEntry(

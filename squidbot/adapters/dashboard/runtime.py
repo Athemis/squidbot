@@ -28,7 +28,7 @@ def _new_local_nonce() -> str:
 class DashboardRuntime:
     """In-memory runtime dependencies shared by dashboard endpoints.
 
-    Attributes:
+    Args:
         state: Live gateway state snapshot source.
         log_buffer: Bounded in-memory log buffer for log-tail APIs.
         config_path: Optional settings file path for config endpoints.
@@ -45,5 +45,9 @@ class DashboardRuntime:
     agent_loop: AgentLoop | None = None
 
     def mark_restart_requested(self) -> None:
-        """Record the latest explicit restart intent timestamp."""
+        """Record the latest explicit restart intent timestamp.
+
+        Returns:
+            None.
+        """
         self.restart_requested_at = datetime.now(UTC)

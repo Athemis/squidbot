@@ -1,8 +1,14 @@
-"""Security and bootstrap tests for dashboard API guards."""
+"""Security and bootstrap tests for dashboard API guard behavior.
+
+This module validates localhost/write-safety checks for dashboard endpoints,
+including host, origin, and nonce requirements. It also verifies bootstrap
+nonce exposure needed by frontend mutating requests.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +29,7 @@ def _runtime() -> DashboardRuntime:
     return DashboardRuntime(state=state, log_buffer=DashboardLogBuffer(), config_path=None)
 
 
-def _runtime_with_config(tmp_path) -> DashboardRuntime:
+def _runtime_with_config(tmp_path: Path) -> DashboardRuntime:
     runtime = _runtime()
     config_path = tmp_path / "config.json"
     Settings().save(config_path)
@@ -128,7 +134,7 @@ def test_patch_config_rejects_invalid_nonce() -> None:
     assert response.json()["error"]["code"] == "INVALID_NONCE"
 
 
-def test_patch_config_accepts_loopback_origin_with_valid_nonce(tmp_path) -> None:
+def test_patch_config_accepts_loopback_origin_with_valid_nonce(tmp_path: Path) -> None:
     """Guard should allow loopback writes when all local checks pass."""
     runtime = _runtime_with_config(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -146,7 +152,7 @@ def test_patch_config_accepts_loopback_origin_with_valid_nonce(tmp_path) -> None
     assert response.status_code == 200
 
 
-def test_patch_config_accepts_ipv6_loopback(tmp_path) -> None:
+def test_patch_config_accepts_ipv6_loopback(tmp_path: Path) -> None:
     """Guard should allow IPv6 loopback host and origin values."""
     runtime = _runtime_with_config(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -164,7 +170,7 @@ def test_patch_config_accepts_ipv6_loopback(tmp_path) -> None:
     assert response.status_code == 200
 
 
-def test_restart_intent_rejects_missing_nonce(tmp_path) -> None:
+def test_restart_intent_rejects_missing_nonce(tmp_path: Path) -> None:
     """Restart intent must require local nonce on mutating route."""
     runtime = _runtime_with_config(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
@@ -178,7 +184,7 @@ def test_restart_intent_rejects_missing_nonce(tmp_path) -> None:
     assert response.json()["error"]["code"] == "MISSING_NONCE"
 
 
-def test_restart_intent_rejects_non_loopback_host(tmp_path) -> None:
+def test_restart_intent_rejects_non_loopback_host(tmp_path: Path) -> None:
     """Restart intent should reject non-loopback host values."""
     runtime = _runtime_with_config(tmp_path)
     client = TestClient(build_dashboard_app(runtime))
