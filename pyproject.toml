@@ -20,7 +20,7 @@ dependencies = [
     "mistune>=3.0",
     "nh3>=0.2",
     "aioimaplib>=1.0",
-    "aiosmtplib>=3.0",
+    "aiosmtplib>=5.1.0",
     "prompt-toolkit>=3,<4",
 ]
 
